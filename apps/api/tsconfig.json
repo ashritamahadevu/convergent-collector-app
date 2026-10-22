@@ -1,0 +1,8 @@
+{
+  "extends": "@convergent/typescript-config/node.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts", "api/**/*.ts"]
+}

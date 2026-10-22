@@ -1,0 +1,26 @@
+{
+  "name": "@convergent/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/local.ts",
+    "dev:vercel": "vercel dev --listen 3000",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"No linter configured\""
+  },
+  "dependencies": {
+    "@convergent/shared": "workspace:*",
+    "@hono/node-server": "^1.14.4",
+    "@supabase/supabase-js": "^2.49.8",
+    "hono": "^4.7.10"
+  },
+  "devDependencies": {
+    "@convergent/typescript-config": "workspace:*",
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3",
+    "tsx": "^4.19.4",
+    "vercel": "^42.3.0"
+  }
+}

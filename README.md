@@ -1,93 +1,77 @@
-# Convergent Collector
+# Comprehension Guard
 
-Pokémon TCG collection app scaffold: Expo (iOS, Android, Web), Supabase (auth, database, storage), and a Hono API deployable on Vercel.
+A VS Code extension that makes sure you actually understand code before it lands in your file. When you paste a large chunk of code, or when a large AI-generated snippet is inserted inline (Copilot/Cursor/"apply"), the extension holds the code and asks you a quick comprehension question. The code is only inserted after you explain what it does.
 
-## Prerequisites
+This is an early MVP focused on the personal-project use case. The quiz is intentionally simple for now ("What does this code do?") and graded deterministically. LLM-based question generation and grading, a learning dashboard, and instructor/proctoring features are planned for later (see [Roadmap](#roadmap)).
 
-- Node.js 20+
-- [pnpm](https://pnpm.io/) (or `npx pnpm@10` from the repo root)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for local Supabase)
-- [Vercel CLI](https://vercel.com/docs/cli) (for local API dev and deploy)
+## What it does today
 
-## Structure
+- Intercepts `Ctrl+V` / `Cmd+V` and, if the clipboard content is large enough, runs a comprehension check before pasting.
+- Detects large inline insertions (AI completions, apply-from-chat, snippet expansion) via document change events, removes the snippet, runs the check, and re-inserts it only on a pass.
+- Comprehension check: a modal input box asking "What does this code do?" You must give an explanation of at least a configurable length to proceed; cancelling holds the code back.
+- Deadline escape hatch: a one-shot "Bypass Next Insertion" command.
+- Status bar indicator showing On / Off / Bypass armed (click to toggle).
 
-| Path | Purpose |
-|------|---------|
-| `apps/mobile` | Expo Router client |
-| `apps/api` | Hono API (Vercel serverless) |
-| `packages/shared` | Shared Zod schemas and types |
-| `supabase/` | Migrations and local Supabase config |
+## Settings
 
-## Setup
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `comprehensionGuard.enabled` | `true` | Enable/disable the guard. |
+| `comprehensionGuard.charThreshold` | `200` | Minimum characters in a single paste/insertion before the check triggers. |
+| `comprehensionGuard.minAnswerLength` | `15` | Minimum explanation length (characters) required to pass. |
 
-```powershell
-# Install dependencies
-npx pnpm@10 install
+## Commands
 
-# Environment files
-copy apps\mobile\.env.example apps\mobile\.env
-copy apps\api\.env.example apps\api\.env
-```
+- `Comprehension Guard: Paste (guarded)` - bound to `Ctrl+V` / `Cmd+V`.
+- `Comprehension Guard: Toggle On/Off`.
+- `Comprehension Guard: Bypass Next Insertion (deadline escape hatch)`.
 
-### Local Supabase
+## Develop and run from source
 
-```powershell
-npx supabase@latest start
-npx supabase@latest status
-```
-
-Copy the API URL, anon (publishable) key, and service role key into:
-
-- `apps/mobile/.env` — `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `apps/api/.env` — `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
-
-Reset/apply migrations:
+Prerequisites: Node.js 20+.
 
 ```powershell
-npx supabase@latest db reset
+npm install
 ```
 
-### Run development
+Then press `F5` in VS Code / Cursor. This runs the `watch` build task and launches an **Extension Development Host** window with the extension loaded. Open a file in that window and try pasting a large block of code (200+ characters) or triggering an AI completion to see the comprehension check.
+
+Other scripts:
 
 ```powershell
-# All apps (Turbo)
-npx pnpm@10 dev
-
-# Or individually:
-npx pnpm@10 --filter mobile dev
-npx pnpm@10 --filter @convergent/api dev
+npm run compile   # one-off production build to dist/
+npm run watch     # rebuild on change (used automatically by F5)
 ```
 
-The API `dev` script runs Hono on port 3000 via Node (`src/local.ts`). Use `npx pnpm@10 --filter @convergent/api dev:vercel` to emulate Vercel locally.
+## Install into your own VS Code / Cursor
 
-- Expo web: press `w` in the Expo terminal, or open the URL shown (often `http://localhost:8081`).
-- API health: `GET http://localhost:3000/health`
-- Authenticated API: `GET http://localhost:3000/api/v1/me` with header `Authorization: Bearer <supabase_access_token>`
-
-Sign in via the **Settings** tab in the mobile app to obtain a session token for API testing.
-
-## Deploy API (Vercel)
+To use it day-to-day (outside the debug host), package it into a `.vsix` and install:
 
 ```powershell
-cd apps\api
-vercel link
-vercel env add SUPABASE_URL
-vercel env add SUPABASE_SERVICE_ROLE_KEY
-vercel env add CORS_ORIGINS
-vercel
+npm run package
 ```
 
-Set `EXPO_PUBLIC_API_URL` in the mobile app to your production API URL.
+This produces `comprehension-guard-0.0.1.vsix` in the project root. Install it with either method:
 
-## Scripts
+- CLI: `code --install-extension comprehension-guard-0.0.1.vsix` (use `cursor --install-extension ...` for Cursor).
+- UI: open the Extensions panel, click the `...` menu at the top, choose **Install from VSIX...**, and select the file.
 
-| Command | Description |
-|---------|-------------|
-| `npx pnpm@10 dev` | Start mobile + API dev servers |
-| `npx pnpm@10 build` | Build packages/apps |
-| `npx pnpm@10 typecheck` | TypeScript across the monorepo |
-| `npx pnpm@10 lint` | Lint (stubs where not configured) |
+Reload the window after installing. The status bar should show a shield icon with "Guard: On".
 
-## Roadmap hooks
+> Note: the first `npm run package` may prompt about a missing publisher or repository field; those are fine to ignore for local installs, or add a `publisher` to `package.json` before publishing to a marketplace.
 
-Empty route stubs live under `apps/api/src/routes/` (`scan`, `valuation`, `grading`). Feature folders under `apps/mobile/features/` are placeholders for upcoming MVP work.
+## How detection works
+
+- **Paste path:** a keybinding remaps `Ctrl+V` to `comprehensionGuard.paste`, which reads the clipboard, checks the threshold, runs the gate, and then calls the built-in paste command. See [src/pasteGuard.ts](src/pasteGuard.ts).
+- **Inline path:** `workspace.onDidChangeTextDocument` flags any single insertion at or above the threshold. Since the text is already inserted when the event fires, it is undone, held, and re-inserted after the gate passes. A re-entrancy flag ensures the guard ignores its own edits. See [src/editGuard.ts](src/editGuard.ts).
+
+## Roadmap
+
+Scoped for later, not in this MVP:
+
+- LLM-generated, context-specific questions and LLM-as-judge / multiple-choice grading (with local Ollama/Qwen as a free, private option).
+- `SecretStorage` for API keys.
+- Webview-based quiz and learning dashboard.
+- Learning analytics: track difficult concepts and improvement over time; generate practice and interview questions.
+- Translate hard languages (e.g. C) to plain English or a familiar language.
+- Instructor/university enforcement and proctoring; web dashboard (Next.js + Supabase/Firebase on Vercel).

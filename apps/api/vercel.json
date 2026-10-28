@@ -1,6 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "cd ../.. && npx pnpm@10 install",
-  "buildCommand": "cd ../.. && npx pnpm@10 --filter @convergent/api typecheck",
-  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
-}

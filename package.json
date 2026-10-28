@@ -1,15 +1,82 @@
 {
-  "name": "convergent-collector-app",
-  "private": true,
-  "packageManager": "pnpm@10.34.7",
+  "name": "comprehension-guard",
+  "displayName": "Comprehension Guard",
+  "description": "Blocks large pastes and AI-generated inline insertions behind a quick comprehension check, so you understand code before it lands in your file.",
+  "version": "0.0.1",
+  "publisher": "comprehension-guard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashritamahadevu/convergent-collector-app.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "comprehensionGuard.paste",
+        "title": "Comprehension Guard: Paste (guarded)"
+      },
+      {
+        "command": "comprehensionGuard.toggle",
+        "title": "Comprehension Guard: Toggle On/Off"
+      },
+      {
+        "command": "comprehensionGuard.bypassNext",
+        "title": "Comprehension Guard: Bypass Next Insertion (deadline escape hatch)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "comprehensionGuard.paste",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ],
+    "configuration": {
+      "title": "Comprehension Guard",
+      "properties": {
+        "comprehensionGuard.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the comprehension check on large pastes and inline insertions."
+        },
+        "comprehensionGuard.charThreshold": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Minimum number of characters in a single paste or insertion before the comprehension check is triggered."
+        },
+        "comprehensionGuard.minAnswerLength": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "description": "Minimum length of an explanation (in characters) required to pass the comprehension check."
+        }
+      }
+    }
+  },
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "lint": "turbo lint",
-    "typecheck": "turbo typecheck"
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "turbo": "^2.5.4",
-    "typescript": "^5.8.3"
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
   }
 }

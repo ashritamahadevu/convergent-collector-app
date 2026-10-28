@@ -1,16 +1,24 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Packaged extension
+*.vsix
+
+# VS Code extension test runner
+.vscode-test/
+
+# Logs
+*.log
+
+# Environment
 .env
 .env.local
 .env.*.local
-.turbo
-dist
-*.log
 
-apps/mobile/.expo
-apps/mobile/dist
-apps/mobile/web-build
-
-supabase/.branches
-supabase/.temp
-
-.vercel
+# OS
+.DS_Store
+Thumbs.db

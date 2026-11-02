@@ -33,6 +33,18 @@
       {
         "command": "comprehensionGuard.bypassNext",
         "title": "Comprehension Guard: Bypass Next Insertion (deadline escape hatch)"
+      },
+      {
+        "command": "comprehensionGuard.setApiKey",
+        "title": "Comprehension Guard: Set API Key"
+      },
+      {
+        "command": "comprehensionGuard.clearApiKey",
+        "title": "Comprehension Guard: Clear API Key"
+      },
+      {
+        "command": "comprehensionGuard.showStats",
+        "title": "Comprehension Guard: Show Learning Stats"
       }
     ],
     "keybindings": [
@@ -62,6 +74,36 @@
           "default": 15,
           "minimum": 0,
           "description": "Minimum length of an explanation (in characters) required to pass the comprehension check."
+        },
+        "comprehensionGuard.provider": {
+          "type": "string",
+          "enum": ["openai", "anthropic", "gemini", "ollama"],
+          "default": "openai",
+          "description": "LLM provider for question generation and grading. ollama is local and does not need an API key."
+        },
+        "comprehensionGuard.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model id. Leave empty to use a sensible mid-tier default for the provider. Do not use nano/mini tiers for grading."
+        },
+        "comprehensionGuard.gradingMode": {
+          "type": "string",
+          "enum": ["free-text", "multiple-choice"],
+          "default": "free-text",
+          "description": "Grading mode: free-text LLM-as-judge or deterministic multiple-choice."
+        },
+        "comprehensionGuard.nonCriticalPassFraction": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of non-critical criteria that must pass (all critical criteria must always pass)."
+        },
+        "comprehensionGuard.maxFollowups": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Maximum number of follow-up questions before a final decision."
         }
       }
     }
@@ -70,7 +112,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
-    "package": "vsce package"
+    "package": "vsce package",
+    "eval:judge": "npx -y tsx eval/run.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

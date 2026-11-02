@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getCharThreshold, isEnabled, setBypassArmed, state } from "./state";
+import { getCharThreshold, insertedRange, isEnabled, setBypassArmed, state } from "./state";
 import { runComprehensionGate } from "./quiz";
 
 /**
@@ -10,9 +10,8 @@ import { runComprehensionGate } from "./quiz";
  * listening for large single-shot insertions via
  * `workspace.onDidChangeTextDocument`.
  *
- * Because the text has already been inserted by the time the event fires, the
- * flow is: undo the insertion, hold the snippet, run the comprehension gate,
- * then re-insert on a pass (or leave it removed on a cancel).
+ * The inserted code stays visible during the quiz. It is removed only when
+ * the student does not pass.
  */
 export function registerEditGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
@@ -47,48 +46,26 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
     }
 
     const snippet = bigChange.text;
-    const insertStart = bigChange.range.start;
+    const placed = insertedRange(bigChange.range.start, snippet);
 
+    state.suppressEditGuard = true;
     state.processing = true;
     try {
-      // Remove the just-inserted code while the student is challenged.
-      await undoInsertion();
-
-      const passed = await runComprehensionGate(snippet);
-      if (passed) {
-        await reinsert(editor, insertStart, snippet);
+      const passed = await runComprehensionGate(
+        snippet,
+        context,
+        editor.document.languageId,
+      );
+      if (!passed && editor.document.getText(placed) === snippet) {
+        await editor.edit((builder) => {
+          builder.delete(placed);
+        });
       }
-      // On failure the code stays removed (undo already took it out).
     } finally {
       state.processing = false;
+      state.suppressEditGuard = false;
     }
   });
 
   context.subscriptions.push(disposable);
-}
-
-/** Undo the flagged insertion, suppressing re-entrant guard triggers. */
-async function undoInsertion(): Promise<void> {
-  state.suppressEditGuard = true;
-  try {
-    await vscode.commands.executeCommand("undo");
-  } finally {
-    state.suppressEditGuard = false;
-  }
-}
-
-/** Re-insert an approved snippet at the original position. */
-async function reinsert(
-  editor: vscode.TextEditor,
-  position: vscode.Position,
-  snippet: string,
-): Promise<void> {
-  state.suppressEditGuard = true;
-  try {
-    await editor.edit((builder) => {
-      builder.insert(position, snippet);
-    });
-  } finally {
-    state.suppressEditGuard = false;
-  }
 }

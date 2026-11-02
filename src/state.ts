@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { GradingMode, Provider } from "./types";
 
 /**
  * Shared, process-local mutable state for the extension.
@@ -29,6 +30,29 @@ export function setBypassArmed(value: boolean): void {
   }
 }
 
+/** Range occupied by `text` after it is inserted at `start`. */
+export function insertedRange(start: vscode.Position, text: string): vscode.Range {
+  const lines = text.split(/\r?\n/);
+  const last = lines[lines.length - 1] ?? "";
+  const endLine = start.line + lines.length - 1;
+  const endCharacter = lines.length === 1 ? start.character + last.length : last.length;
+  return new vscode.Range(start, new vscode.Position(endLine, endCharacter));
+}
+
+/**
+ * Runs an edit the guard itself is making. The document-change event can
+ * arrive after the edit promise resolves, so the flag stays up briefly.
+ */
+export async function withoutEditGuard(action: () => Promise<void>): Promise<void> {
+  state.suppressEditGuard = true;
+  try {
+    await action();
+  } finally {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    state.suppressEditGuard = false;
+  }
+}
+
 export function isEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("comprehensionGuard")
@@ -45,4 +69,34 @@ export function getMinAnswerLength(): number {
   return vscode.workspace
     .getConfiguration("comprehensionGuard")
     .get<number>("minAnswerLength", 15);
+}
+
+export function getProvider(): Provider {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<Provider>("provider", "openai");
+}
+
+export function getModel(): string {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<string>("model", "");
+}
+
+export function getGradingMode(): GradingMode {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<GradingMode>("gradingMode", "free-text");
+}
+
+export function getNonCriticalPassFraction(): number {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<number>("nonCriticalPassFraction", 0.5);
+}
+
+export function getMaxFollowups(): number {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<number>("maxFollowups", 3);
 }

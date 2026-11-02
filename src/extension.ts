@@ -1,11 +1,24 @@
 import * as vscode from "vscode";
 import { registerPasteGuard } from "./pasteGuard";
 import { registerEditGuard } from "./editGuard";
-import { isEnabled, onStateChanged, setBypassArmed, state } from "./state";
+import { setLogSink } from "./llm";
+import { clearApiKey, setApiKey } from "./secrets";
+import { getStats } from "./store";
+import {
+  getProvider,
+  isEnabled,
+  onStateChanged,
+  setBypassArmed,
+  state,
+} from "./state";
 
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext): void {
+  const output = vscode.window.createOutputChannel("Comprehension Guard");
+  context.subscriptions.push(output);
+  setLogSink((line) => output.appendLine(line));
+
   // Status bar indicator (click to toggle).
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -50,6 +63,62 @@ export function activate(context: vscode.ExtensionContext): void {
         "Comprehension Guard: next insertion will be allowed without a check.",
         4000,
       );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "comprehensionGuard.setApiKey",
+      async () => {
+        const provider = getProvider();
+        const key = await vscode.window.showInputBox({
+          title: "Comprehension Guard API Key",
+          prompt: "API key for " + provider,
+          password: true,
+          ignoreFocusOut: true,
+        });
+        if (!key || key.trim().length === 0) {
+          return;
+        }
+        await setApiKey(context, provider, key.trim());
+        vscode.window.showInformationMessage(
+          "Comprehension Guard: API key saved for " + provider + ".",
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "comprehensionGuard.clearApiKey",
+      async () => {
+        await clearApiKey(context, getProvider());
+        vscode.window.showInformationMessage(
+          "Comprehension Guard: API key cleared for " + getProvider() + ".",
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.showStats", () => {
+      const stats = getStats(context);
+      output.clear();
+      output.appendLine("Comprehension Guard - Learning stats");
+      output.appendLine("");
+      output.appendLine("Total attempts: " + stats.total);
+      output.appendLine("Passed: " + stats.passed);
+      const pct = Math.round(stats.passRate * 1000) / 10;
+      output.appendLine("Pass rate: " + pct + "%");
+      output.appendLine("");
+      if (stats.mostMissed.length === 0) {
+        output.appendLine("Most missed concepts: (none yet)");
+      } else {
+        output.appendLine(
+          "Most missed concepts: " + stats.mostMissed.join(", "),
+        );
+      }
+      output.show(true);
     }),
   );
 

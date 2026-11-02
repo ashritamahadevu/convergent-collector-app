@@ -1,5 +1,12 @@
 import * as vscode from "vscode";
-import { getCharThreshold, isEnabled, setBypassArmed, state } from "./state";
+import {
+  getCharThreshold,
+  insertedRange,
+  isEnabled,
+  setBypassArmed,
+  state,
+  withoutEditGuard,
+} from "./state";
 import { runComprehensionGate } from "./quiz";
 
 const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
@@ -19,6 +26,8 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.commands.registerCommand(
     "comprehensionGuard.paste",
     async () => {
+      const editor = vscode.window.activeTextEditor;
+      const selection = editor?.selection;
       const clipboardText = await vscode.env.clipboard.readText();
 
       // Below threshold, disabled, or a bypass is armed -> just paste.
@@ -34,23 +43,82 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         return;
       }
 
-      const passed = await runComprehensionGate(clipboardText);
-      if (passed) {
-        await performPaste();
+      if (!editor || !selection) {
+        const passed = await runComprehensionGate(
+          clipboardText,
+          context,
+          editor?.document.languageId,
+        );
+        if (passed) {
+          await performPaste();
+        }
+        return;
       }
-      // On failure we do nothing -- the clipboard content is never inserted.
+
+      // Show the code in the editor during the quiz. Remove it if they do not pass.
+      state.suppressEditGuard = true;
+      state.processing = true;
+      let placed: vscode.Range | undefined;
+      try {
+        placed = await insertPreview(editor, selection, clipboardText);
+        const passed = await runComprehensionGate(
+          clipboardText,
+          context,
+          editor.document.languageId,
+        );
+        if (!passed && placed) {
+          await removeIfUnchanged(editor, placed, clipboardText);
+        }
+      } finally {
+        state.processing = false;
+        state.suppressEditGuard = false;
+      }
     },
   );
 
   context.subscriptions.push(disposable);
 }
 
+/** Puts the snippet in the editor so it can be read during the quiz. */
+async function insertPreview(
+  editor: vscode.TextEditor,
+  selection: vscode.Selection,
+  text: string,
+): Promise<vscode.Range | undefined> {
+  await vscode.window.showTextDocument(editor.document, {
+    viewColumn: editor.viewColumn,
+    preserveFocus: false,
+    selection,
+  });
+  const applied = await editor.edit((builder) => {
+    builder.replace(selection, text);
+  });
+  if (!applied) {
+    vscode.window.showWarningMessage(
+      "Comprehension Guard: could not show the code in the editor.",
+    );
+    return undefined;
+  }
+  return insertedRange(selection.start, text);
+}
+
+/** Deletes a preview insertion that is still exactly the original snippet. */
+async function removeIfUnchanged(
+  editor: vscode.TextEditor,
+  range: vscode.Range,
+  text: string,
+): Promise<void> {
+  if (editor.document.getText(range) !== text) {
+    return;
+  }
+  await editor.edit((builder) => {
+    builder.delete(range);
+  });
+}
+
 /** Runs the built-in paste while suppressing the edit guard. */
 async function performPaste(): Promise<void> {
-  state.suppressEditGuard = true;
-  try {
+  await withoutEditGuard(async () => {
     await vscode.commands.executeCommand(BUILTIN_PASTE);
-  } finally {
-    state.suppressEditGuard = false;
-  }
+  });
 }

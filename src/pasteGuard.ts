@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { noteAccepted } from "./editorBaseline";
 import {
   getCharThreshold,
   insertedRange,
@@ -70,6 +71,13 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           await removeIfUnchanged(editor, placed, clipboardText);
         }
       } finally {
+        if (editor.document.uri.scheme === "file") {
+          try {
+            noteAccepted(editor.document.uri.fsPath, editor.document.getText());
+          } catch {
+            // The editor can close while the quiz is open.
+          }
+        }
         state.processing = false;
         state.suppressEditGuard = false;
       }

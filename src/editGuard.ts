@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { noteAccepted } from "./editorBaseline";
+import { isAgentClaimed, markEditorGate } from "./gateLock";
 import { getCharThreshold, insertedRange, isEnabled, setBypassArmed, state } from "./state";
 import { runComprehensionGate } from "./quiz";
 
@@ -17,6 +19,14 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
     // Ignore our own edits (paste / undo / re-insert) and no-op states.
     if (state.suppressEditGuard || state.processing || !isEnabled()) {
+      return;
+    }
+
+    // An agent hook already owns this write. Quizzing it here would stack a second check.
+    if (
+      event.document.uri.scheme === "file" &&
+      isAgentClaimed(event.document.uri.fsPath)
+    ) {
       return;
     }
 
@@ -42,12 +52,14 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
     // A bypass is armed -> let this one through, consume the bypass.
     if (state.bypassArmed) {
       setBypassArmed(false);
+      noteAccepted(editor.document.uri.fsPath, editor.document.getText());
       return;
     }
 
     const snippet = bigChange.text;
     const placed = insertedRange(bigChange.range.start, snippet);
 
+    markEditorGate(editor.document.uri.fsPath, snippet);
     state.suppressEditGuard = true;
     state.processing = true;
     try {
@@ -62,6 +74,11 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         });
       }
     } finally {
+      try {
+        noteAccepted(editor.document.uri.fsPath, editor.document.getText());
+      } catch {
+        // The editor can close while the quiz is open.
+      }
       state.processing = false;
       state.suppressEditGuard = false;
     }

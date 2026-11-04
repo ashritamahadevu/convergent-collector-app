@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { registerPasteGuard } from "./pasteGuard";
+import { registerAgentGuard } from "./agentGuard";
 import { registerEditGuard } from "./editGuard";
 import { setLogSink } from "./llm";
 import { clearApiKey, setApiKey } from "./secrets";
@@ -29,8 +30,10 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBarItem.show();
   updateStatusBar();
 
-  // Core guards.
+  // Core guards. The agent guard listens for document changes first so it can
+  // tell an external write apart from an insertion the inline guard will quiz.
   registerPasteGuard(context);
+  registerAgentGuard(context);
   registerEditGuard(context);
 
   // Toggle on/off.

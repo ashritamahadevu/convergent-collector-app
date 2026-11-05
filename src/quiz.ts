@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { aggregate, gradeMcq, runPreChecks } from "./decision";
-import { generateQuestion, getJudgeConfigId, judge } from "./llm";
+import { generateQuestion, getJudgeConfigId, judge, providerNeedsApiKey } from "./llm";
 import { getApiKey } from "./secrets";
 import {
   getGradingMode,
@@ -8,10 +8,12 @@ import {
   getMinAnswerLength,
   getNonCriticalPassFraction,
   getProvider,
+  subscribeQuizBypass,
+  takeQuizBypass,
 } from "./state";
-import { addAttempt } from "./store";
-import type { AttemptRecord, CriterionVerdict, GeneratedQuestion } from "./types";
-import { createQuizPanel } from "./quizPanel";
+import { addAttempt, saveMisgradeReport } from "./store";
+import type { AttemptOutcome, AttemptRecord, CriterionVerdict, GeneratedQuestion } from "./types";
+import { createQuizPanel, type QuizAction } from "./quizPanel";
 
 let missingApiKeyHintShown = false;
 
@@ -32,7 +34,7 @@ export async function runComprehensionGate(
   }
 
   const provider = getProvider();
-  const key = provider === "ollama" ? "local" : await getApiKey(context, provider);
+  const key = providerNeedsApiKey(provider) ? await getApiKey(context, provider) : "local";
   if (!key?.trim()) {
     if (!missingApiKeyHintShown) {
       missingApiKeyHintShown = true;
@@ -65,8 +67,13 @@ export async function runComprehensionGate(
   const maxFollowups = getMaxFollowups();
   const judgeConfigId = getJudgeConfigId();
 
+  let lastStudentAnswer = "";
+  let lastFeedback = "";
+  let lastCriterionResults: AttemptRecord["criterionResults"];
+
   const recordAttempt = async (
     passed: boolean,
+    outcome: AttemptOutcome,
     criterionResults?: AttemptRecord["criterionResults"],
   ): Promise<void> => {
     await addAttempt(context, {
@@ -77,33 +84,73 @@ export async function runComprehensionGate(
       conceptTags: question.conceptTags,
       criterionResults,
       passed,
+      outcome,
       followups,
       judgeConfigId,
+      appealed: outcome === "disputed",
     });
   };
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const payload = await view.waitForSubmit();
+    const payload = await waitForQuizAction(view);
 
-    if (payload === "cancel") {
-      await recordAttempt(false);
+    if (payload.type === "explain") {
+      const explanation = question.referenceAnswer.trim();
+      view.showFeedback({
+        message: explanation
+          ? "Explanation: " + explanation
+          : "No explanation was generated for this check. The code stays.",
+        explained: true,
+      });
+      await recordAttempt(false, "explained");
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: explanation shown. The code stays and is not counted as correct.",
+        5000,
+      );
+      return true;
+    }
+
+    if (payload.type === "bypass") {
+      await recordAttempt(false, "bypass");
       view.close();
       vscode.window.setStatusBarMessage(
-        "Comprehension Guard: insertion blocked (no explanation given).",
+        "Comprehension Guard: bypassed. The code stays and is not counted as correct.",
+        4000,
+      );
+      return true;
+    }
+
+    if (payload.type === "dispute") {
+      const reported = await saveMisgradeReport(context, {
+        timestamp: Date.now(),
+        language: lang,
+        question: question.question,
+        studentAnswer: payload.answer?.trim() || lastStudentAnswer,
+        feedback: lastFeedback,
+        snippetPreview: snippet.slice(0, 2000),
+        conceptTags: question.conceptTags,
+        judgeConfigId,
+      });
+      await recordAttempt(true, "disputed", lastCriterionResults);
+      view.close();
+      vscode.window.showInformationMessage(
+        "Comprehension Guard: counted as correct. " + reported.detail,
+      );
+      return true;
+    }
+
+    if (payload.type === "cancel") {
+      await recordAttempt(false, "fail");
+      view.close();
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: quiz closed. The code was removed.",
         4000,
       );
       return false;
     }
 
-    if (payload === "bypass") {
-      view.close();
-      vscode.window.setStatusBarMessage(
-        "Comprehension Guard: bypassed. The code will be inserted.",
-        4000,
-      );
-      return true;
-    }
+    lastStudentAnswer = (payload.answer ?? "").trim();
 
     if (question.kind === "multiple-choice") {
       const selectedIndex = payload.selectedIndex;
@@ -114,21 +161,23 @@ export async function runComprehensionGate(
 
       const ok = gradeMcq(question, selectedIndex);
       if (ok) {
-        await recordAttempt(true);
+        await recordAttempt(true, "pass");
         view.close();
         return true;
       }
 
       followups += 1;
+      lastFeedback = "That option is not correct. Look at the code again and try another.";
 
       if (followups < maxFollowups) {
         view.showFeedback({
-          message: "That option is not correct. Look at the code again and try another.",
+          message: lastFeedback,
+          allowDispute: true,
         });
         continue;
       }
 
-      await recordAttempt(false);
+      await recordAttempt(false, "fail");
       view.close();
       return false;
     }
@@ -149,8 +198,18 @@ export async function runComprehensionGate(
       studentAnswer: payload.answer ?? "",
     });
 
+    if (takeQuizBypass()) {
+      await recordAttempt(false, "bypass");
+      view.close();
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: bypassed. The code stays and is not counted as correct.",
+        4000,
+      );
+      return true;
+    }
+
     if (res.kind === "no_decision") {
-      await recordAttempt(true);
+      await recordAttempt(true, "pass");
       view.close();
       return true;
     }
@@ -162,26 +221,49 @@ export async function runComprehensionGate(
     );
 
     const criterionResults = mapCriterionResults(res.verdicts);
+    lastCriterionResults = criterionResults;
 
     if (agg.outcome === "pass") {
-      await recordAttempt(true, criterionResults);
+      await recordAttempt(true, "pass", criterionResults);
       view.close();
       return true;
     }
 
     followups += 1;
+    lastFeedback =
+      "Not quite. Look at the part of the code the question asks about and describe what it does. The answer is not shown.";
 
     if (followups < maxFollowups) {
       view.showFeedback({
-        message:
-          "Not quite. Look at the part of the code the question asks about and describe what it does. The answer is not shown.",
+        message: lastFeedback,
+        allowDispute: true,
       });
       continue;
     }
 
-    await recordAttempt(false, criterionResults);
+    await recordAttempt(false, "fail", criterionResults);
     view.close();
     return false;
+  }
+}
+
+/** Submit, close the quiz tab, or Bypass. Bypass keeps the code; closing removes it. */
+async function waitForQuizAction(
+  view: ReturnType<typeof createQuizPanel>,
+): Promise<QuizAction> {
+  let bypassed = false;
+  const unsubscribe = subscribeQuizBypass(() => {
+    bypassed = true;
+    view.close();
+  });
+  try {
+    const payload = await view.waitForSubmit();
+    if (bypassed || takeQuizBypass()) {
+      return { type: "bypass" };
+    }
+    return payload;
+  } finally {
+    unsubscribe();
   }
 }
 
@@ -208,24 +290,43 @@ async function fallbackGate(snippet: string, language?: string): Promise<boolean
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const payload = await view.waitForSubmit();
+    const payload = await waitForQuizAction(view);
 
-    if (payload === "cancel") {
-      view.close();
+    if (payload.type === "explain") {
+      view.showFeedback({
+        message: "No model explanation is available for this check. The code stays.",
+        explained: true,
+      });
       vscode.window.setStatusBarMessage(
-        "Comprehension Guard: insertion blocked (no explanation given).",
-        4000,
+        "Comprehension Guard: explanation requested. The code stays and is not counted as correct.",
+        5000,
       );
-      return false;
+      return true;
     }
 
-    if (payload === "bypass") {
+    if (payload.type === "bypass") {
       view.close();
       vscode.window.setStatusBarMessage(
-        "Comprehension Guard: bypassed. The code will be inserted.",
+        "Comprehension Guard: bypassed. The code stays and is not counted as correct.",
         4000,
       );
       return true;
+    }
+
+    if (payload.type === "dispute") {
+      view.showFeedback({
+        message: "This check is not graded by a model, so there is no misgrade to report. Use Bypass to keep the code.",
+      });
+      continue;
+    }
+
+    if (payload.type === "cancel") {
+      view.close();
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: quiz closed. The code was removed.",
+        4000,
+      );
+      return false;
     }
 
     const answer = (payload.answer ?? "").trim();

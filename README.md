@@ -28,7 +28,7 @@ Design details for question generation and grading: [docs/llm-grading.md](docs/l
 | `comprehensionGuard.enabled` | `true` | Enable/disable the guard. |
 | `comprehensionGuard.charThreshold` | `200` | Minimum characters in a single paste, inline insertion, or AI-agent edit before the check triggers. |
 | `comprehensionGuard.minAnswerLength` | `15` | Minimum explanation length (characters) for the **offline** input-box fallback when no API key is set. |
-| `comprehensionGuard.provider` | `openai` | LLM provider: `openai`, `anthropic`, `gemini`, or `ollama` (local, no API key; default model `qwen2.5-coder:7b`). |
+| `comprehensionGuard.provider` | `openai` | LLM provider. API providers: `openai`, `anthropic`, `gemini`. No key required: `ollama` (local), or `claude-cli`, `cursor-cli`, `codex-cli`, `gemini-cli`, `copilot-cli` (the matching CLI must be installed and signed in). |
 | `comprehensionGuard.model` | `""` | Model id; empty uses a sensible mid-tier default for the provider. |
 | `comprehensionGuard.gradingMode` | `free-text` | `free-text` (LLM judge) or `multiple-choice` (deterministic). |
 | `comprehensionGuard.nonCriticalPassFraction` | `0.5` | Fraction of non-critical rubric criteria that must pass (all critical criteria must pass). |

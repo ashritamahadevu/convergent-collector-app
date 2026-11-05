@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import * as vscode from "vscode";
+import { isCliProvider, runCliPrompt } from "./cliRunner";
 import { getApiKey } from "./secrets";
 import { getModel, getNonCriticalPassFraction, getProvider } from "./state";
 import type {
@@ -23,6 +24,11 @@ const DEFAULT_MODELS: Record<Provider, string> = {
   anthropic: "claude-3-5-haiku-latest",
   gemini: "gemini-flash-latest",
   ollama: "qwen2.5-coder:7b",
+  "claude-cli": "",
+  "cursor-cli": "",
+  "codex-cli": "",
+  "gemini-cli": "",
+  "copilot-cli": "",
 };
 
 const GENERATE_MAX_TOKENS: Record<Provider, number> = {
@@ -30,6 +36,11 @@ const GENERATE_MAX_TOKENS: Record<Provider, number> = {
   anthropic: 4096,
   gemini: 4096,
   ollama: 2048,
+  "claude-cli": 2048,
+  "cursor-cli": 2048,
+  "codex-cli": 2048,
+  "gemini-cli": 2048,
+  "copilot-cli": 2048,
 };
 
 const JUDGE_MAX_TOKENS: Record<Provider, number> = {
@@ -37,7 +48,18 @@ const JUDGE_MAX_TOKENS: Record<Provider, number> = {
   anthropic: 2048,
   gemini: 2048,
   ollama: 1024,
+  "claude-cli": 1024,
+  "cursor-cli": 1024,
+  "codex-cli": 1024,
+  "gemini-cli": 1024,
+  "copilot-cli": 1024,
 };
+
+const CLI_TIMEOUT_MS = 120_000;
+
+export function providerNeedsApiKey(provider: Provider): boolean {
+  return provider !== "ollama" && !isCliProvider(provider);
+}
 
 const CONCEPT_TAG_DEFINITIONS = `
 Concept tags (use only when a student lacking that concept could not answer correctly; under-tag):
@@ -567,6 +589,40 @@ async function completeChat(
       return callGemini(apiKey, model, messages, maxTokens, temperature);
     case "ollama":
       return callOllama(model, messages, maxTokens, temperature, jsonMode);
+    case "claude-cli":
+    case "cursor-cli":
+    case "codex-cli":
+    case "gemini-cli":
+    case "copilot-cli": {
+      const started = Date.now();
+      try {
+        const result = await runCliPrompt(
+          provider,
+          messages.map((message) => message.content).join("\n\n"),
+          model,
+          CLI_TIMEOUT_MS,
+        );
+        logSink(
+          "[Comprehension Guard] cli " +
+            result.command +
+            " " +
+            result.ms +
+            "ms outcome=ok",
+        );
+        return result.text;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logSink(
+          "[Comprehension Guard] cli " +
+            provider +
+            " " +
+            (Date.now() - started) +
+            "ms outcome=error reason=" +
+            message.slice(0, 180),
+        );
+        throw err;
+      }
+    }
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive}`);
@@ -650,9 +706,9 @@ async function runGenerateOnce(
 ): Promise<GeneratedQuestion> {
   const provider = getProvider();
   const model = resolveModel(provider, getModel());
-  const storedKey = provider === "ollama" ? "" : await getApiKey(context, provider);
+  const storedKey = providerNeedsApiKey(provider) ? await getApiKey(context, provider) : "";
   const apiKey = storedKey ?? "";
-  if (provider !== "ollama" && !apiKey.trim()) {
+  if (providerNeedsApiKey(provider) && !apiKey.trim()) {
     throw new Error("Missing API key for configured provider.");
   }
   const prompt = buildGeneratePrompt(params.snippet, params.language, params.mode);
@@ -722,9 +778,11 @@ export async function judge(params: JudgeParams): Promise<JudgeResult> {
   const start = Date.now();
   const provider = getProvider();
   const model = resolveModel(provider, getModel());
-  const storedKey = provider === "ollama" ? "" : await getApiKey(params.context, provider);
+  const storedKey = providerNeedsApiKey(provider)
+    ? await getApiKey(params.context, provider)
+    : "";
   const apiKey = storedKey ?? "";
-  if (provider !== "ollama" && !apiKey.trim()) {
+  if (providerNeedsApiKey(provider) && !apiKey.trim()) {
     logCall("judge", Date.now() - start, "outcome=no_decision reason=missing_api_key");
     return { kind: "no_decision", reason: "missing_api_key" };
   }

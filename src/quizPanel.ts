@@ -3,14 +3,23 @@ import type { GeneratedQuestion } from "./types";
 
 export type SubmitPayload = { answer?: string; selectedIndex?: number };
 
+export type QuizAction =
+  | { type: "submit"; answer?: string; selectedIndex?: number }
+  | { type: "bypass" }
+  | { type: "explain" }
+  | { type: "dispute"; answer?: string }
+  | { type: "cancel" };
+
 export type QuizView = {
   showQuestion(question: GeneratedQuestion): void;
   showFeedback(opts: {
     message: string;
     missed?: { text: string; evidence?: string }[];
     correctOption?: string;
+    allowDispute?: boolean;
+    explained?: boolean;
   }): void;
-  waitForSubmit(): Promise<SubmitPayload | "cancel" | "bypass">;
+  waitForSubmit(): Promise<QuizAction>;
   close(): void;
 };
 
@@ -69,7 +78,12 @@ function getWebviewHtml(
     h1 {
       font-size: 1.15em;
       font-weight: 600;
+      margin: 0 0 8px;
+    }
+    .lock-note {
       margin: 0 0 12px;
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.9em;
     }
     .snippet-wrap {
       border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
@@ -164,7 +178,7 @@ function getWebviewHtml(
       gap: 8px;
       align-items: center;
     }
-    button.bypass {
+    button.bypass, button.dispute {
       padding: 6px 16px;
       font-size: var(--vscode-font-size);
       color: var(--vscode-button-secondaryForeground);
@@ -173,14 +187,16 @@ function getWebviewHtml(
       border-radius: 2px;
       cursor: pointer;
     }
-    button.bypass:hover {
+    button.bypass:hover, button.dispute:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
+    button.dispute { margin-top: 8px; }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
   <h1>Comprehension check</h1>
+  <p class="lock-note">Editing is locked until you submit, bypass, ask for an explanation, or close this tab. Bypass and "I don't know" keep the code and do not count as correct. Closing removes the code.</p>
   <div class="snippet-wrap">
     <div class="snippet-head">
       <span>Code</span>
@@ -193,11 +209,13 @@ function getWebviewHtml(
     <p id="feedback-msg" class="feedback-msg"></p>
     <ul id="missed-list" class="missed-list hidden"></ul>
     <p id="correct-option" class="correct-option hidden"></p>
+    <button type="button" class="dispute hidden" id="dispute-btn">My answer was right</button>
   </div>
   <div id="answer-area" class="answer-area"></div>
   <div class="actions">
     <button type="button" class="submit" id="submit-btn">Submit</button>
     <button type="button" class="bypass" id="bypass-btn">Bypass</button>
+    <button type="button" class="bypass" id="explain-btn">I don't know, explain it</button>
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -208,8 +226,12 @@ function getWebviewHtml(
     const correctOptionEl = document.getElementById("correct-option");
     const answerAreaEl = document.getElementById("answer-area");
     const submitBtn = document.getElementById("submit-btn");
+    const bypassBtn = document.getElementById("bypass-btn");
+    const explainBtn = document.getElementById("explain-btn");
+    const disputeBtn = document.getElementById("dispute-btn");
 
     let currentKind = "free-text";
+    let lastAnswer = "";
 
     function clearFeedback() {
       feedbackEl.classList.remove("visible");
@@ -218,6 +240,7 @@ function getWebviewHtml(
       missedListEl.classList.add("hidden");
       correctOptionEl.textContent = "";
       correctOptionEl.classList.add("hidden");
+      disputeBtn.classList.add("hidden");
     }
 
     function renderQuestion(payload) {
@@ -273,6 +296,17 @@ function getWebviewHtml(
         correctOptionEl.classList.add("hidden");
       }
       feedbackEl.classList.add("visible");
+      if (payload.explained) {
+        submitBtn.classList.add("hidden");
+        bypassBtn.classList.add("hidden");
+        explainBtn.classList.add("hidden");
+        disputeBtn.classList.add("hidden");
+      }
+      if (payload.allowDispute) {
+        disputeBtn.classList.remove("hidden");
+      } else {
+        disputeBtn.classList.add("hidden");
+      }
 
       if (currentKind === "free-text") {
         const ta = document.getElementById("answer-input");
@@ -295,6 +329,7 @@ function getWebviewHtml(
           showFeedback({ message: "Please select an option before submitting." });
           return;
         }
+        lastAnswer = selected.parentElement ? selected.parentElement.textContent : "";
         vscode.postMessage({
           type: "submit",
           selectedIndex: parseInt(selected.value, 10),
@@ -303,12 +338,19 @@ function getWebviewHtml(
       }
       const ta = document.getElementById("answer-input");
       const answer = ta ? ta.value : "";
+      lastAnswer = answer;
       vscode.postMessage({ type: "submit", answer: answer });
     }
 
     submitBtn.addEventListener("click", collectSubmit);
-    document.getElementById("bypass-btn").addEventListener("click", function () {
+    bypassBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "bypass" });
+    });
+    explainBtn.addEventListener("click", function () {
+      vscode.postMessage({ type: "explain" });
+    });
+    disputeBtn.addEventListener("click", function () {
+      vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
 
     vscode.postMessage({ type: "ready" });
@@ -342,7 +384,8 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
   let disposed = false;
   let ready = false;
   const queued: unknown[] = [];
-  let pendingResolve: ((value: SubmitPayload | "cancel" | "bypass") => void) | null = null;
+  let pendingResolve: ((value: QuizAction) => void) | null = null;
+  let queuedAction: QuizAction | null = null;
 
   const post = (message: unknown): void => {
     if (disposed) {
@@ -355,12 +398,14 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
     void panel.webview.postMessage(message);
   };
 
-  const resolvePending = (value: SubmitPayload | "cancel" | "bypass"): void => {
+  const resolvePending = (value: QuizAction): void => {
     if (pendingResolve) {
       const resolve = pendingResolve;
       pendingResolve = null;
       resolve(value);
+      return;
     }
+    queuedAction = value;
   };
 
   panel.webview.onDidReceiveMessage((message: unknown) => {
@@ -376,25 +421,36 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       return;
     }
     if (msg.type === "bypass") {
-      resolvePending("bypass");
+      resolvePending({ type: "bypass" });
+      return;
+    }
+    if (msg.type === "explain") {
+      resolvePending({ type: "explain" });
+      return;
+    }
+    if (msg.type === "dispute") {
+      resolvePending({
+        type: "dispute",
+        answer: typeof msg.answer === "string" ? msg.answer : "",
+      });
       return;
     }
     if (msg.type !== "submit") {
       return;
     }
-    const payload: SubmitPayload = {};
-    if (typeof msg.answer === "string") {
-      payload.answer = msg.answer;
-    }
-    if (typeof msg.selectedIndex === "number" && Number.isFinite(msg.selectedIndex)) {
-      payload.selectedIndex = msg.selectedIndex;
-    }
-    resolvePending(payload);
+    resolvePending({
+      type: "submit",
+      answer: typeof msg.answer === "string" ? msg.answer : undefined,
+      selectedIndex:
+        typeof msg.selectedIndex === "number" && Number.isFinite(msg.selectedIndex)
+          ? msg.selectedIndex
+          : undefined,
+    });
   });
 
   panel.onDidDispose(() => {
     disposed = true;
-    resolvePending("cancel");
+    resolvePending({ type: "cancel" });
   });
 
   panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce);
@@ -416,6 +472,8 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       message: string;
       missed?: { text: string; evidence?: string }[];
       correctOption?: string;
+      allowDispute?: boolean;
+      explained?: boolean;
     }): void {
       if (disposed) {
         return;
@@ -425,12 +483,19 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
         message: opts.message,
         missed: opts.missed ?? [],
         correctOption: opts.correctOption ?? "",
+        allowDispute: opts.allowDispute === true,
+        explained: opts.explained === true,
       });
     },
 
-    waitForSubmit(): Promise<SubmitPayload | "cancel" | "bypass"> {
+    waitForSubmit(): Promise<QuizAction> {
+      if (queuedAction) {
+        const action = queuedAction;
+        queuedAction = null;
+        return Promise.resolve(action);
+      }
       if (disposed) {
-        return Promise.resolve("cancel");
+        return Promise.resolve({ type: "cancel" });
       }
       return new Promise((resolve) => {
         pendingResolve = resolve;

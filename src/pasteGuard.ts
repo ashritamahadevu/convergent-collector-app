@@ -6,6 +6,7 @@ import {
   insertedRange,
   isEnabled,
   setBypassArmed,
+  setQuizActive,
   state,
   withoutEditGuard,
 } from "./state";
@@ -21,8 +22,8 @@ const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
  *  2. If the guard is disabled, a bypass is armed, or the text is below the
  *     character threshold, run the real paste (consuming any armed bypass).
  *  3. Otherwise paste, then lock the file until the check is answered,
- *     bypassed, or closed. A pass or bypass keeps the paste. Closing or
- *     failing removes it.
+ *     bypassed, or closed. A pass, bypass, or explanation keeps the paste.
+ *     Closing or failing removes it.
  *
  * All real paste operations are wrapped so the edit guard ignores them.
  */
@@ -30,7 +31,11 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.commands.registerCommand(
     "comprehensionGuard.paste",
     async () => {
-      if (state.processing) {
+      if (state.quizActive || state.processing) {
+        vscode.window.setStatusBarMessage(
+          "Comprehension Guard: finish the open quiz before pasting again.",
+          3000,
+        );
         return;
       }
 
@@ -38,7 +43,6 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
       const selection = editor?.selection;
       const clipboardText = await vscode.env.clipboard.readText();
 
-      // Below threshold, disabled, or a bypass is armed -> just paste.
       if (
         !isEnabled() ||
         state.bypassArmed ||
@@ -65,10 +69,12 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
 
       state.suppressEditGuard = true;
       state.processing = true;
+      setQuizActive(true);
       const placed = await insertSnippet(editor, selection, clipboardText);
+      state.suppressEditGuard = false;
       if (!placed) {
         state.processing = false;
-        state.suppressEditGuard = false;
+        setQuizActive(false);
         return;
       }
       const release = lockDocument(editor.document);
@@ -87,9 +93,11 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         );
         unlock();
         if (!passed && editor.document.getText(placed) === clipboardText) {
+          state.suppressEditGuard = true;
           await editor.edit((builder) => {
             builder.delete(placed);
           });
+          state.suppressEditGuard = false;
         }
       } finally {
         unlock();
@@ -102,6 +110,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         }
         state.processing = false;
         state.suppressEditGuard = false;
+        setQuizActive(false);
       }
     },
   );

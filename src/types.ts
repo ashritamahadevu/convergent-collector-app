@@ -21,8 +21,19 @@ export type CriterionVerdict = { id: string; verdict: "pass" | "fail" | "n/a"; e
 export type JudgeResult =
   | { kind: "decided"; verdicts: CriterionVerdict[] }
   | { kind: "no_decision"; reason: string };
-export type Provider = "openai" | "anthropic" | "gemini" | "ollama";
+export type Provider =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "ollama"
+  | "claude-cli"
+  | "cursor-cli"
+  | "codex-cli"
+  | "gemini-cli"
+  | "copilot-cli";
 export type GradingMode = "free-text" | "multiple-choice";
+/** Bypass is stored but excluded from the pass rate. Disputed counts as correct. */
+export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained";
 export type AttemptRecord = {
   timestamp: number;
   language: string;
@@ -31,7 +42,18 @@ export type AttemptRecord = {
   conceptTags: string[];
   criterionResults?: { id: string; verdict: "pass" | "fail" | "n/a" }[];
   passed: boolean;
+  outcome?: AttemptOutcome;
   followups: number;
   judgeConfigId: string;
   appealed?: boolean;
+};
+export type MisgradeReport = {
+  timestamp: number;
+  language: string;
+  question: string;
+  studentAnswer: string;
+  feedback: string;
+  snippetPreview: string;
+  conceptTags: string[];
+  judgeConfigId: string;
 };

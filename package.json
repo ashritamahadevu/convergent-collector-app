@@ -81,9 +81,9 @@
         },
         "comprehensionGuard.provider": {
           "type": "string",
-          "enum": ["openai", "anthropic", "gemini", "ollama"],
+          "enum": ["openai", "anthropic", "gemini", "ollama", "claude-cli", "cursor-cli", "codex-cli", "gemini-cli", "copilot-cli"],
           "default": "openai",
-          "description": "LLM provider for question generation and grading. ollama is local and does not need an API key."
+          "description": "LLM provider for question generation and grading. ollama is local. The *-cli providers use an installed, signed-in coding CLI and do not need an API key."
         },
         "comprehensionGuard.model": {
           "type": "string",
@@ -102,6 +102,11 @@
           "minimum": 0,
           "maximum": 1,
           "description": "Fraction of non-critical criteria that must pass (all critical criteria must always pass)."
+        },
+        "comprehensionGuard.misgradeReportUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional URL that receives a JSON POST when a student marks a grade as wrong. Reports are always saved on the computer."
         },
         "comprehensionGuard.maxFollowups": {
           "type": "number",

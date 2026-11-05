@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import type { AttemptRecord } from "./types";
+import type { AttemptRecord, MisgradeReport } from "./types";
 
 export const STORE_KEY = "comprehensionGuard.attempts";
+export const MISGRADE_KEY = "comprehensionGuard.misgradeReports";
 
 /** Most recent records kept in globalState; older entries are dropped on append. */
 const MAX_ATTEMPTS = 1000;
@@ -32,7 +33,9 @@ export type Stats = {
 };
 
 export function getStats(context: vscode.ExtensionContext): Stats {
-  const attempts = getAttempts(context);
+  const attempts = getAttempts(context).filter(
+    (a) => a.outcome !== "bypass" && a.outcome !== "explained",
+  );
   const total = attempts.length;
   const passed = attempts.filter((a) => a.passed).length;
   const passRate = total === 0 ? 0 : passed / total;
@@ -70,4 +73,38 @@ export function getStats(context: vscode.ExtensionContext): Stats {
     byConcept,
     mostMissed,
   };
+}
+
+export async function saveMisgradeReport(
+  context: vscode.ExtensionContext,
+  report: MisgradeReport,
+): Promise<{ sent: boolean; detail: string }> {
+  const prev = context.globalState.get<MisgradeReport[]>(MISGRADE_KEY, []);
+  const next = [...(Array.isArray(prev) ? prev : []), report].slice(-200);
+  await context.globalState.update(MISGRADE_KEY, next);
+
+  const url = vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<string>("misgradeReportUrl", "")
+    .trim();
+  if (!url) {
+    return {
+      sent: false,
+      detail: "Saved on this computer. Set comprehensionGuard.misgradeReportUrl to send reports to the team.",
+    };
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(report),
+    });
+    if (!response.ok) {
+      return { sent: false, detail: "Saved locally. The report URL returned " + response.status + "." };
+    }
+    return { sent: true, detail: "Misgrade report sent." };
+  } catch {
+    return { sent: false, detail: "Saved locally. The report URL could not be reached." };
+  }
 }

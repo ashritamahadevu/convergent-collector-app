@@ -33,6 +33,7 @@ export function lockDocument(document: vscode.TextDocument): () => void {
       }
     } finally {
       restoring = false;
+      state.suppressEditGuard = false;
     }
   });
 

@@ -17,7 +17,13 @@ export const state = {
   suppressEditGuard: false,
   bypassArmed: false,
   processing: false,
+  /** True while a quiz must be answered, bypassed, or closed. */
+  quizActive: false,
+  /** Set when Bypass is used during an open quiz. Keeps the code. */
+  bypassDuringQuiz: false,
 };
+
+const bypassListeners = new Set<() => void>();
 
 /** Fires whenever `bypassArmed` changes so UI (status bar) can refresh. */
 export const onStateChanged = new vscode.EventEmitter<void>();
@@ -28,6 +34,42 @@ export function setBypassArmed(value: boolean): void {
     state.bypassArmed = value;
     onStateChanged.fire();
   }
+}
+
+export function setQuizActive(value: boolean): void {
+  if (state.quizActive !== value) {
+    state.quizActive = value;
+    if (!value) {
+      state.bypassDuringQuiz = false;
+    }
+    onStateChanged.fire();
+  }
+}
+
+/** Ends the open quiz and keeps the inserted code. Returns false if no quiz is open. */
+export function requestQuizBypass(): boolean {
+  if (!state.quizActive) {
+    return false;
+  }
+  state.bypassDuringQuiz = true;
+  for (const listener of bypassListeners) {
+    listener();
+  }
+  onStateChanged.fire();
+  return true;
+}
+
+export function subscribeQuizBypass(listener: () => void): () => void {
+  bypassListeners.add(listener);
+  return () => {
+    bypassListeners.delete(listener);
+  };
+}
+
+export function takeQuizBypass(): boolean {
+  const requested = state.bypassDuringQuiz;
+  state.bypassDuringQuiz = false;
+  return requested;
 }
 
 /** Range occupied by `text` after it is inserted at `start`. */

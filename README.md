@@ -4,12 +4,12 @@ A VS Code extension that makes sure you actually understand code before it lands
 
 ## What it does today
 
-- Intercepts `Ctrl+V` / `Cmd+V` and, if the clipboard content is large enough, runs a comprehension check before pasting.
-- Detects large inline insertions (AI completions, apply-from-chat, snippet expansion) via document change events. The code stays visible during the check and is removed if you do not pass.
+- Intercepts `Ctrl+V` / `Cmd+V` and, if the clipboard content is large enough, runs a comprehension check before pasting. Nothing is written into the file until you pass or press Bypass.
+- Detects large inline insertions (AI completions, apply-from-chat, snippet expansion) via document change events. The insertion is taken back out immediately and written again only if you pass or press Bypass.
 - Detects file edits from AI coding agents (Claude Code, Codex, and the Cursor agent) after you install their hooks, and runs the same check. A large change that lands on an open file from outside the focused editor can raise the check even without hooks.
 - **AI-powered comprehension checks:** when an API key is configured, the extension generates a context-specific question for the snippet and opens a webview quiz. In **free-text** mode your answer is graded by an LLM-as-judge against atomic criteria; in **multiple-choice** mode you pick an option and grading is deterministic. Without an API key, it falls back to the simple modal prompt ("What does this code do?") with a minimum explanation length.
 - **Local learning stats:** attempts (including concept tags and pass/fail) are stored in the extension's global state.
-- Deadline escape hatch: a one-shot "Bypass Next Insertion" command.
+- **Bypass** button on the quiz, plus a one-shot "Bypass Next Insertion" command. Either one inserts the code without answering.
 - Status bar indicator showing On / Off / Bypass armed (click to toggle).
 
 ## Setup: API key
@@ -120,7 +120,7 @@ The command copies `hook/notify.js` to `~/.comprehension-guard/notify.js` and me
 
 The notifier needs Node.js on your PATH (Node 20+, the same requirement as building this extension). It always exits successfully and prints nothing, so the agent is not blocked and is not asked to judge the quiz. Re-run the install command after you upgrade the extension or switch Node installs (for example nvm).
 
-What you should see: ask the agent to edit a source file with a change of at least `comprehensionGuard.charThreshold` characters (200 by default). The quiz code box shows the code the agent wrote, not the prompt you typed. That code is held out of the file until you answer correctly. A correct answer inserts it. Fail or cancel leaves the file without it. A file the agent created stays out of the project until you pass.
+What you should see: ask the agent to edit a source file with a change of at least `comprehensionGuard.charThreshold` characters (200 by default). The quiz code box shows the code the agent wrote, not the prompt you typed. That code stays out of the file until you answer correctly or press **Bypass**. Fail or cancel leaves the file without it. A file the agent created stays out of the project until you pass or bypass.
 
 If the editor was not running, the event waits in `~/.comprehension-guard/inbox` for about three minutes and is picked up when the extension activates.
 

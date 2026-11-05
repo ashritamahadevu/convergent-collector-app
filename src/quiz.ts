@@ -96,6 +96,15 @@ export async function runComprehensionGate(
       return false;
     }
 
+    if (payload === "bypass") {
+      view.close();
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: bypassed. The code will be inserted.",
+        4000,
+      );
+      return true;
+    }
+
     if (question.kind === "multiple-choice") {
       const selectedIndex = payload.selectedIndex;
       if (selectedIndex === undefined) {
@@ -208,6 +217,15 @@ async function fallbackGate(snippet: string, language?: string): Promise<boolean
         4000,
       );
       return false;
+    }
+
+    if (payload === "bypass") {
+      view.close();
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: bypassed. The code will be inserted.",
+        4000,
+      );
+      return true;
     }
 
     const answer = (payload.answer ?? "").trim();

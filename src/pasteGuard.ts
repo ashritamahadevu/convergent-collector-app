@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { noteAccepted } from "./editorBaseline";
 import {
   getCharThreshold,
-  insertedRange,
   isEnabled,
   setBypassArmed,
   state,
@@ -19,7 +18,8 @@ const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
  *  1. Read the clipboard text.
  *  2. If the guard is disabled, a bypass is armed, or the text is below the
  *     character threshold, run the real paste (consuming any armed bypass).
- *  3. Otherwise run the comprehension gate first; only paste on a pass.
+ *  3. Otherwise run the comprehension gate first. The clipboard stays out of
+ *     the file until the check is passed or bypassed.
  *
  * All real paste operations are wrapped so the edit guard ignores them.
  */
@@ -56,19 +56,22 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Show the code in the editor during the quiz. Remove it if they do not pass.
+      // Keep the clipboard out of the file until the check passes.
       state.suppressEditGuard = true;
       state.processing = true;
-      let placed: vscode.Range | undefined;
       try {
-        placed = await insertPreview(editor, selection, clipboardText);
         const passed = await runComprehensionGate(
           clipboardText,
           context,
           editor.document.languageId,
         );
-        if (!passed && placed) {
-          await removeIfUnchanged(editor, placed, clipboardText);
+        if (passed) {
+          const applied = await insertSnippet(editor, selection, clipboardText);
+          if (!applied) {
+            vscode.window.showWarningMessage(
+              "Comprehension Guard: the answer was accepted, but the paste could not be inserted.",
+            );
+          }
         }
       } finally {
         if (editor.document.uri.scheme === "file") {
@@ -87,40 +90,19 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
   context.subscriptions.push(disposable);
 }
 
-/** Puts the snippet in the editor so it can be read during the quiz. */
-async function insertPreview(
+/** Inserts clipboard text after the comprehension check has passed. */
+async function insertSnippet(
   editor: vscode.TextEditor,
   selection: vscode.Selection,
   text: string,
-): Promise<vscode.Range | undefined> {
+): Promise<boolean> {
   await vscode.window.showTextDocument(editor.document, {
     viewColumn: editor.viewColumn,
     preserveFocus: false,
     selection,
   });
-  const applied = await editor.edit((builder) => {
+  return editor.edit((builder) => {
     builder.replace(selection, text);
-  });
-  if (!applied) {
-    vscode.window.showWarningMessage(
-      "Comprehension Guard: could not show the code in the editor.",
-    );
-    return undefined;
-  }
-  return insertedRange(selection.start, text);
-}
-
-/** Deletes a preview insertion that is still exactly the original snippet. */
-async function removeIfUnchanged(
-  editor: vscode.TextEditor,
-  range: vscode.Range,
-  text: string,
-): Promise<void> {
-  if (editor.document.getText(range) !== text) {
-    return;
-  }
-  await editor.edit((builder) => {
-    builder.delete(range);
   });
 }
 

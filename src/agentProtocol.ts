@@ -221,6 +221,39 @@ export function hookCommand(nodePath: string, scriptPath: string): string {
   return `${quoteArg(nodePath)} ${quoteArg(scriptPath)}`;
 }
 
+/** Puts generated hunks back into a file that does not yet contain them. */
+export function applyHunks(text: string, hunks: AgentHunk[]): string {
+  let next = text;
+  for (const hunk of hunks) {
+    if (!hunk.newText || hunk.newText === hunk.oldText) {
+      continue;
+    }
+    if (looksLikeAgentInvocation(hunk.newText)) {
+      continue;
+    }
+    if (hunk.replaceAll && hunk.oldText) {
+      next = next.split(hunk.oldText).join(hunk.newText);
+      continue;
+    }
+    if (hunk.oldText) {
+      const at = next.indexOf(hunk.oldText);
+      if (at >= 0) {
+        next =
+          next.slice(0, at) +
+          hunk.newText +
+          next.slice(at + hunk.oldText.length);
+        continue;
+      }
+    }
+    if (!next.includes(hunk.newText)) {
+      next = next.length === 0 || next.endsWith("\n")
+        ? next + hunk.newText
+        : next + "\n" + hunk.newText;
+    }
+  }
+  return next;
+}
+
 export function revertHunks(text: string, hunks: AgentHunk[]): string {
   let next = text;
   for (const hunk of hunks) {
@@ -313,12 +346,7 @@ export function prepareHeldEdit(
   const prompt = edit.userPrompt?.trim() ?? "";
   const landed = fileText ?? edit.restore?.next ?? edit.next;
   let previous = edit.restore?.previous;
-  if (
-    previous === undefined &&
-    baseline !== undefined &&
-    landed !== undefined &&
-    !equivalentText(baseline, landed)
-  ) {
+  if (previous === undefined && baseline !== undefined) {
     previous = baseline;
   }
   if (previous === undefined && landed !== undefined && edit.hunks.length > 0) {
@@ -353,11 +381,20 @@ export function prepareHeldEdit(
   }
 
   if (previous !== undefined && landed !== undefined) {
+    let next = landed;
+    if (hunkCode && !landed.includes(hunkCode)) {
+      next = applyHunks(previous, edit.hunks);
+    } else if (snippet && !looksLikeAgentInvocation(snippet) && !landed.includes(snippet)) {
+      next = applyHunks(previous, [
+        ...edit.hunks,
+        { oldText: "", newText: snippet },
+      ]);
+    }
     return {
       ...edit,
       snippet,
-      restore: { previous, next: landed },
-      next: landed,
+      restore: { previous, next },
+      next,
     };
   }
   return { ...edit, snippet };

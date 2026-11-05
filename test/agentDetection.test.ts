@@ -12,6 +12,7 @@ import {
   isFreshEvent,
   parseApplyPatch,
   planHookInstall,
+  prepareHeldEdit,
   quizSnippet,
   revertHunks,
   shouldQuizDiskBurst,
@@ -114,6 +115,34 @@ test("a brand-new claude write is marked created and a tiny edit is below thresh
     },
   });
   assert.ok(tiny[0].snippet.length < THRESHOLD);
+});
+
+test("cursor cli quiz shows generated code, not the prompt, and can be inserted later", () => {
+  const prompt = "Add a function named buildReceipt that explains the sale in detail";
+  const generated = [
+    "export function buildReceipt(price: number, quantity: number) {",
+    "  const subtotal = price * quantity;",
+    "  const tax = subtotal * 0.08;",
+    "  const total = subtotal + tax;",
+    "  return ['Subtotal ' + subtotal, 'Tax ' + tax, 'Total ' + total].join('\\n');",
+    "}",
+    "",
+  ].join("\n").padEnd(240, " ");
+  const before = "export const ready = true;\n";
+  const after = before + generated;
+  const [edit] = editsFromHookEnvelope({
+    hook_event_name: "afterFileEdit",
+    prompt,
+    file_path: "/work/app/quiz-target.ts",
+    edits: [{ old_string: prompt, new_string: prompt }],
+  });
+  assert.equal(edit.userPrompt, prompt);
+  const held = prepareHeldEdit(edit, after, before);
+  assert.ok(held.snippet.includes("buildReceipt"));
+  assert.equal(held.snippet.includes(prompt), false);
+  assert.ok(held.snippet.length >= THRESHOLD);
+  assert.equal(held.restore?.previous, before);
+  assert.equal(held.restore?.next, after);
 });
 
 test("cursor afterFileEdit and codex apply_patch both normalize", () => {

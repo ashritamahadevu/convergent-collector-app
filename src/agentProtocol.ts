@@ -36,15 +36,20 @@ export type AgentEdit = {
   /** claude-code, codex, cursor, disk, or unknown. */
   agent: string;
   filePath: string;
-  /** Code the student has to explain. */
+  /** Generated code the student has to explain. Not the user's prompt. */
   snippet: string;
   hunks: AgentHunk[];
-  /** Fail the quiz by putting the whole previous file back. */
+  /**
+   * `previous` is the file with the generated code removed.
+   * `next` is the file after that code is inserted.
+   */
   restore?: { previous: string; next: string };
-  /** Move a file this edit created to the trash when the quiz is failed. */
+  /** The agent created this file. It stays deleted until the quiz is passed. */
   created?: boolean;
   /** Full file contents after the edit, when known. */
   next?: string;
+  /** The text the user typed to the agent, when the hook included it. */
+  userPrompt?: string;
 };
 
 export type ConfigInput =
@@ -285,7 +290,74 @@ export function editsFromHookEnvelope(
     }
     return opts?.readSnapshot?.(absPath);
   };
-  return normalizePayload(payload, readSnapshot, opts?.readFile);
+  const edits = normalizePayload(payload, readSnapshot, opts?.readFile);
+  const userPrompt = extractUserPrompt(payload);
+  if (!userPrompt) {
+    return edits;
+  }
+  return edits.map((edit) => ({ ...edit, userPrompt }));
+}
+
+/**
+ * Choose the generated code to review, and remember the file with that code
+ * removed (`restore.previous`) and with it applied (`restore.next`).
+ *
+ * Cursor's hook sometimes echoes the user's prompt in `new_string`. When that
+ * happens, the snippet comes from the lines that actually landed in the file.
+ */
+export function prepareHeldEdit(
+  edit: AgentEdit,
+  fileText: string | undefined,
+  baseline: string | undefined,
+): AgentEdit {
+  const prompt = edit.userPrompt?.trim() ?? "";
+  const landed = fileText ?? edit.restore?.next ?? edit.next;
+  let previous = edit.restore?.previous;
+  if (
+    previous === undefined &&
+    baseline !== undefined &&
+    landed !== undefined &&
+    !equivalentText(baseline, landed)
+  ) {
+    previous = baseline;
+  }
+  if (previous === undefined && landed !== undefined && edit.hunks.length > 0) {
+    const reverted = revertHunks(landed, edit.hunks);
+    if (reverted !== landed) {
+      previous = reverted;
+    }
+  }
+
+  let snippet = stripPrompt(edit.snippet, prompt);
+  const hunkCode = stripPrompt(
+    edit.hunks
+      .map((hunk) => hunk.newText)
+      .filter((text) => text.length > 0 && !isSameText(text, prompt))
+      .join("\n"),
+    prompt,
+  );
+  if (
+    previous !== undefined &&
+    landed !== undefined &&
+    !equivalentText(previous, landed)
+  ) {
+    const added = stripPrompt(diffAddedText(previous, landed), prompt);
+    if (hunkCode && landed.includes(hunkCode) && !isSameText(hunkCode, prompt)) {
+      snippet = hunkCode;
+    } else if (added.trim()) {
+      snippet = added;
+    }
+  }
+
+  if (previous !== undefined && landed !== undefined) {
+    return {
+      ...edit,
+      snippet,
+      restore: { previous, next: landed },
+      next: landed,
+    };
+  }
+  return { ...edit, snippet };
 }
 
 export function planHookInstall(opts: {
@@ -900,6 +972,39 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
+}
+
+function extractUserPrompt(payload: Record<string, unknown>): string {
+  const input = asRecord(parseMaybe(payload.tool_input ?? payload.toolInput));
+  const candidates = [
+    stringField(payload, "prompt"),
+    stringField(payload, "user_prompt"),
+    stringField(payload, "userPrompt"),
+    stringField(input, "prompt"),
+    stringField(input, "user_prompt"),
+    stringField(input, "instruction"),
+  ];
+  for (const candidate of candidates) {
+    if (candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function isSameText(a: string, b: string): boolean {
+  if (!b) {
+    return false;
+  }
+  return equivalentText(a.trim(), b.trim());
+}
+
+function stripPrompt(text: string, prompt: string): string {
+  if (!prompt || prompt.length < 12 || !text) {
+    return text;
+  }
+  const stripped = text.split(prompt).join("").trim();
+  return stripped;
 }
 
 function stringField(record: Record<string, unknown> | undefined, key: string): string {

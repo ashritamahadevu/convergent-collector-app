@@ -18,6 +18,7 @@ import {
   normPath,
   parseConfigText,
   planHookInstall,
+  prepareHeldEdit,
   quizSnippet,
   resolveGuardHome,
   revertHunks,
@@ -299,10 +300,13 @@ async function runAgentQuiz(
   context: vscode.ExtensionContext,
   edit: AgentEdit,
 ): Promise<void> {
-  if (!isEnabled() || edit.snippet.length < getCharThreshold()) {
+  const fileText = await readText(edit.filePath);
+  const prepared = prepareHeldEdit(edit, fileText, acceptedText(edit.filePath));
+  const snippet = quizSnippet(prepared.snippet);
+  if (!isEnabled() || snippet.length < getCharThreshold()) {
     return;
   }
-  if (isCoveredByEditorGate(edit.filePath, edit.snippet)) {
+  if (isCoveredByEditorGate(edit.filePath, snippet)) {
     return;
   }
   if (state.bypassArmed) {
@@ -312,46 +316,85 @@ async function runAgentQuiz(
   }
 
   holdPath(edit.filePath);
-  markEditorGate(edit.filePath, edit.snippet);
+  markEditorGate(edit.filePath, snippet);
   state.suppressEditGuard = true;
   state.processing = true;
+  let withheld = false;
   try {
     void vscode.window.setStatusBarMessage(
       "Comprehension Guard: checking code from " + agentLabel(edit.agent) + ".",
       4000,
     );
+    // Take the generated code back out of the file until the answer is correct.
+    withheld = await revertEdit(prepared);
     let language: string | undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
       language = doc.languageId;
-      const editor = await vscode.window.showTextDocument(doc, {
+      await vscode.window.showTextDocument(doc, {
         preview: false,
         preserveFocus: false,
       });
-      revealSnippet(editor, edit.snippet);
     } catch {
       language = undefined;
     }
-    const passed = await runComprehensionGate(edit.snippet, context, language);
+    const passed = await runComprehensionGate(snippet, context, language);
     if (passed) {
-      await rememberFile(edit.filePath);
-    } else {
-      const reverted = await revertEdit(edit);
+      const inserted = await applyHeldEdit(prepared);
+      if (!inserted) {
+        void vscode.window.showWarningMessage(
+          "Comprehension Guard: the answer was accepted, but the generated code could not be written back into the file.",
+        );
+      }
+    } else if (!withheld) {
+      const reverted = await revertEdit(prepared);
       if (!reverted) {
         await rememberFile(edit.filePath);
         void vscode.window.showWarningMessage(
           "Comprehension Guard: the check did not pass, but the file had already changed again so it was left as-is.",
         );
       }
+    } else if (prepared.restore) {
+      noteAccepted(edit.filePath, prepared.restore.previous);
     }
   } catch {
-    await rememberFile(edit.filePath);
+    if (withheld) {
+      await applyHeldEdit(prepared);
+    } else {
+      await rememberFile(edit.filePath);
+    }
   } finally {
     state.processing = false;
     await delay(150);
     state.suppressEditGuard = false;
     releasePath(edit.filePath);
   }
+}
+
+/** Writes the generated code into the file after a correct answer. */
+async function applyHeldEdit(edit: AgentEdit): Promise<boolean> {
+  const next = edit.restore?.next ?? edit.next;
+  const previous = edit.restore?.previous;
+  if (next === undefined) {
+    return false;
+  }
+  if (edit.created || previous === "") {
+    await fs.promises.mkdir(path.dirname(edit.filePath), { recursive: true });
+    await fs.promises.writeFile(edit.filePath, next, "utf8");
+    const open = findOpen(edit.filePath);
+    if (open) {
+      await replaceDocument(open, next);
+      if (open.isDirty) {
+        await open.save();
+      }
+    }
+    noteAccepted(edit.filePath, next);
+    return true;
+  }
+  if (previous === undefined) {
+    return false;
+  }
+  return writeBack(edit.filePath, next, previous);
 }
 
 async function revertEdit(edit: AgentEdit): Promise<boolean> {
@@ -429,20 +472,6 @@ async function replaceDocument(doc: vscode.TextDocument, text: string): Promise<
   const edit = new vscode.WorkspaceEdit();
   edit.replace(doc.uri, full, text);
   return vscode.workspace.applyEdit(edit);
-}
-
-function revealSnippet(editor: vscode.TextEditor, snippet: string): void {
-  const needle = snippet.length > 4000 ? snippet.slice(0, 4000) : snippet;
-  const text = editor.document.getText();
-  const at = text.indexOf(needle);
-  if (at < 0) {
-    return;
-  }
-  const start = editor.document.positionAt(at);
-  const end = editor.document.positionAt(at + needle.length);
-  const range = new vscode.Range(start, end);
-  editor.selection = new vscode.Selection(start, end);
-  editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
 }
 
 async function installAgentHooks(

@@ -117,8 +117,9 @@
     "compile": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
+    "install:cursor": "npm run package && node scripts/install-cursor.mjs",
     "eval:judge": "npx -y tsx eval/run.ts",
-    "test:agent": "npx -y tsx --test test/agentDetection.test.ts"
+    "test:agent": "npx -y tsx --test test/agentDetection.test.ts && node --test scripts/cursor-ide.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

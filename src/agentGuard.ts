@@ -344,6 +344,8 @@ async function runAgentQuiz(
       "Comprehension Guard: checking code from " + agentLabel(edit.agent) + ".",
       4000,
     );
+    // Keep the generated code out of the file while the quiz is open.
+    const withheld = await revertEdit(prepared);
     let language: string | undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
@@ -359,8 +361,13 @@ async function runAgentQuiz(
     const passed = await runComprehensionGate(snippet, context, language);
     unlock();
     if (passed) {
-      await rememberFile(edit.filePath);
-    } else {
+      const inserted = await applyHeldEdit(prepared);
+      if (!inserted) {
+        void vscode.window.showWarningMessage(
+          "Comprehension Guard: the check was passed, but the generated code could not be written into the file.",
+        );
+      }
+    } else if (!withheld) {
       const reverted = await revertEdit(prepared);
       if (!reverted) {
         await rememberFile(edit.filePath);
@@ -368,16 +375,49 @@ async function runAgentQuiz(
           "Comprehension Guard: the check did not pass, but the file had already changed again so it was left as-is.",
         );
       }
+    } else if (prepared.restore) {
+      noteAccepted(edit.filePath, prepared.restore.previous);
     }
   } catch {
     unlock();
-    await rememberFile(edit.filePath);
+    await applyHeldEdit(prepared);
   } finally {
     state.processing = false;
     await delay(150);
     state.suppressEditGuard = false;
     releasePath(edit.filePath);
   }
+}
+
+/** Writes the generated code into the file after a pass or Bypass. */
+async function applyHeldEdit(edit: AgentEdit): Promise<boolean> {
+  const next = edit.restore?.next ?? edit.next;
+  const previous = edit.restore?.previous;
+  if (next === undefined) {
+    return false;
+  }
+  const open = findOpen(edit.filePath);
+  const current = open ? open.getText() : await readText(edit.filePath);
+  if (current !== undefined && equivalentText(current, next)) {
+    noteAccepted(edit.filePath, next);
+    return true;
+  }
+  if (edit.created || previous === "") {
+    await fs.promises.mkdir(path.dirname(edit.filePath), { recursive: true });
+    await fs.promises.writeFile(edit.filePath, next, "utf8");
+    if (open) {
+      await replaceDocument(open, next);
+      if (open.isDirty) {
+        await open.save();
+      }
+    }
+    noteAccepted(edit.filePath, next);
+    return true;
+  }
+  if (previous === undefined) {
+    return false;
+  }
+  return writeBack(edit.filePath, next, previous);
 }
 
 async function revertEdit(edit: AgentEdit): Promise<boolean> {

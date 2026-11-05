@@ -120,7 +120,7 @@ The command copies `hook/notify.js` to `~/.comprehension-guard/notify.js` and me
 
 The notifier needs Node.js on your PATH (Node 20+, the same requirement as building this extension). It always exits successfully and prints nothing, so the agent is not blocked and is not asked to judge the quiz. Re-run the install command after you upgrade the extension or switch Node installs (for example nvm).
 
-What you should see: ask the agent to edit a source file with a change of at least `comprehensionGuard.charThreshold` characters (200 by default). The generated code lands in the file and the file locks, the same way a large paste does. You cannot edit or switch files until you answer, press **Bypass**, or close the quiz. A pass or Bypass keeps the code. Closing or failing deletes it.
+What you should see: ask the agent to edit a source file with a change of at least `comprehensionGuard.charThreshold` characters (200 by default). The generated code stays in the quiz, not in the file, and the file stays locked. A correct answer or **Bypass** writes that code into the file. Closing or failing leaves the file without it.
 
 If the editor was not running, the event waits in `~/.comprehension-guard/inbox` for about three minutes and is picked up when the extension activates.
 

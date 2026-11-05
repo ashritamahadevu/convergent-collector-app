@@ -181,6 +181,28 @@ test("a cursor cli command is not quizzed or written back as code", () => {
   assert.equal(onlyCommand.snippet, "");
 });
 
+test("bypass can insert generated cli code that is not in the file yet", () => {
+  const before = "export const ready = true;\n";
+  const generated = [
+    "export function buildReceipt(price: number, quantity: number) {",
+    "  const subtotal = price * quantity;",
+    "  const tax = subtotal * 0.08;",
+    "  return subtotal + tax;",
+    "}",
+    "",
+  ].join("\n").padEnd(240, " ");
+  const [edit] = editsFromHookEnvelope({
+    hook_event_name: "afterFileEdit",
+    file_path: "/work/app/quiz-target.ts",
+    edits: [{ old_string: before, new_string: generated }],
+  });
+  const held = prepareHeldEdit(edit, before, before);
+  assert.ok(held.snippet.includes("function buildReceipt"));
+  assert.equal(held.restore?.previous, before);
+  assert.ok(held.restore?.next.includes("function buildReceipt"));
+  assert.equal(held.restore?.next.includes("export const ready"), false);
+});
+
 test("cursor afterFileEdit and codex apply_patch both normalize", () => {
   const replacement = "const port = 4312;\n".padEnd(240, " ");
   const cursor = editsFromHookEnvelope({

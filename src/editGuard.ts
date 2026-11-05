@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { looksLikeAgentInvocation } from "./agentProtocol";
 import { noteAccepted } from "./editorBaseline";
 import { isAgentClaimed, markEditorGate } from "./gateLock";
 import { getCharThreshold, insertedRange, isEnabled, setBypassArmed, state } from "./state";
@@ -59,6 +60,19 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
     const snippet = bigChange.text;
     const start = bigChange.range.start;
     const placed = insertedRange(start, snippet);
+
+    // The Cursor CLI can echo the command you typed into the file. That is
+    // not generated code, so drop it and wait for the real edit.
+    if (looksLikeAgentInvocation(snippet)) {
+      if (editor.document.getText(placed) === snippet) {
+        state.suppressEditGuard = true;
+        await editor.edit((builder) => {
+          builder.delete(placed);
+        });
+        state.suppressEditGuard = false;
+      }
+      return;
+    }
 
     markEditorGate(editor.document.uri.fsPath, snippet);
     state.suppressEditGuard = true;

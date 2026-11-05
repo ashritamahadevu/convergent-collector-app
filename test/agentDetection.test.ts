@@ -9,6 +9,8 @@ import {
   diffAddedText,
   editsFromHookEnvelope,
   equivalentText,
+  generatedCode,
+  looksLikeAgentInvocation,
   isFreshEvent,
   parseApplyPatch,
   planHookInstall,
@@ -143,6 +145,40 @@ test("cursor cli quiz shows generated code, not the prompt, and can be inserted 
   assert.ok(held.snippet.length >= THRESHOLD);
   assert.equal(held.restore?.previous, before);
   assert.equal(held.restore?.next, after);
+});
+
+test("a cursor cli command is not quizzed or written back as code", () => {
+  const command = 'agent -p --force "Edit quiz-target.ts only. Add a function named buildReceipt that is longer than 200 characters."';
+  const before = "export const ready = true;\n";
+  const generated = [
+    "export function buildReceipt(price: number, quantity: number) {",
+    "  const subtotal = price * quantity;",
+    "  const tax = subtotal * 0.08;",
+    "  return subtotal + tax;",
+    "}",
+    "",
+  ].join("\n").padEnd(240, " ");
+  const after = before + generated;
+  assert.equal(looksLikeAgentInvocation(command), true);
+  assert.equal(generatedCode(command), "");
+
+  const [edit] = editsFromHookEnvelope({
+    hook_event_name: "afterFileEdit",
+    file_path: "/work/app/quiz-target.ts",
+    edits: [{ old_string: before, new_string: command }],
+  });
+  const held = prepareHeldEdit(edit, after, before);
+  assert.ok(held.snippet.includes("function buildReceipt"));
+  assert.equal(held.snippet.includes("agent -p"), false);
+  assert.equal(held.restore?.next, after);
+  assert.equal(held.restore?.previous, before);
+
+  const onlyCommand = prepareHeldEdit(
+    { ...edit, snippet: command, hunks: [{ oldText: before, newText: command }] },
+    before + command,
+    before,
+  );
+  assert.equal(onlyCommand.snippet, "");
 });
 
 test("cursor afterFileEdit and codex apply_patch both normalize", () => {

@@ -15,6 +15,7 @@ import {
   isFreshEvent,
   isIgnoredCodePath,
   looksBinary,
+  looksLikeAgentInvocation,
   normPath,
   parseConfigText,
   planHookInstall,
@@ -302,6 +303,16 @@ async function runAgentQuiz(
 ): Promise<void> {
   const fileText = await readText(edit.filePath);
   const prepared = prepareHeldEdit(edit, fileText, acceptedText(edit.filePath));
+  const added = prepared.restore
+    ? diffAddedText(prepared.restore.previous, prepared.restore.next)
+    : "";
+  if (looksLikeAgentInvocation(prepared.snippet) || looksLikeAgentInvocation(added)) {
+    // The terminal command landed in the file. Remove it and wait for generated code.
+    if (prepared.restore && looksLikeAgentInvocation(added)) {
+      await revertEdit(prepared);
+    }
+    return;
+  }
   const snippet = quizSnippet(prepared.snippet);
   if (!isEnabled() || snippet.length < getCharThreshold()) {
     return;

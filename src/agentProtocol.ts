@@ -328,25 +328,28 @@ export function prepareHeldEdit(
     }
   }
 
-  let snippet = stripPrompt(edit.snippet, prompt);
-  const hunkCode = stripPrompt(
+  let snippet = generatedCode(stripPrompt(edit.snippet, prompt));
+  const hunkCode = generatedCode(
     edit.hunks
       .map((hunk) => hunk.newText)
-      .filter((text) => text.length > 0 && !isSameText(text, prompt))
+      .filter((text) => text.length > 0 && !isSameText(text, prompt) && !looksLikeAgentInvocation(text))
       .join("\n"),
-    prompt,
   );
   if (
     previous !== undefined &&
     landed !== undefined &&
     !equivalentText(previous, landed)
   ) {
-    const added = stripPrompt(diffAddedText(previous, landed), prompt);
-    if (hunkCode && landed.includes(hunkCode) && !isSameText(hunkCode, prompt)) {
+    const added = generatedCode(stripPrompt(diffAddedText(previous, landed), prompt));
+    if (hunkCode && landed.includes(hunkCode)) {
       snippet = hunkCode;
     } else if (added.trim()) {
       snippet = added;
+    } else if (looksLikeAgentInvocation(edit.snippet)) {
+      snippet = "";
     }
+  } else if (looksLikeAgentInvocation(snippet)) {
+    snippet = "";
   }
 
   if (previous !== undefined && landed !== undefined) {
@@ -990,6 +993,33 @@ function extractUserPrompt(payload: Record<string, unknown>): string {
     }
   }
   return "";
+}
+
+/** A terminal line that launched the agent, not source the agent wrote. */
+export function looksLikeAgentInvocation(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0 || lines.length > 3) {
+    return false;
+  }
+  const invocation = /^(?:\$\s*)?(?:agent|cursor-agent|cursor|claude|codex)\b/;
+  return lines.every((line) => invocation.test(line));
+}
+
+/** Drops a leading agent command so the quiz shows generated source. */
+export function generatedCode(text: string): string {
+  if (!text) {
+    return "";
+  }
+  if (looksLikeAgentInvocation(text)) {
+    return "";
+  }
+  const kept = text
+    .split(/\r?\n/)
+    .filter((line) => !looksLikeAgentInvocation(line));
+  return kept.join("\n").trim();
 }
 
 function isSameText(a: string, b: string): boolean {

@@ -10,7 +10,7 @@ export type QuizView = {
     missed?: { text: string; evidence?: string }[];
     correctOption?: string;
   }): void;
-  waitForSubmit(): Promise<SubmitPayload | "cancel">;
+  waitForSubmit(): Promise<SubmitPayload | "cancel" | "bypass">;
   close(): void;
 };
 
@@ -159,6 +159,23 @@ function getWebviewHtml(
     button.submit:hover {
       background: var(--vscode-button-hoverBackground);
     }
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    button.bypass {
+      padding: 6px 16px;
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-button-secondaryForeground);
+      background: var(--vscode-button-secondaryBackground);
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    button.bypass:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -178,7 +195,10 @@ function getWebviewHtml(
     <p id="correct-option" class="correct-option hidden"></p>
   </div>
   <div id="answer-area" class="answer-area"></div>
-  <button type="button" class="submit" id="submit-btn">Submit</button>
+  <div class="actions">
+    <button type="button" class="submit" id="submit-btn">Submit</button>
+    <button type="button" class="bypass" id="bypass-btn">Bypass</button>
+  </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const questionEl = document.getElementById("question");
@@ -287,6 +307,9 @@ function getWebviewHtml(
     }
 
     submitBtn.addEventListener("click", collectSubmit);
+    document.getElementById("bypass-btn").addEventListener("click", function () {
+      vscode.postMessage({ type: "bypass" });
+    });
 
     vscode.postMessage({ type: "ready" });
 
@@ -318,7 +341,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
   let disposed = false;
   let ready = false;
   const queued: unknown[] = [];
-  let pendingResolve: ((value: SubmitPayload | "cancel") => void) | null = null;
+  let pendingResolve: ((value: SubmitPayload | "cancel" | "bypass") => void) | null = null;
 
   const post = (message: unknown): void => {
     if (disposed) {
@@ -331,7 +354,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
     void panel.webview.postMessage(message);
   };
 
-  const resolvePending = (value: SubmitPayload | "cancel"): void => {
+  const resolvePending = (value: SubmitPayload | "cancel" | "bypass"): void => {
     if (pendingResolve) {
       const resolve = pendingResolve;
       pendingResolve = null;
@@ -349,6 +372,10 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       for (const queuedMessage of queued.splice(0)) {
         void panel.webview.postMessage(queuedMessage);
       }
+      return;
+    }
+    if (msg.type === "bypass") {
+      resolvePending("bypass");
       return;
     }
     if (msg.type !== "submit") {
@@ -400,7 +427,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       });
     },
 
-    waitForSubmit(): Promise<SubmitPayload | "cancel"> {
+    waitForSubmit(): Promise<SubmitPayload | "cancel" | "bypass"> {
       if (disposed) {
         return Promise.resolve("cancel");
       }

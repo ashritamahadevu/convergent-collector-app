@@ -80,10 +80,17 @@ To use it day-to-day (outside the debug host), package it into a `.vsix` and ins
 npm run package
 ```
 
-This produces `comprehension-guard-0.0.1.vsix` in the project root. Install it with either method:
+This produces `comprehension-guard-0.0.1.vsix` in the project root.
 
-- CLI: `code --install-extension comprehension-guard-0.0.1.vsix` (use `cursor --install-extension ...` for Cursor).
-- UI: open the Extensions panel, click the `...` menu at the top, choose **Install from VSIX...**, and select the file.
+On a Mac, `cursor` in the terminal is usually the agent CLI (`cursor agent`). That program cannot install extensions and reports "No Cursor IDE installation found" for `--install-extension`. Use the app instead:
+
+```bash
+npm run install:cursor
+```
+
+That builds the VSIX and installs it with the Cursor app binary (`/Applications/Cursor.app/.../bin/cursor`), including when Cursor lives in your home `Applications` folder. For VS Code, `code --install-extension comprehension-guard-0.0.1.vsix` still works.
+
+You can also install from the UI: Extensions panel, `...` menu, **Install from VSIX...**.
 
 Reload the window after installing. The status bar should show a shield icon with "Guard: On".
 
@@ -109,7 +116,7 @@ The command copies `hook/notify.js` to `~/.comprehension-guard/notify.js` and me
 | --- | --- | --- |
 | Claude Code | `~/.claude/settings.json` | `PreToolUse` snapshots the file, then `PostToolUse` on `Edit`, `Write`, `NotebookEdit`, and `MultiEdit` notifies the extension |
 | Codex | `~/.codex/hooks.json` | Same pair of hooks for `apply_patch` (also matched as Edit/Write). Open `/hooks` in Codex and trust the comprehension-guard hook |
-| Cursor agent | `~/.cursor/hooks.json` | `afterFileEdit`. Cursor reloads hook files on its own |
+| Cursor agent (`cursor agent` or `agent`) | `.cursor/hooks.json` in this repo, and `~/.cursor/hooks.json` from the install command | `afterFileEdit` runs `node hook/notify.js`. Trust the folder when Cursor asks. The Cursor app has to be open with this extension running so the quiz can appear |
 
 The notifier needs Node.js on your PATH (Node 20+, the same requirement as building this extension). It always exits successfully and prints nothing, so the agent is not blocked and is not asked to judge the quiz. Re-run the install command after you upgrade the extension or switch Node installs (for example nvm).
 

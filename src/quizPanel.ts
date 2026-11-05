@@ -334,9 +334,10 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
   const panel = vscode.window.createWebviewPanel(
     "comprehensionGuard.quiz",
     "Comprehension check",
-    vscode.ViewColumn.Beside,
+    { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
     { enableScripts: true, retainContextWhenHidden: true },
   );
+  panel.reveal(vscode.ViewColumn.Active, false);
 
   let disposed = false;
   let ready = false;

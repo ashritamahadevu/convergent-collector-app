@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import { state } from "./state";
 
 /**
- * Freezes one file while a comprehension check is open.
- * Edits are reverted and other files cannot stay focused.
+ * Freezes edits to one file while a comprehension check is open.
+ * Does not steal focus, so the quiz panel can stay in front.
  * Call the returned function before keeping or deleting the code.
  */
 export function lockDocument(document: vscode.TextDocument): () => void {
@@ -36,18 +36,7 @@ export function lockDocument(document: vscode.TextDocument): () => void {
     }
   });
 
-  const focus = vscode.window.onDidChangeActiveTextEditor(async (next) => {
-    if (!next || next.document === document) {
-      return;
-    }
-    await vscode.window.showTextDocument(document, {
-      preserveFocus: false,
-      preview: false,
-    });
-  });
-
   return () => {
     edits.dispose();
-    focus.dispose();
   };
 }

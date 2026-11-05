@@ -12,8 +12,8 @@ import { runComprehensionGate } from "./quiz";
  * listening for large single-shot insertions via
  * `workspace.onDidChangeTextDocument`.
  *
- * The inserted code stays visible during the quiz. It is removed only when
- * the student does not pass.
+ * The insertion is removed immediately. It is written back only when the
+ * student passes or bypasses the check.
  */
 export function registerEditGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
@@ -57,18 +57,34 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
     }
 
     const snippet = bigChange.text;
-    const placed = insertedRange(bigChange.range.start, snippet);
+    const start = bigChange.range.start;
+    const placed = insertedRange(start, snippet);
 
     markEditorGate(editor.document.uri.fsPath, snippet);
     state.suppressEditGuard = true;
     state.processing = true;
+    let removed = false;
     try {
+      if (editor.document.getText(placed) === snippet) {
+        removed = await editor.edit((builder) => {
+          builder.delete(placed);
+        });
+      }
       const passed = await runComprehensionGate(
         snippet,
         context,
         editor.document.languageId,
       );
-      if (!passed && editor.document.getText(placed) === snippet) {
+      if (passed && removed) {
+        const inserted = await editor.edit((builder) => {
+          builder.insert(start, snippet);
+        });
+        if (!inserted) {
+          vscode.window.showWarningMessage(
+            "Comprehension Guard: the answer was accepted, but the code could not be inserted.",
+          );
+        }
+      } else if (!passed && !removed && editor.document.getText(placed) === snippet) {
         await editor.edit((builder) => {
           builder.delete(placed);
         });

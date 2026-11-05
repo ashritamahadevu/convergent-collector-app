@@ -29,6 +29,7 @@ import {
   withBaseline,
   type ConfigInput,
 } from "./agentProtocol";
+import { lockDocument } from "./documentLock";
 import { acceptedText, noteAccepted } from "./editorBaseline";
 import {
   holdPath,
@@ -330,14 +331,21 @@ async function runAgentQuiz(
   markEditorGate(edit.filePath, snippet);
   state.suppressEditGuard = true;
   state.processing = true;
-  let withheld = false;
+  let release: (() => void) | undefined;
+  let released = false;
+  const unlock = (): void => {
+    if (!released) {
+      released = true;
+      release?.();
+    }
+  };
   try {
     void vscode.window.setStatusBarMessage(
       "Comprehension Guard: checking code from " + agentLabel(edit.agent) + ".",
       4000,
     );
-    // Take the generated code back out of the file until the answer is correct.
-    withheld = await revertEdit(prepared);
+    // Keep the generated code out of the file while the quiz is open.
+    const withheld = await revertEdit(prepared);
     let language: string | undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
@@ -346,15 +354,17 @@ async function runAgentQuiz(
         preview: false,
         preserveFocus: false,
       });
+      release = lockDocument(doc);
     } catch {
       language = undefined;
     }
     const passed = await runComprehensionGate(snippet, context, language);
+    unlock();
     if (passed) {
       const inserted = await applyHeldEdit(prepared);
       if (!inserted) {
         void vscode.window.showWarningMessage(
-          "Comprehension Guard: the answer was accepted, but the generated code could not be written back into the file.",
+          "Comprehension Guard: the check was passed, but the generated code could not be written into the file.",
         );
       }
     } else if (!withheld) {
@@ -369,11 +379,8 @@ async function runAgentQuiz(
       noteAccepted(edit.filePath, prepared.restore.previous);
     }
   } catch {
-    if (withheld) {
-      await applyHeldEdit(prepared);
-    } else {
-      await rememberFile(edit.filePath);
-    }
+    unlock();
+    await applyHeldEdit(prepared);
   } finally {
     state.processing = false;
     await delay(150);
@@ -382,17 +389,22 @@ async function runAgentQuiz(
   }
 }
 
-/** Writes the generated code into the file after a correct answer. */
+/** Writes the generated code into the file after a pass or Bypass. */
 async function applyHeldEdit(edit: AgentEdit): Promise<boolean> {
   const next = edit.restore?.next ?? edit.next;
   const previous = edit.restore?.previous;
   if (next === undefined) {
     return false;
   }
+  const open = findOpen(edit.filePath);
+  const current = open ? open.getText() : await readText(edit.filePath);
+  if (current !== undefined && equivalentText(current, next)) {
+    noteAccepted(edit.filePath, next);
+    return true;
+  }
   if (edit.created || previous === "") {
     await fs.promises.mkdir(path.dirname(edit.filePath), { recursive: true });
     await fs.promises.writeFile(edit.filePath, next, "utf8");
-    const open = findOpen(edit.filePath);
     if (open) {
       await replaceDocument(open, next);
       if (open.isDirty) {

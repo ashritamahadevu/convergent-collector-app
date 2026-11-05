@@ -29,6 +29,7 @@ import {
   withBaseline,
   type ConfigInput,
 } from "./agentProtocol";
+import { lockDocument } from "./documentLock";
 import { acceptedText, noteAccepted } from "./editorBaseline";
 import {
   holdPath,
@@ -330,14 +331,19 @@ async function runAgentQuiz(
   markEditorGate(edit.filePath, snippet);
   state.suppressEditGuard = true;
   state.processing = true;
-  let withheld = false;
+  let release: (() => void) | undefined;
+  let released = false;
+  const unlock = (): void => {
+    if (!released) {
+      released = true;
+      release?.();
+    }
+  };
   try {
     void vscode.window.setStatusBarMessage(
       "Comprehension Guard: checking code from " + agentLabel(edit.agent) + ".",
       4000,
     );
-    // Take the generated code back out of the file until the answer is correct.
-    withheld = await revertEdit(prepared);
     let language: string | undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
@@ -346,18 +352,15 @@ async function runAgentQuiz(
         preview: false,
         preserveFocus: false,
       });
+      release = lockDocument(doc);
     } catch {
       language = undefined;
     }
     const passed = await runComprehensionGate(snippet, context, language);
+    unlock();
     if (passed) {
-      const inserted = await applyHeldEdit(prepared);
-      if (!inserted) {
-        void vscode.window.showWarningMessage(
-          "Comprehension Guard: the answer was accepted, but the generated code could not be written back into the file.",
-        );
-      }
-    } else if (!withheld) {
+      await rememberFile(edit.filePath);
+    } else {
       const reverted = await revertEdit(prepared);
       if (!reverted) {
         await rememberFile(edit.filePath);
@@ -365,47 +368,16 @@ async function runAgentQuiz(
           "Comprehension Guard: the check did not pass, but the file had already changed again so it was left as-is.",
         );
       }
-    } else if (prepared.restore) {
-      noteAccepted(edit.filePath, prepared.restore.previous);
     }
   } catch {
-    if (withheld) {
-      await applyHeldEdit(prepared);
-    } else {
-      await rememberFile(edit.filePath);
-    }
+    unlock();
+    await rememberFile(edit.filePath);
   } finally {
     state.processing = false;
     await delay(150);
     state.suppressEditGuard = false;
     releasePath(edit.filePath);
   }
-}
-
-/** Writes the generated code into the file after a correct answer. */
-async function applyHeldEdit(edit: AgentEdit): Promise<boolean> {
-  const next = edit.restore?.next ?? edit.next;
-  const previous = edit.restore?.previous;
-  if (next === undefined) {
-    return false;
-  }
-  if (edit.created || previous === "") {
-    await fs.promises.mkdir(path.dirname(edit.filePath), { recursive: true });
-    await fs.promises.writeFile(edit.filePath, next, "utf8");
-    const open = findOpen(edit.filePath);
-    if (open) {
-      await replaceDocument(open, next);
-      if (open.isDirty) {
-        await open.save();
-      }
-    }
-    noteAccepted(edit.filePath, next);
-    return true;
-  }
-  if (previous === undefined) {
-    return false;
-  }
-  return writeBack(edit.filePath, next, previous);
 }
 
 async function revertEdit(edit: AgentEdit): Promise<boolean> {

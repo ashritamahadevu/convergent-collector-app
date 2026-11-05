@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { lockDocument } from "./documentLock";
 import { noteAccepted } from "./editorBaseline";
 import {
   getCharThreshold,
@@ -129,56 +130,6 @@ async function insertSnippet(
     return undefined;
   }
   return insertedRange(selection.start, text);
-}
-
-/**
- * While the quiz is open, edits to this file are undone and other files
- * cannot stay focused. Closing, answering, or bypassing ends the lock.
- */
-function lockDocument(document: vscode.TextDocument): () => void {
-  const snapshot = document.getText();
-  let restoring = false;
-
-  const edits = vscode.workspace.onDidChangeTextDocument(async (event) => {
-    if (restoring || event.document !== document || event.contentChanges.length === 0) {
-      return;
-    }
-    restoring = true;
-    state.suppressEditGuard = true;
-    try {
-      const end = document.lineAt(document.lineCount - 1).range.end;
-      const whole = new vscode.Range(new vscode.Position(0, 0), end);
-      const editor = vscode.window.visibleTextEditors.find(
-        (item) => item.document === document,
-      );
-      if (editor) {
-        await editor.edit((builder) => {
-          builder.replace(whole, snapshot);
-        });
-      } else {
-        const work = new vscode.WorkspaceEdit();
-        work.replace(document.uri, whole, snapshot);
-        await vscode.workspace.applyEdit(work);
-      }
-    } finally {
-      restoring = false;
-    }
-  });
-
-  const focus = vscode.window.onDidChangeActiveTextEditor(async (next) => {
-    if (!next || next.document === document) {
-      return;
-    }
-    await vscode.window.showTextDocument(document, {
-      preserveFocus: false,
-      preview: false,
-    });
-  });
-
-  return () => {
-    edits.dispose();
-    focus.dispose();
-  };
 }
 
 /** Runs the built-in paste while suppressing the edit guard. */

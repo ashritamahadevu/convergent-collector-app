@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { noteAccepted } from "./editorBaseline";
 import {
   getCharThreshold,
   insertedRange,
@@ -18,7 +19,9 @@ const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
  *  1. Read the clipboard text.
  *  2. If the guard is disabled, a bypass is armed, or the text is below the
  *     character threshold, run the real paste (consuming any armed bypass).
- *  3. Otherwise run the comprehension gate first; only paste on a pass.
+ *  3. Otherwise paste, then lock the file until the check is answered,
+ *     bypassed, or closed. A pass or bypass keeps the paste. Closing or
+ *     failing removes it.
  *
  * All real paste operations are wrapped so the edit guard ignores them.
  */
@@ -26,6 +29,10 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
   const disposable = vscode.commands.registerCommand(
     "comprehensionGuard.paste",
     async () => {
+      if (state.processing) {
+        return;
+      }
+
       const editor = vscode.window.activeTextEditor;
       const selection = editor?.selection;
       const clipboardText = await vscode.env.clipboard.readText();
@@ -55,21 +62,43 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Show the code in the editor during the quiz. Remove it if they do not pass.
       state.suppressEditGuard = true;
       state.processing = true;
-      let placed: vscode.Range | undefined;
+      const placed = await insertSnippet(editor, selection, clipboardText);
+      if (!placed) {
+        state.processing = false;
+        state.suppressEditGuard = false;
+        return;
+      }
+      const release = lockDocument(editor.document);
+      let released = false;
+      const unlock = (): void => {
+        if (!released) {
+          released = true;
+          release();
+        }
+      };
       try {
-        placed = await insertPreview(editor, selection, clipboardText);
         const passed = await runComprehensionGate(
           clipboardText,
           context,
           editor.document.languageId,
         );
-        if (!passed && placed) {
-          await removeIfUnchanged(editor, placed, clipboardText);
+        unlock();
+        if (!passed && editor.document.getText(placed) === clipboardText) {
+          await editor.edit((builder) => {
+            builder.delete(placed);
+          });
         }
       } finally {
+        unlock();
+        if (editor.document.uri.scheme === "file") {
+          try {
+            noteAccepted(editor.document.uri.fsPath, editor.document.getText());
+          } catch {
+            // The editor can close while the quiz is open.
+          }
+        }
         state.processing = false;
         state.suppressEditGuard = false;
       }
@@ -79,8 +108,8 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
   context.subscriptions.push(disposable);
 }
 
-/** Puts the snippet in the editor so it can be read during the quiz. */
-async function insertPreview(
+/** Inserts the clipboard text and returns the range it occupies. */
+async function insertSnippet(
   editor: vscode.TextEditor,
   selection: vscode.Selection,
   text: string,
@@ -95,25 +124,61 @@ async function insertPreview(
   });
   if (!applied) {
     vscode.window.showWarningMessage(
-      "Comprehension Guard: could not show the code in the editor.",
+      "Comprehension Guard: could not paste into the editor.",
     );
     return undefined;
   }
   return insertedRange(selection.start, text);
 }
 
-/** Deletes a preview insertion that is still exactly the original snippet. */
-async function removeIfUnchanged(
-  editor: vscode.TextEditor,
-  range: vscode.Range,
-  text: string,
-): Promise<void> {
-  if (editor.document.getText(range) !== text) {
-    return;
-  }
-  await editor.edit((builder) => {
-    builder.delete(range);
+/**
+ * While the quiz is open, edits to this file are undone and other files
+ * cannot stay focused. Closing, answering, or bypassing ends the lock.
+ */
+function lockDocument(document: vscode.TextDocument): () => void {
+  const snapshot = document.getText();
+  let restoring = false;
+
+  const edits = vscode.workspace.onDidChangeTextDocument(async (event) => {
+    if (restoring || event.document !== document || event.contentChanges.length === 0) {
+      return;
+    }
+    restoring = true;
+    state.suppressEditGuard = true;
+    try {
+      const end = document.lineAt(document.lineCount - 1).range.end;
+      const whole = new vscode.Range(new vscode.Position(0, 0), end);
+      const editor = vscode.window.visibleTextEditors.find(
+        (item) => item.document === document,
+      );
+      if (editor) {
+        await editor.edit((builder) => {
+          builder.replace(whole, snapshot);
+        });
+      } else {
+        const work = new vscode.WorkspaceEdit();
+        work.replace(document.uri, whole, snapshot);
+        await vscode.workspace.applyEdit(work);
+      }
+    } finally {
+      restoring = false;
+    }
   });
+
+  const focus = vscode.window.onDidChangeActiveTextEditor(async (next) => {
+    if (!next || next.document === document) {
+      return;
+    }
+    await vscode.window.showTextDocument(document, {
+      preserveFocus: false,
+      preview: false,
+    });
+  });
+
+  return () => {
+    edits.dispose();
+    focus.dispose();
+  };
 }
 
 /** Runs the built-in paste while suppressing the edit guard. */

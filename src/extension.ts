@@ -9,6 +9,7 @@ import {
   getProvider,
   isEnabled,
   onStateChanged,
+  requestQuizBypass,
   setBypassArmed,
   state,
 } from "./state";
@@ -61,6 +62,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // One-shot bypass (deadline escape hatch).
   context.subscriptions.push(
     vscode.commands.registerCommand("comprehensionGuard.bypassNext", () => {
+      if (requestQuizBypass()) {
+        vscode.window.setStatusBarMessage(
+          "Comprehension Guard: quiz bypassed. The code stays.",
+          4000,
+        );
+        return;
+      }
       setBypassArmed(true);
       vscode.window.setStatusBarMessage(
         "Comprehension Guard: next insertion will be allowed without a check.",
@@ -146,6 +154,10 @@ function updateStatusBar(): void {
   if (!isEnabled()) {
     statusBarItem.text = "$(shield) Guard: Off";
     statusBarItem.tooltip = "Comprehension Guard is disabled. Click to enable.";
+  } else if (state.quizActive) {
+    statusBarItem.text = "$(shield) Guard: Quiz open";
+    statusBarItem.tooltip =
+      "Finish the quiz, run Bypass Next Insertion to keep the code, or close the quiz tab to remove it.";
   } else if (state.bypassArmed) {
     statusBarItem.text = "$(shield) Guard: Bypass armed";
     statusBarItem.tooltip =

@@ -49,6 +49,34 @@
       {
         "command": "comprehensionGuard.installAgentHooks",
         "title": "Comprehension Guard: Install AI Agent Hooks"
+      },
+      {
+        "command": "comprehensionGuard.showDueConcepts",
+        "title": "Comprehension Guard: Show Due Concepts"
+      },
+      {
+        "command": "comprehensionGuard.signIn",
+        "title": "Comprehension Guard: Sign In (Supabase)"
+      },
+      {
+        "command": "comprehensionGuard.signOut",
+        "title": "Comprehension Guard: Sign Out (Supabase)"
+      },
+      {
+        "command": "comprehensionGuard.setProfile",
+        "title": "Comprehension Guard: Set Exam and Interview Dates"
+      },
+      {
+        "command": "comprehensionGuard.indexCodebase",
+        "title": "Comprehension Guard: Index Codebase Locally"
+      },
+      {
+        "command": "comprehensionGuard.deleteCodeIndex",
+        "title": "Comprehension Guard: Delete Local Code Index"
+      },
+      {
+        "command": "comprehensionGuard.searchCodebase",
+        "title": "Comprehension Guard: Search Local Code Index"
       }
     ],
     "keybindings": [
@@ -107,6 +135,16 @@
           "type": "string",
           "default": "",
           "description": "Optional URL that receives a JSON POST when a student marks a grade as wrong. Reports are always saved on the computer."
+        },
+        "comprehensionGuard.supabaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Supabase project URL. Used only to sync mastery, recall cards, profile, and the file knowledge map."
+        },
+        "comprehensionGuard.supabaseAnonKey": {
+          "type": "string",
+          "default": "",
+          "description": "Supabase anon key. The session token is stored in SecretStorage, not this setting."
         },
         "comprehensionGuard.maxFollowups": {
           "type": "number",

@@ -60,6 +60,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           clipboardText,
           context,
           editor?.document.languageId,
+          { source: "paste", filePath: editor?.document.uri.fsPath },
         );
         if (passed) {
           await performPaste();
@@ -90,6 +91,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           clipboardText,
           context,
           editor.document.languageId,
+          { source: "paste", filePath: editor.document.uri.fsPath },
         );
         unlock();
         if (!passed && editor.document.getText(placed) === clipboardText) {

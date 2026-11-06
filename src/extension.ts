@@ -4,6 +4,10 @@ import { registerAgentGuard } from "./agentGuard";
 import { registerEditGuard } from "./editGuard";
 import { setLogSink } from "./llm";
 import { clearApiKey, setApiKey } from "./secrets";
+import { dueConcepts, getMastery, getProfile, saveProfile } from "./memory/remember";
+import { deleteCodeIndex, indexFile, indexWorkspace, searchCode } from "./memory/rag";
+import { retrievability } from "./memory/scheduler";
+import { signIn, signOut } from "./memory/sync";
 import { getStats } from "./store";
 import {
   getProvider,
@@ -129,7 +133,138 @@ export function activate(context: vscode.ExtensionContext): void {
           "Most missed concepts: " + stats.mostMissed.join(", "),
         );
       }
+      const mastery = getMastery(context);
+      output.appendLine("");
+      output.appendLine("Concept mastery (Bayesian):");
+      if (mastery.length === 0) {
+        output.appendLine("(none yet)");
+      } else {
+        for (const row of mastery) {
+          output.appendLine(
+            row.concept + ": " + Math.round(row.mastery * 100) + "%  elo " + row.elo + "  attempts " + row.attempts,
+          );
+        }
+      }
       output.show(true);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.showDueConcepts", () => {
+      const now = Date.now();
+      const due = dueConcepts(context, now);
+      output.clear();
+      output.appendLine("Comprehension Guard - Due concepts");
+      output.appendLine("");
+      if (due.length === 0) {
+        output.appendLine("Nothing is due.");
+      } else {
+        for (const card of due) {
+          const recall = Math.round(retrievability(card, now) * 100);
+          output.appendLine(card.concept + "  recall " + recall + "%  due " + new Date(card.dueAt).toLocaleDateString());
+        }
+      }
+      output.show(true);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.signIn", async () => {
+      const email = await vscode.window.showInputBox({ prompt: "Supabase email", ignoreFocusOut: true });
+      const password = await vscode.window.showInputBox({
+        prompt: "Supabase password",
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!email || !password) {
+        return;
+      }
+      try {
+        const userId = await signIn(context, email.trim(), password);
+        vscode.window.showInformationMessage("Comprehension Guard: signed in (" + userId.slice(0, 8) + ").");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage("Comprehension Guard: " + message);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.signOut", async () => {
+      await signOut(context);
+      vscode.window.showInformationMessage("Comprehension Guard: signed out. Local memory stays on this computer.");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.setProfile", async () => {
+      const current = getProfile(context);
+      const examDate = await vscode.window.showInputBox({
+        prompt: "Exam date (YYYY-MM-DD), or leave blank",
+        value: current.examDate ?? "",
+        ignoreFocusOut: true,
+      });
+      if (examDate === undefined) {
+        return;
+      }
+      const interviewDate = await vscode.window.showInputBox({
+        prompt: "Interview date (YYYY-MM-DD), or leave blank",
+        value: current.interviewDate ?? "",
+        ignoreFocusOut: true,
+      });
+      if (interviewDate === undefined) {
+        return;
+      }
+      await saveProfile(context, {
+        ...current,
+        examDate: examDate.trim(),
+        interviewDate: interviewDate.trim(),
+      });
+      vscode.window.showInformationMessage("Comprehension Guard: profile saved.");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.indexCodebase", async () => {
+      const count = await indexWorkspace(context);
+      vscode.window.showInformationMessage("Comprehension Guard: indexed " + count + " code chunks locally.");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.deleteCodeIndex", () => {
+      deleteCodeIndex(context);
+      vscode.window.showInformationMessage("Comprehension Guard: local code index deleted.");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.searchCodebase", async () => {
+      const query = await vscode.window.showInputBox({ prompt: "Search your local code index", ignoreFocusOut: true });
+      if (!query) {
+        return;
+      }
+      const hits = searchCode(context, query);
+      output.clear();
+      output.appendLine("Comprehension Guard - Code search");
+      output.appendLine("");
+      if (hits.length === 0) {
+        output.appendLine("No indexed chunks. Run Index Codebase first.");
+      } else {
+        for (const hit of hits) {
+          output.appendLine(hit.path + ":" + hit.startLine + "  " + hit.name);
+        }
+      }
+      output.show(true);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (document.uri.scheme !== "file") {
+        return;
+      }
+      indexFile(context, document.uri.fsPath, document.getText());
     }),
   );
 

@@ -103,6 +103,10 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         snippet,
         context,
         editor.document.languageId,
+        {
+          source: "inline",
+          filePath: editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+        },
       );
       unlock();
       if (!passed && editor.document.getText(placed) === snippet) {

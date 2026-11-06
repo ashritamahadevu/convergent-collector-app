@@ -34,6 +34,7 @@ export type Provider =
 export type GradingMode = "free-text" | "multiple-choice";
 /** Bypass is stored but excluded from the pass rate. Disputed counts as correct. */
 export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained";
+export type AttemptSource = "paste" | "inline" | "agent";
 export type AttemptRecord = {
   timestamp: number;
   language: string;
@@ -46,6 +47,41 @@ export type AttemptRecord = {
   followups: number;
   judgeConfigId: string;
   appealed?: boolean;
+  /** 0 to 1 evidence the student understood the concept, after judge-bias discount. */
+  score?: number;
+  source?: AttemptSource;
+  filePath?: string;
+  misconceptions?: string[];
+};
+export type ConceptMastery = {
+  concept: string;
+  mastery: number;
+  elo: number;
+  attempts: number;
+  lastSeen: number;
+};
+export type RecallCard = {
+  concept: string;
+  ease: number;
+  intervalDays: number;
+  repetitions: number;
+  dueAt: number;
+  stability: number;
+  difficulty: number;
+  lastReview: number;
+};
+export type ProfileFacts = {
+  examDate?: string;
+  interviewDate?: string;
+  preferredLanguage?: string;
+  strictness?: string;
+};
+export type FileKnowledge = {
+  path: string;
+  concepts: string[];
+  passed: boolean;
+  aiWritten: boolean;
+  updatedAt: number;
 };
 export type MisgradeReport = {
   timestamp: number;

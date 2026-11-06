@@ -358,7 +358,10 @@ async function runAgentQuiz(
     } catch {
       language = undefined;
     }
-    const passed = await runComprehensionGate(snippet, context, language);
+    const passed = await runComprehensionGate(snippet, context, language, {
+      source: "agent",
+      filePath: edit.filePath,
+    });
     unlock();
     if (passed) {
       const inserted = await applyHeldEdit(prepared);

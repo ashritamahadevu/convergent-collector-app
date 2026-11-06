@@ -11,8 +11,9 @@ import {
   subscribeQuizBypass,
   takeQuizBypass,
 } from "./state";
+import { gradedScore, misconceptionsFor, rememberCheck } from "./memory/remember";
 import { addAttempt, saveMisgradeReport } from "./store";
-import type { AttemptOutcome, AttemptRecord, CriterionVerdict, GeneratedQuestion } from "./types";
+import type { AttemptOutcome, AttemptRecord, AttemptSource, CriterionVerdict, GeneratedQuestion } from "./types";
 import { createQuizPanel, type QuizAction } from "./quizPanel";
 
 let missingApiKeyHintShown = false;
@@ -28,6 +29,7 @@ export async function runComprehensionGate(
   snippet: string,
   context?: vscode.ExtensionContext,
   language?: string,
+  meta?: { source?: AttemptSource; filePath?: string },
 ): Promise<boolean> {
   if (!context) {
     return fallbackGate(snippet, language);
@@ -76,7 +78,7 @@ export async function runComprehensionGate(
     outcome: AttemptOutcome,
     criterionResults?: AttemptRecord["criterionResults"],
   ): Promise<void> => {
-    await addAttempt(context, {
+    const draft: AttemptRecord = {
       timestamp: Date.now(),
       language: lang,
       charCount: snippet.length,
@@ -88,7 +90,15 @@ export async function runComprehensionGate(
       followups,
       judgeConfigId,
       appealed: outcome === "disputed",
-    });
+      source: meta?.source,
+      filePath: meta?.filePath,
+      misconceptions: misconceptionsFor({ mode, passed, criterionResults }),
+    };
+    draft.score = gradedScore(draft);
+    await addAttempt(context, draft);
+    if (outcome === "pass" || outcome === "fail" || outcome === "disputed") {
+      await rememberCheck(context, draft);
+    }
   };
 
   // eslint-disable-next-line no-constant-condition

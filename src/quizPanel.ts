@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import type { GeneratedQuestion } from "./types";
 
-export type SubmitPayload = { answer?: string; selectedIndex?: number };
+export type SubmitPayload = { answer?: string; selectedIndex?: number; order?: number[] };
 
 export type QuizAction =
-  | { type: "submit"; answer?: string; selectedIndex?: number }
+  | { type: "submit"; answer?: string; selectedIndex?: number; order?: number[] }
   | { type: "bypass" }
   | { type: "explain" }
   | { type: "dispute"; answer?: string }
@@ -249,7 +249,33 @@ function getWebviewHtml(
       clearFeedback();
       answerAreaEl.innerHTML = "";
 
-      if (currentKind === "multiple-choice" && Array.isArray(payload.options)) {
+      if (currentKind === "ordering" && Array.isArray(payload.items)) {
+        payload.items.forEach(function (item, idx) {
+          const row = document.createElement("div");
+          row.className = "mcq-option";
+          row.dataset.index = String(idx);
+          const up = document.createElement("button");
+          up.type = "button";
+          up.textContent = "Up";
+          const down = document.createElement("button");
+          down.type = "button";
+          down.textContent = "Down";
+          up.addEventListener("click", function () {
+            if (row.previousElementSibling) {
+              answerAreaEl.insertBefore(row, row.previousElementSibling);
+            }
+          });
+          down.addEventListener("click", function () {
+            if (row.nextElementSibling) {
+              answerAreaEl.insertBefore(row.nextElementSibling, row);
+            }
+          });
+          row.appendChild(up);
+          row.appendChild(down);
+          row.appendChild(document.createTextNode(" " + item));
+          answerAreaEl.appendChild(row);
+        });
+      } else if (currentKind === "multiple-choice" && Array.isArray(payload.options)) {
         payload.options.forEach(function (opt, idx) {
           const label = document.createElement("label");
           label.className = "mcq-option";
@@ -323,6 +349,13 @@ function getWebviewHtml(
     }
 
     function collectSubmit() {
+      if (currentKind === "ordering") {
+        const order = Array.from(answerAreaEl.querySelectorAll("[data-index]")).map(function (row) {
+          return parseInt(row.dataset.index, 10);
+        });
+        vscode.postMessage({ type: "submit", order: order });
+        return;
+      }
       if (currentKind === "multiple-choice") {
         const selected = answerAreaEl.querySelector('input[name="mcq"]:checked');
         if (!selected) {
@@ -412,7 +445,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
     if (disposed || !message || typeof message !== "object") {
       return;
     }
-    const msg = message as { type?: string; answer?: string; selectedIndex?: number };
+    const msg = message as { type?: string; answer?: string; selectedIndex?: number; order?: number[] };
     if (msg.type === "ready") {
       ready = true;
       for (const queuedMessage of queued.splice(0)) {
@@ -445,6 +478,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
         typeof msg.selectedIndex === "number" && Number.isFinite(msg.selectedIndex)
           ? msg.selectedIndex
           : undefined,
+      order: Array.isArray(msg.order) ? msg.order.filter((item) => typeof item === "number") : undefined,
     });
   });
 
@@ -465,6 +499,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
         kind: question.kind,
         questionText: question.question,
         options: question.options ?? [],
+        items: question.items ?? [],
       });
     },
 

@@ -10,6 +10,7 @@ import type {
   GradingMode,
   JudgeResult,
   Provider,
+  QuestionKind,
 } from "./types";
 
 export const PROMPT_VERSION = "v3";
@@ -138,6 +139,7 @@ export type GenerateParams = {
   snippet: string;
   language: string;
   mode: GradingMode;
+  kind?: QuestionKind;
 };
 
 export type JudgeParams = {
@@ -213,7 +215,7 @@ function normalizeCriterion(raw: unknown, index: number): Criterion | null {
 
 function parseGeneratedPayload(
   rawText: string,
-  mode: GradingMode,
+  mode: GradingMode | QuestionKind,
 ): GeneratedQuestion {
   const jsonText = extractJsonBlock(rawText);
   let parsed: unknown;
@@ -227,7 +229,7 @@ function parseGeneratedPayload(
   }
   const obj = parsed as Record<string, unknown>;
   const kind =
-    obj.kind === "multiple-choice" || obj.kind === "free-text"
+    obj.kind === "multiple-choice" || obj.kind === "free-text" || obj.kind === "ordering"
       ? obj.kind
       : mode;
   const question = typeof obj.question === "string" ? obj.question.trim() : "";
@@ -251,6 +253,28 @@ function parseGeneratedPayload(
     : [];
 
   const flagged = obj.flagged === true;
+
+  if (kind === "ordering") {
+    const items = Array.isArray(obj.items)
+      ? obj.items.filter((item): item is string => typeof item === "string")
+      : [];
+    const correctOrder = Array.isArray(obj.correctOrder)
+      ? obj.correctOrder.filter((item): item is number => typeof item === "number")
+      : [];
+    if (items.length < 2 || correctOrder.length !== items.length) {
+      throw new Error("Ordering question needs items and a full correctOrder.");
+    }
+    return {
+      kind: "ordering",
+      question,
+      referenceAnswer,
+      criteria: [],
+      items,
+      correctOrder,
+      conceptTags,
+      flagged,
+    };
+  }
 
   if (kind === "multiple-choice") {
     const options = Array.isArray(obj.options)
@@ -289,7 +313,7 @@ function parseGeneratedPayload(
 function buildGeneratePrompt(
   snippet: string,
   language: string,
-  mode: GradingMode,
+  mode: GradingMode | QuestionKind,
 ): string {
   const code = capSnippet(snippet);
   const sharedRules = `
@@ -308,6 +332,26 @@ Rubric authoring (free-text only): ship 1-3 atomic criteria. One critical criter
 - No reference leakage and no "must say exactly/verbatim/word for word".
 - Each criterion also has a "hint" shown to the student when they miss it. The hint names where to look and must not state the outcome, return value, or correct behavior. Good hint: "Check the first condition and what the function does when it matches." Bad hint: "The function returns immediately."
 `.trim();
+
+  if (mode === "ordering") {
+    return `${sharedRules}
+
+Generate ONE ordering question. Shuffle the steps in "items". "correctOrder" is the indexes of items in the right order.
+Return STRICT JSON only:
+{
+  "kind": "ordering",
+  "question": string,
+  "referenceAnswer": string,
+  "items": string[],
+  "correctOrder": number[],
+  "conceptTags": string[],
+  "flagged": boolean
+}
+
+<code language="${language}">
+${code}
+</code>`;
+  }
 
   if (mode === "multiple-choice") {
     return `${sharedRules}
@@ -381,6 +425,7 @@ Return JSON only:
 Field order per criterion: analysis, then verdict, then evidence.
 If the required idea is absent, evidence is "NONE" and verdict is "fail".
 If a quote entails the criterion, use that quote and verdict "pass".
+Also include top-level "misconception": "" when they passed, or one sentence under 120 characters naming the wrong idea when they missed it.
 Do not put code blocks or backslash escapes inside JSON strings.`;
 }
 
@@ -693,6 +738,14 @@ function parseJudgeVerdicts(
   return verdicts;
 }
 
+function readMisconception(raw: string): string {
+  const match = raw.match(/"misconception"\s*:\s*"((?:\\.|[^"\\]){0,160})"/);
+  if (!match) {
+    return "";
+  }
+  return match[1].replace(/\\"/g, "\"").slice(0, 120);
+}
+
 function normalizeVerdict(value: unknown): "pass" | "fail" | "n/a" | null {
   if (value === "pass" || value === "fail" || value === "n/a") {
     return value;
@@ -711,7 +764,7 @@ async function runGenerateOnce(
   if (providerNeedsApiKey(provider) && !apiKey.trim()) {
     throw new Error("Missing API key for configured provider.");
   }
-  const prompt = buildGeneratePrompt(params.snippet, params.language, params.mode);
+  const prompt = buildGeneratePrompt(params.snippet, params.language, params.kind ?? params.mode);
   const raw = await completeChat(
     provider,
     apiKey,
@@ -721,7 +774,7 @@ async function runGenerateOnce(
     0.2,
     true,
   );
-  return parseGeneratedPayload(raw, params.mode);
+  return parseGeneratedPayload(raw, params.kind ?? params.mode);
 }
 
 /** Runs generation, retrying transient API errors (429/503/overload) with backoff. */
@@ -814,7 +867,7 @@ export async function judge(params: JudgeParams): Promise<JudgeResult> {
       if (!verdicts) {
         return { kind: "no_decision", reason: "parse_failed" };
       }
-      return { kind: "decided", verdicts };
+      return { kind: "decided", verdicts, misconception: readMisconception(raw) };
     } catch (err) {
       if (isAbortError(err)) {
         return { kind: "no_decision", reason: "timeout" };

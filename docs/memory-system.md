@@ -253,6 +253,10 @@ Proportional to current state (single-user, extension-only, LLM + grading workin
 
 ---
 
+## Modes
+
+`comprehensionGuard.mode` is `auto`, `learn`, or `walkthrough`. Auto keeps a single check unless an agent changes at least 7 files or 500 lines, then it offers a walkthrough. Session count follows how many core files are still below mastery, not a fixed script of three. The understanding map colors files from mastery times recall retrievability, so a file fades when the concept is not reviewed. Login opens one due recall instead of a notification. Each graded check, bypass, and explanation is a `review_events` row (question and answer included, source code excluded). Interview and exam questions are generated on the machine and synced as `prep_sets`.
+
 ## 8. References
 
 Spaced repetition:

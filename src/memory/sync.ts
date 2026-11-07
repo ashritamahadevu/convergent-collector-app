@@ -15,7 +15,9 @@ type SyncOp =
   | { table: "concept_mastery"; row: Record<string, unknown> }
   | { table: "recall_cards"; row: Record<string, unknown> }
   | { table: "profiles"; row: Record<string, unknown> }
-  | { table: "file_knowledge"; row: Record<string, unknown> };
+  | { table: "file_knowledge"; row: Record<string, unknown> }
+  | { table: "review_events"; row: Record<string, unknown>; insert: true }
+  | { table: "prep_sets"; row: Record<string, unknown>; insert: true };
 
 function supabaseUrl(): string {
   return vscode.workspace.getConfiguration("comprehensionGuard").get<string>("supabaseUrl", "").trim();
@@ -123,9 +125,10 @@ async function upsert(
   auth: { anon: string; token: string; userId: string },
   op: SyncOp,
 ): Promise<boolean> {
+  const insertOnly = "insert" in op && op.insert;
   const conflict = op.table === "profiles" ? "user_id" : "user_id,concept";
   const onConflict = op.table === "file_knowledge" ? "user_id,path" : conflict;
-  const url = supabaseUrl().replace(/\/$/, "") + "/rest/v1/" + op.table + "?on_conflict=" + onConflict;
+  const url = supabaseUrl().replace(/\/$/, "") + "/rest/v1/" + op.table + (insertOnly ? "" : "?on_conflict=" + onConflict);
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -196,7 +199,70 @@ export function queueFileKnowledge(context: vscode.ExtensionContext, row: FileKn
       concepts: row.concepts,
       passed: row.passed,
       ai_written: row.aiWritten,
+      core: row.core ?? false,
+      complexity: row.complexity ?? null,
+      centrality: row.centrality ?? null,
       updated_at: new Date(row.updatedAt).toISOString(),
+    },
+  });
+  void flushSync(context);
+}
+
+export function queueReview(context: vscode.ExtensionContext, event: {
+  concepts: string[];
+  eventKind: string;
+  source?: string;
+  mode?: string;
+  score?: number;
+  passed?: boolean;
+  followups: number;
+  masteryAfter?: number;
+  filePath?: string;
+  question?: string;
+  studentAnswer?: string;
+  misconception?: string;
+  askedForExplanation: boolean;
+  explanation?: string;
+  judgeConfigId?: string;
+}): void {
+  enqueue(context, {
+    table: "review_events",
+    insert: true,
+    row: {
+      concepts: event.concepts,
+      event_kind: event.eventKind,
+      source: event.source ?? null,
+      mode: event.mode ?? null,
+      score: event.score ?? null,
+      passed: event.passed ?? null,
+      followups: event.followups,
+      mastery_after: event.masteryAfter ?? null,
+      file_path: event.filePath ?? null,
+      question: event.question ?? null,
+      student_answer: event.studentAnswer ?? null,
+      misconception: event.misconception || null,
+      asked_for_explanation: event.askedForExplanation,
+      explanation: event.explanation || null,
+      judge_config_id: event.judgeConfigId ?? null,
+    },
+  });
+  void flushSync(context);
+}
+
+export function queuePrepSet(
+  context: vscode.ExtensionContext,
+  kind: "interview" | "exam",
+  project: string,
+  questions: unknown[],
+): void {
+  enqueue(context, {
+    table: "prep_sets",
+    insert: true,
+    row: {
+      kind,
+      project,
+      questions,
+      created_at: new Date().toISOString(),
     },
   });
   void flushSync(context);

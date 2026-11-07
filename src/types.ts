@@ -8,18 +8,20 @@ export type Criterion = {
   negative?: boolean;
 };
 export type GeneratedQuestion = {
-  kind: "free-text" | "multiple-choice";
+  kind: QuestionKind;
   question: string;
   referenceAnswer: string;   // hidden from the student
   criteria: Criterion[];     // free-text only; 2-6 atomic binary items
   options?: string[];        // MCQ only
   correctIndex?: number;     // MCQ only
+  items?: string[];          // ordering, shown shuffled
+  correctOrder?: number[];   // ordering, indexes into items
   conceptTags: string[];
   flagged?: boolean;
 };
 export type CriterionVerdict = { id: string; verdict: "pass" | "fail" | "n/a"; evidence: string };
 export type JudgeResult =
-  | { kind: "decided"; verdicts: CriterionVerdict[] }
+  | { kind: "decided"; verdicts: CriterionVerdict[]; misconception?: string }
   | { kind: "no_decision"; reason: string };
 export type Provider =
   | "openai"
@@ -32,9 +34,11 @@ export type Provider =
   | "gemini-cli"
   | "copilot-cli";
 export type GradingMode = "free-text" | "multiple-choice";
+export type GuardMode = "auto" | "learn" | "walkthrough";
+export type QuestionKind = "free-text" | "multiple-choice" | "ordering";
 /** Bypass is stored but excluded from the pass rate. Disputed counts as correct. */
 export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained";
-export type AttemptSource = "paste" | "inline" | "agent";
+export type AttemptSource = "paste" | "inline" | "agent" | "recall" | "walkthrough";
 export type AttemptRecord = {
   timestamp: number;
   language: string;
@@ -81,6 +85,9 @@ export type FileKnowledge = {
   concepts: string[];
   passed: boolean;
   aiWritten: boolean;
+  core?: boolean;
+  complexity?: number;
+  centrality?: number;
   updatedAt: number;
 };
 export type MisgradeReport = {

@@ -8,7 +8,7 @@ import {
   nextMastery,
 } from "./bkt";
 import { newCard, reviewCard } from "./scheduler";
-import { queueCard, queueFileKnowledge, queueMastery, queueProfile } from "./sync";
+import { queueCard, queueFileKnowledge, queueMastery, queueProfile, queueReview } from "./sync";
 
 const MASTERY_KEY = "comprehensionGuard.conceptMastery";
 const CARD_KEY = "comprehensionGuard.recallCards";
@@ -36,6 +36,22 @@ export function getFileKnowledge(context: vscode.ExtensionContext): FileKnowledg
   return Array.isArray(raw) ? raw : [];
 }
 
+export async function annotateFile(
+  context: vscode.ExtensionContext,
+  file: { path: string; concepts: string[]; core?: boolean; complexity?: number; centrality?: number },
+): Promise<void> {
+  await markFile(context, {
+    path: file.path,
+    concepts: file.concepts,
+    passed: true,
+    aiWritten: true,
+    core: file.core,
+    complexity: file.complexity,
+    centrality: file.centrality,
+    updatedAt: Date.now(),
+  });
+}
+
 export function getProfile(context: vscode.ExtensionContext) {
   return context.globalState.get(PROFILE_KEY, {}) as {
     examDate?: string;
@@ -60,8 +76,9 @@ export async function saveProfile(
 export async function rememberCheck(
   context: vscode.ExtensionContext,
   record: AttemptRecord,
-): Promise<void> {
+): Promise<number | undefined> {
   const tags = record.conceptTags.length > 0 ? record.conceptTags : ["unspecified"];
+  let firstMastery: number | undefined;
   const score = record.score ?? (record.passed ? 1 : 0);
   const now = record.timestamp;
   const mastery = getMastery(context);
@@ -72,9 +89,13 @@ export async function rememberCheck(
     const guess = record.mode === "multiple-choice" ? MCQ_GUESS : DEFAULT_BKT.guess;
     const next = nextMastery(prior?.mastery ?? DEFAULT_BKT.prior, score, { ...DEFAULT_BKT, guess });
     const elo = nextElo(prior?.elo ?? 1000, score);
+    const rounded = Math.round(next * 1000) / 1000;
+    if (firstMastery === undefined) {
+      firstMastery = rounded;
+    }
     const row: ConceptMastery = {
       concept,
-      mastery: Math.round(next * 1000) / 1000,
+      mastery: rounded,
       elo,
       attempts: (prior?.attempts ?? 0) + 1,
       lastSeen: now,
@@ -109,6 +130,7 @@ export async function rememberCheck(
       updatedAt: now,
     });
   }
+  return firstMastery;
 }
 
 async function markFile(context: vscode.ExtensionContext, next: FileKnowledge): Promise<void> {
@@ -117,9 +139,13 @@ async function markFile(context: vscode.ExtensionContext, next: FileKnowledge): 
   if (index >= 0) {
     const prev = rows[index];
     rows[index] = {
+      ...prev,
       ...next,
       concepts: Array.from(new Set([...prev.concepts, ...next.concepts])),
       aiWritten: prev.aiWritten || next.aiWritten,
+      core: next.core ?? prev.core,
+      complexity: next.complexity ?? prev.complexity,
+      centrality: next.centrality ?? prev.centrality,
     };
     queueFileKnowledge(context, rows[index]);
   } else {
@@ -127,6 +153,33 @@ async function markFile(context: vscode.ExtensionContext, next: FileKnowledge): 
     queueFileKnowledge(context, next);
   }
   await context.globalState.update(FILE_KEY, rows);
+}
+
+export type ReviewEvent = {
+  concepts: string[];
+  eventKind: "check" | "recall" | "bypass" | "explain";
+  source?: string;
+  mode?: string;
+  score?: number;
+  passed?: boolean;
+  followups: number;
+  masteryAfter?: number;
+  filePath?: string;
+  question?: string;
+  studentAnswer?: string;
+  misconception?: string;
+  askedForExplanation: boolean;
+  explanation?: string;
+  judgeConfigId?: string;
+};
+
+const REVIEW_KEY = "comprehensionGuard.reviewEvents";
+
+export async function logReview(context: vscode.ExtensionContext, event: ReviewEvent): Promise<void> {
+  const prev = context.globalState.get<ReviewEvent[]>(REVIEW_KEY, []);
+  const next = [...(Array.isArray(prev) ? prev : []), event].slice(-1000);
+  await context.globalState.update(REVIEW_KEY, next);
+  queueReview(context, event);
 }
 
 export function gradedScore(record: Pick<AttemptRecord, "mode" | "passed" | "criterionResults">): number {

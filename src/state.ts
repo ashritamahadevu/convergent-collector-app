@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { GradingMode, Provider } from "./types";
+import type { GradingMode, GuardMode, Provider } from "./types";
 
 /**
  * Shared, process-local mutable state for the extension.
@@ -141,4 +141,36 @@ export function getMaxFollowups(): number {
   return vscode.workspace
     .getConfiguration("comprehensionGuard")
     .get<number>("maxFollowups", 3);
+}
+
+export function getMode(): GuardMode {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<GuardMode>("mode", "auto");
+}
+
+export function getWalkthroughFileThreshold(): number {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<number>("walkthroughFileThreshold", 7);
+}
+
+export function getWalkthroughLineThreshold(): number {
+  return vscode.workspace
+    .getConfiguration("comprehensionGuard")
+    .get<number>("walkthroughLineThreshold", 500);
+}
+
+export function wantsWalkthrough(fileCount: number, lineCount: number): boolean {
+  const mode = getMode();
+  if (mode === "learn") {
+    return false;
+  }
+  if (mode === "walkthrough") {
+    return fileCount > 1;
+  }
+  return (
+    fileCount >= getWalkthroughFileThreshold() ||
+    lineCount >= getWalkthroughLineThreshold()
+  );
 }

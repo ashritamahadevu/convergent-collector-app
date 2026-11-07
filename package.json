@@ -77,6 +77,14 @@
       {
         "command": "comprehensionGuard.searchCodebase",
         "title": "Comprehension Guard: Search Local Code Index"
+      },
+      {
+        "command": "comprehensionGuard.showUnderstandingMap",
+        "title": "Comprehension Guard: Show Understanding Map"
+      },
+      {
+        "command": "comprehensionGuard.buildPrepSet",
+        "title": "Comprehension Guard: Build Prep Set"
       }
     ],
     "keybindings": [
@@ -145,6 +153,24 @@
           "type": "string",
           "default": "",
           "description": "Supabase anon key. The session token is stored in SecretStorage, not this setting."
+        },
+        "comprehensionGuard.mode": {
+          "type": "string",
+          "enum": ["auto", "learn", "walkthrough"],
+          "default": "auto",
+          "description": "auto uses a walkthrough only for a large multi-file agent change. learn always uses one check. walkthrough always walks through multi-file agent changes."
+        },
+        "comprehensionGuard.walkthroughFileThreshold": {
+          "type": "number",
+          "default": 7,
+          "minimum": 2,
+          "description": "In auto mode, start a walkthrough when an agent changes at least this many files."
+        },
+        "comprehensionGuard.walkthroughLineThreshold": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "description": "In auto mode, start a walkthrough when an agent change adds at least this many lines."
         },
         "comprehensionGuard.maxFollowups": {
           "type": "number",

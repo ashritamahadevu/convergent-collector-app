@@ -5,6 +5,8 @@ import { registerEditGuard } from "./editGuard";
 import { setLogSink } from "./llm";
 import { clearApiKey, setApiKey } from "./secrets";
 import { dueConcepts, getMastery, getProfile, saveProfile } from "./memory/remember";
+import { showUnderstandingMapFor } from "./mapPanel";
+import { buildPrepSet, offerLoginRecall, resumeWalkthrough } from "./walkthrough";
 import { deleteCodeIndex, indexFile, indexWorkspace, searchCode } from "./memory/rag";
 import { retrievability } from "./memory/scheduler";
 import { signIn, signOut } from "./memory/sync";
@@ -40,6 +42,8 @@ export function activate(context: vscode.ExtensionContext): void {
   registerPasteGuard(context);
   registerAgentGuard(context);
   registerEditGuard(context);
+  void resumeWalkthrough(context);
+  void offerLoginRecall(context);
 
   // Toggle on/off.
   context.subscriptions.push(
@@ -235,6 +239,24 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("comprehensionGuard.deleteCodeIndex", () => {
       deleteCodeIndex(context);
       vscode.window.showInformationMessage("Comprehension Guard: local code index deleted.");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.showUnderstandingMap", () => {
+      showUnderstandingMapFor(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.buildPrepSet", async () => {
+      const kind = await vscode.window.showQuickPick(["interview", "exam"], {
+        placeHolder: "Which prep set?",
+      });
+      if (kind !== "interview" && kind !== "exam") {
+        return;
+      }
+      await buildPrepSet(context, kind);
     }),
   );
 

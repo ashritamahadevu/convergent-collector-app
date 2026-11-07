@@ -85,3 +85,15 @@ create policy "own events" on public.review_events
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create index if not exists review_events_user_time
   on public.review_events (user_id, occurred_at);
+
+create table if not exists public.prep_sets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  kind text not null check (kind in ('interview', 'exam')),
+  project text,
+  created_at timestamptz not null default now(),
+  questions jsonb not null
+);
+alter table public.prep_sets enable row level security;
+create policy "own prep" on public.prep_sets
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

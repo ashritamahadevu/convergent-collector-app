@@ -138,3 +138,25 @@ export function aggregate(
 export function gradeMcq(question: GeneratedQuestion, selectedIndex: number): boolean {
   return selectedIndex === question.correctIndex;
 }
+
+/** 1 when the order matches. Otherwise the fraction of pairs that are in the right order. */
+export function gradeOrdering(question: GeneratedQuestion, order: number[]): number {
+  const correct = question.correctOrder ?? [];
+  if (correct.length === 0 || order.length !== correct.length) {
+    return 0;
+  }
+  const position = new Map(order.map((item, index) => [item, index]));
+  let agree = 0;
+  let pairs = 0;
+  for (let i = 0; i < correct.length; i++) {
+    for (let j = i + 1; j < correct.length; j++) {
+      pairs += 1;
+      const left = position.get(correct[i]);
+      const right = position.get(correct[j]);
+      if (left !== undefined && right !== undefined && left < right) {
+        agree += 1;
+      }
+    }
+  }
+  return pairs === 0 ? 1 : agree / pairs;
+}

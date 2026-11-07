@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { aggregate, gradeMcq, runPreChecks } from "./decision";
+import { aggregate, gradeMcq, gradeOrdering, runPreChecks } from "./decision";
 import { generateQuestion, getJudgeConfigId, judge, providerNeedsApiKey } from "./llm";
 import { getApiKey } from "./secrets";
 import {
@@ -11,7 +11,7 @@ import {
   subscribeQuizBypass,
   takeQuizBypass,
 } from "./state";
-import { gradedScore, misconceptionsFor, rememberCheck } from "./memory/remember";
+import { gradedScore, logReview, misconceptionsFor, rememberCheck } from "./memory/remember";
 import { addAttempt, saveMisgradeReport } from "./store";
 import type { AttemptOutcome, AttemptRecord, AttemptSource, CriterionVerdict, GeneratedQuestion } from "./types";
 import { createQuizPanel, type QuizAction } from "./quizPanel";
@@ -29,7 +29,7 @@ export async function runComprehensionGate(
   snippet: string,
   context?: vscode.ExtensionContext,
   language?: string,
-  meta?: { source?: AttemptSource; filePath?: string },
+  meta?: { source?: AttemptSource; filePath?: string; recall?: boolean },
 ): Promise<boolean> {
   if (!context) {
     return fallbackGate(snippet, language);
@@ -71,12 +71,14 @@ export async function runComprehensionGate(
 
   let lastStudentAnswer = "";
   let lastFeedback = "";
+  let lastMisconception = "";
   let lastCriterionResults: AttemptRecord["criterionResults"];
 
   const recordAttempt = async (
     passed: boolean,
     outcome: AttemptOutcome,
     criterionResults?: AttemptRecord["criterionResults"],
+    scoreOverride?: number,
   ): Promise<void> => {
     const draft: AttemptRecord = {
       timestamp: Date.now(),
@@ -94,11 +96,29 @@ export async function runComprehensionGate(
       filePath: meta?.filePath,
       misconceptions: misconceptionsFor({ mode, passed, criterionResults }),
     };
-    draft.score = gradedScore(draft);
+    draft.score = scoreOverride ?? gradedScore(draft);
     await addAttempt(context, draft);
+    let masteryAfter: number | undefined;
     if (outcome === "pass" || outcome === "fail" || outcome === "disputed") {
-      await rememberCheck(context, draft);
+      masteryAfter = await rememberCheck(context, draft);
     }
+    await logReview(context, {
+      concepts: draft.conceptTags,
+      eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : meta?.recall ? "recall" : "check",
+      source: draft.source,
+      mode: draft.mode,
+      score: outcome === "bypass" ? undefined : draft.score,
+      passed: outcome === "bypass" || outcome === "explained" ? undefined : draft.passed,
+      followups: draft.followups,
+      masteryAfter,
+      filePath: draft.filePath,
+      question: question.question,
+      studentAnswer: lastStudentAnswer,
+      misconception: outcome === "fail" ? lastMisconception : "",
+      askedForExplanation: outcome === "explained",
+      explanation: outcome === "explained" ? question.referenceAnswer : "",
+      judgeConfigId: draft.judgeConfigId,
+    });
   };
 
   // eslint-disable-next-line no-constant-condition
@@ -192,6 +212,26 @@ export async function runComprehensionGate(
       return false;
     }
 
+    if (question.kind === "ordering") {
+      const order = payload.order ?? [];
+      const score = gradeOrdering(question, order);
+      const ok = score >= 0.999;
+      if (ok) {
+        await recordAttempt(true, "pass", undefined, score);
+        view.close();
+        return true;
+      }
+      followups += 1;
+      lastFeedback = "That order is not quite right. Move the steps and try again.";
+      if (followups < maxFollowups) {
+        view.showFeedback({ message: lastFeedback, allowDispute: true });
+        continue;
+      }
+      await recordAttempt(false, "fail", undefined, score);
+      view.close();
+      return false;
+    }
+
     const answer = (payload.answer ?? "").trim();
     const preChecks = runPreChecks(answer, snippet, getMinAnswerLength());
     const blocking = preChecks.filter((c) => c.blocking);
@@ -216,6 +256,10 @@ export async function runComprehensionGate(
         4000,
       );
       return true;
+    }
+
+    if (res.kind === "decided") {
+      lastMisconception = res.misconception ?? "";
     }
 
     if (res.kind === "no_decision") {
@@ -275,6 +319,101 @@ async function waitForQuizAction(
   } finally {
     unsubscribe();
   }
+}
+
+export async function runSession(
+  context: vscode.ExtensionContext,
+  input: {
+    snippet: string;
+    filePath?: string;
+    language?: string;
+    questions: GeneratedQuestion[];
+    source?: AttemptSource;
+  },
+): Promise<boolean> {
+  if (input.questions.length === 0) {
+    return true;
+  }
+  const view = createQuizPanel(input.snippet, input.language ?? "");
+  for (const question of input.questions) {
+    view.showQuestion(question);
+    const action = await waitForQuizAction(view);
+    if (action.type === "cancel") {
+      view.close();
+      return false;
+    }
+    if (action.type === "bypass" || action.type === "explain") {
+      view.close();
+      return true;
+    }
+    if (action.type !== "submit") {
+      continue;
+    }
+    let passed = false;
+    let score = 0;
+    let misconception = "";
+    if (question.kind === "multiple-choice") {
+      passed = gradeMcq(question, action.selectedIndex ?? -1);
+      score = passed ? 1 : 0;
+    } else if (question.kind === "ordering") {
+      score = gradeOrdering(question, action.order ?? []);
+      passed = score >= 0.999;
+    } else {
+      const res = await judge({
+        context,
+        snippet: input.snippet,
+        language: input.language ?? "",
+        question,
+        studentAnswer: action.answer ?? "",
+      });
+      if (res.kind === "decided") {
+        passed = aggregate(question.criteria, res.verdicts, getNonCriticalPassFraction()).outcome === "pass";
+        misconception = res.misconception ?? "";
+      } else {
+        passed = true;
+      }
+      score = passed ? 1 : 0;
+    }
+    const record: AttemptRecord = {
+      timestamp: Date.now(),
+      language: input.language ?? "",
+      charCount: input.snippet.length,
+      mode: question.kind === "multiple-choice" ? "multiple-choice" : "free-text",
+      conceptTags: question.conceptTags,
+      passed,
+      outcome: passed ? "pass" : "fail",
+      followups: 0,
+      judgeConfigId: getJudgeConfigId(),
+      score,
+      source: input.source ?? "walkthrough",
+      filePath: input.filePath,
+      misconceptions: misconception ? [misconception] : [],
+    };
+    await addAttempt(context, record);
+    const masteryAfter = await rememberCheck(context, record);
+    await logReview(context, {
+      concepts: record.conceptTags,
+      eventKind: "check",
+      source: record.source,
+      mode: record.mode,
+      score,
+      passed,
+      followups: 0,
+      masteryAfter,
+      filePath: record.filePath,
+      question: question.question,
+      studentAnswer: action.answer,
+      misconception: passed ? "" : misconception,
+      askedForExplanation: false,
+      explanation: "",
+      judgeConfigId: record.judgeConfigId,
+    });
+    if (!passed) {
+      view.showFeedback({ message: "Not quite. The next question is coming, or try to remember this one." });
+    }
+  }
+  view.close();
+  return true;
 }
 
 function mapCriterionResults(

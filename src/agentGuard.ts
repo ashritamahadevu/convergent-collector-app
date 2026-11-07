@@ -39,7 +39,8 @@ import {
   releasePath,
 } from "./gateLock";
 import { runComprehensionGate } from "./quiz";
-import { getCharThreshold, isEnabled, setBypassArmed, state } from "./state";
+import { offerWalkthrough } from "./walkthrough";
+import { getCharThreshold, isEnabled, setBypassArmed, state, wantsWalkthrough } from "./state";
 
 /**
  * Quizzes code written by Claude Code, Codex, or the Cursor agent.
@@ -66,6 +67,7 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
   const queue: QueuedEdit[] = [];
   const pending = new Map<string, PendingDiskEdit>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  let batchTimer: ReturnType<typeof setTimeout> | undefined;
   let draining = false;
 
   const enqueue = (edit: AgentEdit): void => {
@@ -94,7 +96,10 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       return;
     }
     queue.push({ ...edit, snippet, key });
-    void drain();
+    if (batchTimer) {
+      clearTimeout(batchTimer);
+    }
+    batchTimer = setTimeout(() => void drain(), 700);
   };
 
   const drain = async (): Promise<void> => {
@@ -107,11 +112,15 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
         while (state.processing) {
           await delay(200);
         }
-        const edit = queue.shift();
-        if (!edit) {
-          break;
+        const batch = queue.splice(0);
+        const lines = batch.reduce((count, edit) => count + edit.snippet.split("\n").length, 0);
+        if (wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
+          await offerWalkthrough(context, batch);
+          continue;
         }
-        await runAgentQuiz(context, edit);
+        for (const edit of batch) {
+          await runAgentQuiz(context, edit);
+        }
       }
     } finally {
       draining = false;

@@ -66,14 +66,26 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Comprehension check</title>
   <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
-      padding: 16px 20px 24px;
+      padding: 16px 20px 12px;
       line-height: 1.5;
       box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
     }
     h1 {
       font-size: 1.15em;
@@ -175,8 +187,12 @@ function getWebviewHtml(
     }
     .actions {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: center;
+      flex-shrink: 0;
+      padding-top: 12px;
+      background: var(--vscode-editor-background);
     }
     button.bypass, button.dispute {
       padding: 6px 16px;
@@ -195,6 +211,7 @@ function getWebviewHtml(
   </style>
 </head>
 <body>
+  <div class="scroll">
   <h1>Comprehension check</h1>
   <p class="lock-note">Editing is locked until you submit, bypass, ask for an explanation, or close this tab. Bypass and "I don't know" keep the code and do not count as correct. Closing removes the code.</p>
   <div class="snippet-wrap">
@@ -212,6 +229,7 @@ function getWebviewHtml(
     <button type="button" class="dispute hidden" id="dispute-btn">My answer was right</button>
   </div>
   <div id="answer-area" class="answer-area"></div>
+  </div>
   <div class="actions">
     <button type="button" class="submit" id="submit-btn">Submit</button>
     <button type="button" class="bypass" id="bypass-btn">Bypass</button>
@@ -247,6 +265,9 @@ function getWebviewHtml(
       currentKind = payload.kind || "free-text";
       questionEl.textContent = payload.questionText || "";
       clearFeedback();
+      submitBtn.classList.remove("hidden");
+      bypassBtn.classList.remove("hidden");
+      explainBtn.classList.remove("hidden");
       answerAreaEl.innerHTML = "";
 
       if (currentKind === "ordering" && Array.isArray(payload.items)) {
@@ -290,7 +311,13 @@ function getWebviewHtml(
       } else {
         const ta = document.createElement("textarea");
         ta.id = "answer-input";
-        ta.placeholder = "Explain in your own words...";
+        ta.placeholder = "Explain in your own words, then press Submit.";
+        ta.addEventListener("keydown", function (event) {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            collectSubmit();
+          }
+        });
         answerAreaEl.appendChild(ta);
         ta.focus();
       }

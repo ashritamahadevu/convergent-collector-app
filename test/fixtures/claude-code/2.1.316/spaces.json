@@ -1,0 +1,294 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "spaces",
+  "prompt": "You are in a test project. Do not use Bash. Step 1: Read 'my module.js'. Step 2: use Edit to replace '// impl' in 'my module.js' with a 10 line function retry(fn, times) with comments. Step 3: use Write to create the new file 'sub dir/new file.js' with 10 lines defining a function memoize(fn). Then stop.",
+  "receiver": "normal",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "my module.js": "// impl\nmodule.exports = {};\n"
+  },
+  "hookEvents": [
+    {
+      "t": 24168,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\my module.js"
+        },
+        "tool_use_id": "toolu_01TyCa8rtXxXAFYWsTgS6UiW"
+      }
+    },
+    {
+      "t": 24635,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\my module.js"
+        },
+        "tool_response": {
+          "type": "text",
+          "file": {
+            "filePath": "__PROJECT__\\my module.js",
+            "content": "// impl\nmodule.exports = {};\n",
+            "numLines": 3,
+            "startLine": 1,
+            "totalLines": 3
+          }
+        },
+        "tool_use_id": "toolu_01TyCa8rtXxXAFYWsTgS6UiW",
+        "duration_ms": 84
+      }
+    },
+    {
+      "t": 37107,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\my module.js",
+          "old_string": "// impl",
+          "new_string": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}",
+          "replace_all": false
+        },
+        "tool_use_id": "toolu_01J6yfMyhtb3UYtjNYu2i8Qr"
+      }
+    },
+    {
+      "t": 37538,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\my module.js",
+          "old_string": "// impl",
+          "new_string": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}",
+          "replace_all": false
+        },
+        "tool_response": {
+          "filePath": "__PROJECT__\\my module.js",
+          "oldString": "// impl",
+          "newString": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}",
+          "originalFile": "// impl\nmodule.exports = {};\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 2,
+              "newStart": 1,
+              "newLines": 11,
+              "lines": [
+                "-// impl",
+                "+// Calls fn up to `times` attempts, returning the first success.",
+                "+function retry(fn, times) {",
+                "+  // Retry on error; rethrow the last error if every attempt fails.",
+                "+  // Track the most recent failure.",
+                "+  let lastError;",
+                "+  for (let i = 0; i < times; i++) {",
+                "+    try { return fn(); } catch (err) { lastError = err; }",
+                "+  }",
+                "+  throw lastError;",
+                "+}",
+                " module.exports = {};"
+              ]
+            }
+          ],
+          "userModified": false,
+          "replaceAll": false
+        },
+        "tool_use_id": "toolu_01J6yfMyhtb3UYtjNYu2i8Qr",
+        "duration_ms": 100
+      }
+    },
+    {
+      "t": 40241,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\sub dir\\new file.js",
+          "content": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n"
+        },
+        "tool_use_id": "toolu_01TzvDkHdpP1Ui8YBHHBcoQm"
+      }
+    },
+    {
+      "t": 40512,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\sub dir\\new file.js",
+          "content": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n"
+        },
+        "tool_response": {
+          "type": "create",
+          "filePath": "__PROJECT__\\sub dir\\new file.js",
+          "content": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n",
+          "structuredPatch": [],
+          "originalFile": null,
+          "userModified": false
+        },
+        "tool_use_id": "toolu_01TzvDkHdpP1Ui8YBHHBcoQm",
+        "duration_ms": 107
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "http",
+      "t": 37542,
+      "envelope": {
+        "receivedAt": 37535,
+        "snapshots": {
+          "__PROJECT__\\my module.js": "// impl\nmodule.exports = {};\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\my module.js",
+            "old_string": "// impl",
+            "new_string": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "__PROJECT__\\my module.js",
+            "oldString": "// impl",
+            "newString": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}",
+            "originalFile": "// impl\nmodule.exports = {};\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 2,
+                "newStart": 1,
+                "newLines": 11,
+                "lines": [
+                  "-// impl",
+                  "+// Calls fn up to `times` attempts, returning the first success.",
+                  "+function retry(fn, times) {",
+                  "+  // Retry on error; rethrow the last error if every attempt fails.",
+                  "+  // Track the most recent failure.",
+                  "+  let lastError;",
+                  "+  for (let i = 0; i < times; i++) {",
+                  "+    try { return fn(); } catch (err) { lastError = err; }",
+                  "+  }",
+                  "+  throw lastError;",
+                  "+}",
+                  " module.exports = {};"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_01J6yfMyhtb3UYtjNYu2i8Qr",
+          "duration_ms": 100
+        }
+      }
+    },
+    {
+      "via": "http",
+      "t": 40523,
+      "envelope": {
+        "receivedAt": 40516,
+        "snapshots": {},
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Write",
+          "tool_input": {
+            "file_path": "__PROJECT__\\sub dir\\new file.js",
+            "content": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n"
+          },
+          "tool_response": {
+            "type": "create",
+            "filePath": "__PROJECT__\\sub dir\\new file.js",
+            "content": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n",
+            "structuredPatch": [],
+            "originalFile": null,
+            "userModified": false
+          },
+          "tool_use_id": "toolu_01TzvDkHdpP1Ui8YBHHBcoQm",
+          "duration_ms": 107
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "my module.js": "// Calls fn up to `times` attempts, returning the first success.\nfunction retry(fn, times) {\n  // Retry on error; rethrow the last error if every attempt fails.\n  // Track the most recent failure.\n  let lastError;\n  for (let i = 0; i < times; i++) {\n    try { return fn(); } catch (err) { lastError = err; }\n  }\n  throw lastError;\n}\nmodule.exports = {};\n",
+    "sub dir\\new file.js": "// Returns a wrapper that caches fn's results by argument.\nfunction memoize(fn) {\n  // Storage for previously computed results.\n  const cache = new Map();\n  return function (arg) {\n    // Compute once per argument; reuse the stored value afterward.\n    if (!cache.has(arg)) cache.set(arg, fn.call(this, arg));\n    return cache.get(arg);\n  };\n}\n"
+  }
+}

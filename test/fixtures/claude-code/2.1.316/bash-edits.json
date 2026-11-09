@@ -1,0 +1,168 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "bash-edits",
+  "prompt": "You are in a test project. Use ONLY the Bash tool, never Edit or Write. Run these three commands one at a time: 1) sed -i 's/hi/hey/' app.js   2) a cat >> app.js <<'EOF' heredoc that appends a 10 line JavaScript function sumSquares(arr) with comments   3) echo \"module.exports = { version: '1.0.0', name: 'demo', description: 'a demo package used for testing hooks', keywords: ['a', 'b', 'c'] };\" > meta.js . Then stop.",
+  "receiver": "normal",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "app.js": "function greet() {\n  return 'hi';\n}\n"
+  },
+  "hookEvents": [
+    {
+      "t": 11947,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sed -i 's/hi/hey/' app.js",
+          "description": "Replace first \"hi\" with \"hey\" in app.js"
+        },
+        "tool_use_id": "toolu_01SLLF5vLPdwT1jnX29wc1Mb"
+      }
+    },
+    {
+      "t": 21390,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sed -i 's/hi/hey/' app.js",
+          "description": "Replace first \"hi\" with \"hey\" in app.js"
+        },
+        "tool_response": {
+          "stdout": "",
+          "stderr": "\nShell cwd was reset to __PROJECT__",
+          "interrupted": false,
+          "isImage": false,
+          "noOutputExpected": false
+        },
+        "tool_use_id": "toolu_01SLLF5vLPdwT1jnX29wc1Mb",
+        "duration_ms": 7633
+      }
+    },
+    {
+      "t": 25324,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat >> app.js <<'EOF'\n\n// Returns the sum of the squares of every number in arr.\n// Each element is squared, then the squares are added together.\n// Example: sumSquares([1, 2, 3]) returns 14.\nfunction sumSquares(arr) {\n  let total = 0;                 // running total of squared values\n  for (const n of arr) {         // visit each element once\n    total += n * n;              // add the square of the current element\n  }\n  return total;                  // hand back the final sum\n}\nEOF",
+          "description": "Append sumSquares function to app.js"
+        },
+        "tool_use_id": "toolu_015VTEfNXSMsAhPfdByTB2bm"
+      }
+    },
+    {
+      "t": 25667,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat >> app.js <<'EOF'\n\n// Returns the sum of the squares of every number in arr.\n// Each element is squared, then the squares are added together.\n// Example: sumSquares([1, 2, 3]) returns 14.\nfunction sumSquares(arr) {\n  let total = 0;                 // running total of squared values\n  for (const n of arr) {         // visit each element once\n    total += n * n;              // add the square of the current element\n  }\n  return total;                  // hand back the final sum\n}\nEOF",
+          "description": "Append sumSquares function to app.js"
+        },
+        "tool_response": {
+          "stdout": "",
+          "stderr": "\nShell cwd was reset to __PROJECT__",
+          "interrupted": false,
+          "isImage": false,
+          "noOutputExpected": false
+        },
+        "tool_use_id": "toolu_015VTEfNXSMsAhPfdByTB2bm",
+        "duration_ms": 150
+      }
+    },
+    {
+      "t": 28035,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"module.exports = { version: '1.0.0', name: 'demo', description: 'a demo package used for testing hooks', keywords: ['a', 'b', 'c'] };\" > meta.js",
+          "description": "Write meta.js with demo package metadata"
+        },
+        "tool_use_id": "toolu_01Y3bLVyZT154zmUQsUXnLxc"
+      }
+    },
+    {
+      "t": 28504,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"module.exports = { version: '1.0.0', name: 'demo', description: 'a demo package used for testing hooks', keywords: ['a', 'b', 'c'] };\" > meta.js",
+          "description": "Write meta.js with demo package metadata"
+        },
+        "tool_response": {
+          "stdout": "",
+          "stderr": "\nShell cwd was reset to __PROJECT__",
+          "interrupted": false,
+          "isImage": false,
+          "noOutputExpected": false
+        },
+        "tool_use_id": "toolu_01Y3bLVyZT154zmUQsUXnLxc",
+        "duration_ms": 153
+      }
+    }
+  ],
+  "delivered": [],
+  "finalFiles": {
+    "app.js": "function greet() {\n  return 'hey';\n}\n\n// Returns the sum of the squares of every number in arr.\n// Each element is squared, then the squares are added together.\n// Example: sumSquares([1, 2, 3]) returns 14.\nfunction sumSquares(arr) {\n  let total = 0;                 // running total of squared values\n  for (const n of arr) {         // visit each element once\n    total += n * n;              // add the square of the current element\n  }\n  return total;                  // hand back the final sum\n}\n",
+    "meta.js": "module.exports = { version: '1.0.0', name: 'demo', description: 'a demo package used for testing hooks', keywords: ['a', 'b', 'c'] };\n"
+  }
+}

@@ -11,3 +11,6 @@ tsconfig.json
 **/*.ts
 **/*.map
 *.vsix
+test/**
+test-reports/**
+ISSUES.md

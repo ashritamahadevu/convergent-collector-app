@@ -1,0 +1,347 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "edit-twice",
+  "prompt": "You are in a test project. Do exactly this and nothing else. Do not use Bash. Step 1: Read app.js. Step 2: use the Edit tool once to change the string 'hi' to 'hello' (small edit). Step 3: use the Edit tool a second time on app.js to replace the line '// TODO: add helpers' with a block of 10 to 14 lines of JavaScript defining functions clamp(x, min, max), sum(arr) and average(arr), each with a one-line comment. Then stop.",
+  "receiver": "normal",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "app.js": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n"
+  },
+  "hookEvents": [
+    {
+      "t": 7089,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js"
+        },
+        "tool_use_id": "toolu_01FbnbPG4nAHLMs2SJpMUKnh"
+      }
+    },
+    {
+      "t": 7319,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js"
+        },
+        "tool_response": {
+          "type": "text",
+          "file": {
+            "filePath": "__PROJECT__\\app.js",
+            "content": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n",
+            "numLines": 6,
+            "startLine": 1,
+            "totalLines": 6
+          }
+        },
+        "tool_use_id": "toolu_01FbnbPG4nAHLMs2SJpMUKnh",
+        "duration_ms": 49
+      }
+    },
+    {
+      "t": 10246,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "  return 'hi';",
+          "new_string": "  return 'hello';",
+          "replace_all": false
+        },
+        "tool_use_id": "toolu_012jWqEFYkJy4Fdf3UVe1gbG"
+      }
+    },
+    {
+      "t": 10441,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "  return 'hi';",
+          "new_string": "  return 'hello';",
+          "replace_all": false
+        },
+        "tool_response": {
+          "filePath": "__PROJECT__\\app.js",
+          "oldString": "  return 'hi';",
+          "newString": "  return 'hello';",
+          "originalFile": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 5,
+              "newStart": 1,
+              "newLines": 5,
+              "lines": [
+                " function greet() {",
+                "-  return 'hi';",
+                "+  return 'hello';",
+                " }",
+                " // TODO: add helpers",
+                " module.exports = { greet };"
+              ]
+            }
+          ],
+          "userModified": false,
+          "replaceAll": false
+        },
+        "tool_use_id": "toolu_012jWqEFYkJy4Fdf3UVe1gbG",
+        "duration_ms": 35
+      }
+    },
+    {
+      "t": 11388,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "// TODO: add helpers",
+          "new_string": "// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}",
+          "replace_all": false
+        },
+        "tool_use_id": "toolu_01EiVKLNHfuRSVab2e8Hf7av"
+      }
+    },
+    {
+      "t": 11569,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "// TODO: add helpers",
+          "new_string": "// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}",
+          "replace_all": false
+        },
+        "tool_response": {
+          "filePath": "__PROJECT__\\app.js",
+          "oldString": "// TODO: add helpers",
+          "newString": "// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}",
+          "originalFile": "function greet() {\n  return 'hello';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 5,
+              "newStart": 1,
+              "newLines": 18,
+              "lines": [
+                " function greet() {",
+                "   return 'hello';",
+                " }",
+                "-// TODO: add helpers",
+                "+// Restrict a value to the range [min, max]",
+                "+function clamp(x, min, max) {",
+                "+  return Math.min(Math.max(x, min), max);",
+                "+}",
+                "+",
+                "+// Add up all numbers in an array",
+                "+function sum(arr) {",
+                "+  return arr.reduce((total, n) => total + n, 0);",
+                "+}",
+                "+",
+                "+// Mean of the numbers in an array (0 for an empty array)",
+                "+function average(arr) {",
+                "+  return arr.length === 0 ? 0 : sum(arr) / arr.length;",
+                "+}",
+                " module.exports = { greet };"
+              ]
+            }
+          ],
+          "userModified": false,
+          "replaceAll": false
+        },
+        "tool_use_id": "toolu_01EiVKLNHfuRSVab2e8Hf7av",
+        "duration_ms": 15
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "http",
+      "t": 10450,
+      "envelope": {
+        "receivedAt": 10443,
+        "snapshots": {
+          "__PROJECT__\\app.js": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\app.js",
+            "old_string": "  return 'hi';",
+            "new_string": "  return 'hello';",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "__PROJECT__\\app.js",
+            "oldString": "  return 'hi';",
+            "newString": "  return 'hello';",
+            "originalFile": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 5,
+                "newStart": 1,
+                "newLines": 5,
+                "lines": [
+                  " function greet() {",
+                  "-  return 'hi';",
+                  "+  return 'hello';",
+                  " }",
+                  " // TODO: add helpers",
+                  " module.exports = { greet };"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_012jWqEFYkJy4Fdf3UVe1gbG",
+          "duration_ms": 35
+        }
+      }
+    },
+    {
+      "via": "http",
+      "t": 11573,
+      "envelope": {
+        "receivedAt": 11566,
+        "snapshots": {
+          "__PROJECT__\\app.js": "function greet() {\n  return 'hello';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\app.js",
+            "old_string": "// TODO: add helpers",
+            "new_string": "// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "__PROJECT__\\app.js",
+            "oldString": "// TODO: add helpers",
+            "newString": "// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}",
+            "originalFile": "function greet() {\n  return 'hello';\n}\n// TODO: add helpers\nmodule.exports = { greet };\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 5,
+                "newStart": 1,
+                "newLines": 18,
+                "lines": [
+                  " function greet() {",
+                  "   return 'hello';",
+                  " }",
+                  "-// TODO: add helpers",
+                  "+// Restrict a value to the range [min, max]",
+                  "+function clamp(x, min, max) {",
+                  "+  return Math.min(Math.max(x, min), max);",
+                  "+}",
+                  "+",
+                  "+// Add up all numbers in an array",
+                  "+function sum(arr) {",
+                  "+  return arr.reduce((total, n) => total + n, 0);",
+                  "+}",
+                  "+",
+                  "+// Mean of the numbers in an array (0 for an empty array)",
+                  "+function average(arr) {",
+                  "+  return arr.length === 0 ? 0 : sum(arr) / arr.length;",
+                  "+}",
+                  " module.exports = { greet };"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_01EiVKLNHfuRSVab2e8Hf7av",
+          "duration_ms": 15
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "app.js": "function greet() {\n  return 'hello';\n}\n// Restrict a value to the range [min, max]\nfunction clamp(x, min, max) {\n  return Math.min(Math.max(x, min), max);\n}\n\n// Add up all numbers in an array\nfunction sum(arr) {\n  return arr.reduce((total, n) => total + n, 0);\n}\n\n// Mean of the numbers in an array (0 for an empty array)\nfunction average(arr) {\n  return arr.length === 0 ? 0 : sum(arr) / arr.length;\n}\nmodule.exports = { greet };\n"
+  }
+}

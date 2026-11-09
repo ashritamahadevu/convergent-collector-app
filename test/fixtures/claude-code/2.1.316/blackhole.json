@@ -1,0 +1,274 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "blackhole",
+  "prompt": "You are in a test project. Read app.js. Then use the Edit tool to replace '// TODO: add helpers' with a 10 line function range(start, end, step) with comments. Do not use Bash. Then stop.",
+  "receiver": "blackhole",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "app.js": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n"
+  },
+  "hookEvents": [
+    {
+      "t": 3423,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js"
+        },
+        "tool_use_id": "toolu_01SpCnPS9aYAkgba6wGLuF6A"
+      }
+    },
+    {
+      "t": 3610,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js"
+        },
+        "tool_response": {
+          "type": "text",
+          "file": {
+            "filePath": "__PROJECT__\\app.js",
+            "content": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n",
+            "numLines": 5,
+            "startLine": 1,
+            "totalLines": 5
+          }
+        },
+        "tool_use_id": "toolu_01SpCnPS9aYAkgba6wGLuF6A",
+        "duration_ms": 24
+      }
+    },
+    {
+      "t": 9695,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "// TODO: add helpers",
+          "new_string": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+          "replace_all": false
+        },
+        "tool_use_id": "toolu_01Gg9qg3U4FNTye4ffZq8G4H"
+      }
+    },
+    {
+      "t": 9880,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\app.js",
+          "old_string": "// TODO: add helpers",
+          "new_string": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+          "replace_all": false
+        },
+        "tool_response": {
+          "filePath": "__PROJECT__\\app.js",
+          "oldString": "// TODO: add helpers",
+          "newString": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+          "originalFile": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 4,
+              "newStart": 1,
+              "newLines": 13,
+              "lines": [
+                " function greet() {",
+                "   return 'hi';",
+                " }",
+                "-// TODO: add helpers",
+                "+function range(start, end, step = 1) {",
+                "+  // Guard against a zero step, which would loop forever",
+                "+  if (step === 0) throw new Error('step must not be 0');",
+                "+  // Collect values from start up to (but not including) end",
+                "+  const result = [];",
+                "+  for (let i = start; step > 0 ? i < end : i > end; i += step) {",
+                "+    result.push(i);",
+                "+  }",
+                "+  return result; // Return the collected sequence",
+                "+}"
+              ]
+            }
+          ],
+          "userModified": false,
+          "replaceAll": false
+        },
+        "tool_use_id": "toolu_01Gg9qg3U4FNTye4ffZq8G4H",
+        "duration_ms": 26
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "http",
+      "t": 9891,
+      "envelope": {
+        "receivedAt": 9885,
+        "snapshots": {
+          "__PROJECT__\\app.js": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\app.js",
+            "old_string": "// TODO: add helpers",
+            "new_string": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "__PROJECT__\\app.js",
+            "oldString": "// TODO: add helpers",
+            "newString": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+            "originalFile": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 4,
+                "newStart": 1,
+                "newLines": 13,
+                "lines": [
+                  " function greet() {",
+                  "   return 'hi';",
+                  " }",
+                  "-// TODO: add helpers",
+                  "+function range(start, end, step = 1) {",
+                  "+  // Guard against a zero step, which would loop forever",
+                  "+  if (step === 0) throw new Error('step must not be 0');",
+                  "+  // Collect values from start up to (but not including) end",
+                  "+  const result = [];",
+                  "+  for (let i = start; step > 0 ? i < end : i > end; i += step) {",
+                  "+    result.push(i);",
+                  "+  }",
+                  "+  return result; // Return the collected sequence",
+                  "+}"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_01Gg9qg3U4FNTye4ffZq8G4H",
+          "duration_ms": 26
+        }
+      }
+    },
+    {
+      "via": "inbox",
+      "t": 11394,
+      "envelope": {
+        "receivedAt": 9885,
+        "snapshots": {
+          "__PROJECT__\\app.js": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\app.js",
+            "old_string": "// TODO: add helpers",
+            "new_string": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "__PROJECT__\\app.js",
+            "oldString": "// TODO: add helpers",
+            "newString": "function range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}",
+            "originalFile": "function greet() {\n  return 'hi';\n}\n// TODO: add helpers\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 4,
+                "newStart": 1,
+                "newLines": 13,
+                "lines": [
+                  " function greet() {",
+                  "   return 'hi';",
+                  " }",
+                  "-// TODO: add helpers",
+                  "+function range(start, end, step = 1) {",
+                  "+  // Guard against a zero step, which would loop forever",
+                  "+  if (step === 0) throw new Error('step must not be 0');",
+                  "+  // Collect values from start up to (but not including) end",
+                  "+  const result = [];",
+                  "+  for (let i = start; step > 0 ? i < end : i > end; i += step) {",
+                  "+    result.push(i);",
+                  "+  }",
+                  "+  return result; // Return the collected sequence",
+                  "+}"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_01Gg9qg3U4FNTye4ffZq8G4H",
+          "duration_ms": 26
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "app.js": "function greet() {\n  return 'hi';\n}\nfunction range(start, end, step = 1) {\n  // Guard against a zero step, which would loop forever\n  if (step === 0) throw new Error('step must not be 0');\n  // Collect values from start up to (but not including) end\n  const result = [];\n  for (let i = start; step > 0 ? i < end : i > end; i += step) {\n    result.push(i);\n  }\n  return result; // Return the collected sequence\n}\n"
+  }
+}

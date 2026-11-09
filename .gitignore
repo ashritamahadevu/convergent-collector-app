@@ -22,3 +22,9 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test run output
+test/integration/out/
+test-reports/*.json
+test-reports/interference-results/
+.claude/worktrees/

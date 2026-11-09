@@ -1,0 +1,230 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "notebook",
+  "prompt": "You are in a test project. Read analysis.ipynb. Then use the NotebookEdit tool to replace the source of the code cell with id 'calc' with a 10 to 12 line Python function moving_average(values, window) plus a call to it. Do not use Bash, Write or Edit. Then stop.",
+  "receiver": "normal",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "analysis.ipynb": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"x = 1\\n\",\n    \"print(x)\\n\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+  },
+  "hookEvents": [
+    {
+      "t": 3674,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\analysis.ipynb"
+        },
+        "tool_use_id": "toolu_012XB5Jxx5s5x2FQ65bhWd4g"
+      }
+    },
+    {
+      "t": 3856,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ToolSearch",
+        "tool_input": {
+          "query": "select:NotebookEdit",
+          "max_results": 1
+        },
+        "tool_use_id": "toolu_016Z1j7CfjNnHirHV2ocgmpx"
+      }
+    },
+    {
+      "t": 3885,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\analysis.ipynb"
+        },
+        "tool_response": {
+          "type": "notebook",
+          "file": {
+            "filePath": "__PROJECT__\\analysis.ipynb",
+            "cells": [
+              {
+                "cellType": "markdown",
+                "source": "# Analysis\n",
+                "cell_id": "intro"
+              },
+              {
+                "cellType": "code",
+                "source": "x = 1\nprint(x)\n",
+                "cell_id": "calc",
+                "language": "python"
+              }
+            ]
+          }
+        },
+        "tool_use_id": "toolu_012XB5Jxx5s5x2FQ65bhWd4g",
+        "duration_ms": 36
+      }
+    },
+    {
+      "t": 3994,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "ToolSearch",
+        "tool_input": {
+          "query": "select:NotebookEdit",
+          "max_results": 1
+        },
+        "tool_response": {
+          "matches": [
+            "NotebookEdit"
+          ],
+          "query": "select:NotebookEdit",
+          "total_deferred_tools": 590
+        },
+        "tool_use_id": "toolu_016Z1j7CfjNnHirHV2ocgmpx",
+        "duration_ms": 9
+      }
+    },
+    {
+      "t": 8431,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "NotebookEdit",
+        "tool_input": {
+          "notebook_path": "__PROJECT__\\analysis.ipynb",
+          "cell_id": "calc",
+          "new_source": "def moving_average(values, window):\n    \"\"\"Return the simple moving average of values over a sliding window.\"\"\"\n    if window <= 0 or window > len(values):\n        raise ValueError(\"window must be between 1 and len(values)\")\n    averages = []\n    for i in range(len(values) - window + 1):\n        chunk = values[i:i + window]\n        averages.append(sum(chunk) / window)\n    return averages\n\nresult = moving_average([1, 2, 3, 4, 5], 3)\nprint(result)\n",
+          "edit_mode": "replace"
+        },
+        "tool_use_id": "toolu_01PWhMxs7e1gr1etd11ovqCT"
+      }
+    },
+    {
+      "t": 8652,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "NotebookEdit",
+        "tool_input": {
+          "notebook_path": "__PROJECT__\\analysis.ipynb",
+          "cell_id": "calc",
+          "new_source": "def moving_average(values, window):\n    \"\"\"Return the simple moving average of values over a sliding window.\"\"\"\n    if window <= 0 or window > len(values):\n        raise ValueError(\"window must be between 1 and len(values)\")\n    averages = []\n    for i in range(len(values) - window + 1):\n        chunk = values[i:i + window]\n        averages.append(sum(chunk) / window)\n    return averages\n\nresult = moving_average([1, 2, 3, 4, 5], 3)\nprint(result)\n",
+          "edit_mode": "replace"
+        },
+        "tool_response": {
+          "new_source": "def moving_average(values, window):\n    \"\"\"Return the simple moving average of values over a sliding window.\"\"\"\n    if window <= 0 or window > len(values):\n        raise ValueError(\"window must be between 1 and len(values)\")\n    averages = []\n    for i in range(len(values) - window + 1):\n        chunk = values[i:i + window]\n        averages.append(sum(chunk) / window)\n    return averages\n\nresult = moving_average([1, 2, 3, 4, 5], 3)\nprint(result)\n",
+          "old_source": "x = 1\nprint(x)\n",
+          "cell_type": "code",
+          "language": "python",
+          "edit_mode": "replace",
+          "cell_id": "calc",
+          "error": "",
+          "notebook_path": "__PROJECT__\\analysis.ipynb",
+          "original_file": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"x = 1\\n\",\n    \"print(x)\\n\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n",
+          "updated_file": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": \"def moving_average(values, window):\\n    \\\"\\\"\\\"Return the simple moving average of values over a sliding window.\\\"\\\"\\\"\\n    if window <= 0 or window > len(values):\\n        raise ValueError(\\\"window must be between 1 and len(values)\\\")\\n    averages = []\\n    for i in range(len(values) - window + 1):\\n        chunk = values[i:i + window]\\n        averages.append(sum(chunk) / window)\\n    return averages\\n\\nresult = moving_average([1, 2, 3, 4, 5], 3)\\nprint(result)\\n\"\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}"
+        },
+        "tool_use_id": "toolu_01PWhMxs7e1gr1etd11ovqCT",
+        "duration_ms": 19
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "http",
+      "t": 8666,
+      "envelope": {
+        "receivedAt": 8658,
+        "snapshots": {
+          "__PROJECT__\\analysis.ipynb": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"x = 1\\n\",\n    \"print(x)\\n\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_input": {
+            "notebook_path": "__PROJECT__\\analysis.ipynb",
+            "cell_id": "calc",
+            "new_source": "def moving_average(values, window):\n    \"\"\"Return the simple moving average of values over a sliding window.\"\"\"\n    if window <= 0 or window > len(values):\n        raise ValueError(\"window must be between 1 and len(values)\")\n    averages = []\n    for i in range(len(values) - window + 1):\n        chunk = values[i:i + window]\n        averages.append(sum(chunk) / window)\n    return averages\n\nresult = moving_average([1, 2, 3, 4, 5], 3)\nprint(result)\n",
+            "edit_mode": "replace"
+          },
+          "tool_response": {
+            "new_source": "def moving_average(values, window):\n    \"\"\"Return the simple moving average of values over a sliding window.\"\"\"\n    if window <= 0 or window > len(values):\n        raise ValueError(\"window must be between 1 and len(values)\")\n    averages = []\n    for i in range(len(values) - window + 1):\n        chunk = values[i:i + window]\n        averages.append(sum(chunk) / window)\n    return averages\n\nresult = moving_average([1, 2, 3, 4, 5], 3)\nprint(result)\n",
+            "old_source": "x = 1\nprint(x)\n",
+            "cell_type": "code",
+            "language": "python",
+            "edit_mode": "replace",
+            "cell_id": "calc",
+            "error": "",
+            "notebook_path": "__PROJECT__\\analysis.ipynb",
+            "original_file": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"x = 1\\n\",\n    \"print(x)\\n\"\n   ]\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n",
+            "updated_file": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": \"def moving_average(values, window):\\n    \\\"\\\"\\\"Return the simple moving average of values over a sliding window.\\\"\\\"\\\"\\n    if window <= 0 or window > len(values):\\n        raise ValueError(\\\"window must be between 1 and len(values)\\\")\\n    averages = []\\n    for i in range(len(values) - window + 1):\\n        chunk = values[i:i + window]\\n        averages.append(sum(chunk) / window)\\n    return averages\\n\\nresult = moving_average([1, 2, 3, 4, 5], 3)\\nprint(result)\\n\"\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}"
+          },
+          "tool_use_id": "toolu_01PWhMxs7e1gr1etd11ovqCT",
+          "duration_ms": 19
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "analysis.ipynb": "{\n \"cells\": [\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"intro\",\n   \"metadata\": {},\n   \"source\": [\n    \"# Analysis\\n\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"calc\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": \"def moving_average(values, window):\\n    \\\"\\\"\\\"Return the simple moving average of values over a sliding window.\\\"\\\"\\\"\\n    if window <= 0 or window > len(values):\\n        raise ValueError(\\\"window must be between 1 and len(values)\\\")\\n    averages = []\\n    for i in range(len(values) - window + 1):\\n        chunk = values[i:i + window]\\n        averages.append(sum(chunk) / window)\\n    return averages\\n\\nresult = moving_average([1, 2, 3, 4, 5], 3)\\nprint(result)\\n\"\n  }\n ],\n \"metadata\": {\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}"
+  }
+}

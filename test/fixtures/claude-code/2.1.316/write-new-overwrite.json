@@ -1,0 +1,298 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "write-new-overwrite",
+  "prompt": "You are in a test project. Do exactly this and nothing else. Do not use Bash. Step 1: use the Write tool to create the NEW file utils/strings.js with 12 to 16 lines of JavaScript defining capitalize, slugify and truncate, exported with module.exports. Step 2: Read config.js, then use the Write tool (not Edit) to overwrite config.js with a new version that keeps the existing keys and adds a validateConfig(cfg) function of about 10 lines that throws on bad values. Then stop.",
+  "receiver": "normal",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "config.js": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n"
+  },
+  "hookEvents": [
+    {
+      "t": 8429,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\utils\\strings.js",
+          "content": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n"
+        },
+        "tool_use_id": "toolu_013hmCDQWRCpfdWh9rxasj7D"
+      }
+    },
+    {
+      "t": 8643,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\utils\\strings.js",
+          "content": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n"
+        },
+        "tool_response": {
+          "type": "create",
+          "filePath": "__PROJECT__\\utils\\strings.js",
+          "content": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n",
+          "structuredPatch": [],
+          "originalFile": null,
+          "userModified": false
+        },
+        "tool_use_id": "toolu_013hmCDQWRCpfdWh9rxasj7D",
+        "duration_ms": 31
+      }
+    },
+    {
+      "t": 9000,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\config.js"
+        },
+        "tool_use_id": "toolu_01HQ99UGqTydtUXkWRn1MAkM"
+      }
+    },
+    {
+      "t": 9172,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\config.js"
+        },
+        "tool_response": {
+          "type": "text",
+          "file": {
+            "filePath": "__PROJECT__\\config.js",
+            "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n",
+            "numLines": 5,
+            "startLine": 1,
+            "totalLines": 5
+          }
+        },
+        "tool_use_id": "toolu_01HQ99UGqTydtUXkWRn1MAkM",
+        "duration_ms": 25
+      }
+    },
+    {
+      "t": 14824,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\config.js",
+          "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n"
+        },
+        "tool_use_id": "toolu_01VnnSXcvdLhrqNJkXxHoLUp"
+      }
+    },
+    {
+      "t": 15199,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "__PROJECT__\\config.js",
+          "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n"
+        },
+        "tool_response": {
+          "type": "update",
+          "filePath": "__PROJECT__\\config.js",
+          "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n",
+          "structuredPatch": [
+            {
+              "oldStart": 2,
+              "oldLines": 3,
+              "newStart": 2,
+              "newLines": 18,
+              "lines": [
+                "   port: 3000,",
+                "   host: 'localhost',",
+                " };",
+                "+",
+                "+function validateConfig(cfg) {",
+                "+  if (!cfg || typeof cfg !== 'object') {",
+                "+    throw new TypeError('config must be an object');",
+                "+  }",
+                "+  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {",
+                "+    throw new RangeError(`invalid port: ${cfg.port}`);",
+                "+  }",
+                "+  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {",
+                "+    throw new TypeError('host must be a non-empty string');",
+                "+  }",
+                "+  return true;",
+                "+}",
+                "+",
+                "+module.exports.validateConfig = validateConfig;"
+              ]
+            }
+          ],
+          "originalFile": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n",
+          "userModified": false
+        },
+        "tool_use_id": "toolu_01VnnSXcvdLhrqNJkXxHoLUp",
+        "duration_ms": 133
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "http",
+      "t": 8653,
+      "envelope": {
+        "receivedAt": 8647,
+        "snapshots": {},
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Write",
+          "tool_input": {
+            "file_path": "__PROJECT__\\utils\\strings.js",
+            "content": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n"
+          },
+          "tool_response": {
+            "type": "create",
+            "filePath": "__PROJECT__\\utils\\strings.js",
+            "content": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n",
+            "structuredPatch": [],
+            "originalFile": null,
+            "userModified": false
+          },
+          "tool_use_id": "toolu_013hmCDQWRCpfdWh9rxasj7D",
+          "duration_ms": 31
+        }
+      }
+    },
+    {
+      "via": "http",
+      "t": 15214,
+      "envelope": {
+        "receivedAt": 15209,
+        "snapshots": {
+          "__PROJECT__\\config.js": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Write",
+          "tool_input": {
+            "file_path": "__PROJECT__\\config.js",
+            "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n"
+          },
+          "tool_response": {
+            "type": "update",
+            "filePath": "__PROJECT__\\config.js",
+            "content": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n",
+            "structuredPatch": [
+              {
+                "oldStart": 2,
+                "oldLines": 3,
+                "newStart": 2,
+                "newLines": 18,
+                "lines": [
+                  "   port: 3000,",
+                  "   host: 'localhost',",
+                  " };",
+                  "+",
+                  "+function validateConfig(cfg) {",
+                  "+  if (!cfg || typeof cfg !== 'object') {",
+                  "+    throw new TypeError('config must be an object');",
+                  "+  }",
+                  "+  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {",
+                  "+    throw new RangeError(`invalid port: ${cfg.port}`);",
+                  "+  }",
+                  "+  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {",
+                  "+    throw new TypeError('host must be a non-empty string');",
+                  "+  }",
+                  "+  return true;",
+                  "+}",
+                  "+",
+                  "+module.exports.validateConfig = validateConfig;"
+                ]
+              }
+            ],
+            "originalFile": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n",
+            "userModified": false
+          },
+          "tool_use_id": "toolu_01VnnSXcvdLhrqNJkXxHoLUp",
+          "duration_ms": 133
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "config.js": "module.exports = {\n  port: 3000,\n  host: 'localhost',\n};\n\nfunction validateConfig(cfg) {\n  if (!cfg || typeof cfg !== 'object') {\n    throw new TypeError('config must be an object');\n  }\n  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {\n    throw new RangeError(`invalid port: ${cfg.port}`);\n  }\n  if (typeof cfg.host !== 'string' || cfg.host.trim() === '') {\n    throw new TypeError('host must be a non-empty string');\n  }\n  return true;\n}\n\nmodule.exports.validateConfig = validateConfig;\n",
+    "utils\\strings.js": "function capitalize(str) {\n  if (!str) return '';\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nfunction slugify(str) {\n  return String(str).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction truncate(str, max = 80, suffix = '...') {\n  if (str.length <= max) return str;\n  return str.slice(0, Math.max(0, max - suffix.length)) + suffix;\n}\n\nmodule.exports = { capitalize, slugify, truncate };\n"
+  }
+}

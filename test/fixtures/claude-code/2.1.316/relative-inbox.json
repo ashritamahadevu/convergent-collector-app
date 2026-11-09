@@ -1,0 +1,215 @@
+{
+  "claudeVersion": "2.1.316 (Claude Code)",
+  "scenario": "relative-inbox",
+  "prompt": "You are in a test project. Read src/rel.js. Then call the Edit tool with file_path set to the RELATIVE path 'src/rel.js' (do not expand it to an absolute path) and replace '// fill me' with a 10 line function debounce(fn, ms) with comments. Do not use Bash. Then stop.",
+  "receiver": "none",
+  "platform": "win32",
+  "note": "Captured from a real `claude -p --model haiku` run. t values are ms since the run started.",
+  "seed": {
+    "src/rel.js": "// fill me\nmodule.exports = {};\n"
+  },
+  "hookEvents": [
+    {
+      "t": 56518,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\src\\rel.js"
+        },
+        "tool_use_id": "toolu_01DxnKgeqEefRCPk6d2sFjo6"
+      }
+    },
+    {
+      "t": 57163,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "__PROJECT__\\src\\rel.js"
+        },
+        "tool_response": {
+          "type": "text",
+          "file": {
+            "filePath": "__PROJECT__\\src\\rel.js",
+            "content": "// fill me\nmodule.exports = {};\n",
+            "numLines": 3,
+            "startLine": 1,
+            "totalLines": 3
+          }
+        },
+        "tool_use_id": "toolu_01DxnKgeqEefRCPk6d2sFjo6",
+        "duration_ms": 43
+      }
+    },
+    {
+      "t": 60886,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\src\\rel.js",
+          "old_string": "// fill me",
+          "new_string": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}",
+          "replace_all": false
+        },
+        "tool_use_id": "toolu_019Q5rtxAeSpsB8qcRRQKgn4"
+      }
+    },
+    {
+      "t": 61449,
+      "payload": {
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "transcript_path": "__REDACTED__",
+        "cwd": "__PROJECT__",
+        "scratchpad_dir": "__REDACTED__",
+        "prompt_id": "00000000-0000-0000-0000-000000000000",
+        "permission_mode": "acceptEdits",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+          "file_path": "__PROJECT__\\src\\rel.js",
+          "old_string": "// fill me",
+          "new_string": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}",
+          "replace_all": false
+        },
+        "tool_response": {
+          "filePath": "src/rel.js",
+          "oldString": "// fill me",
+          "newString": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}",
+          "originalFile": "// fill me\nmodule.exports = {};\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 2,
+              "newStart": 1,
+              "newLines": 15,
+              "lines": [
+                "-// fill me",
+                "+// Returns a debounced version of fn that delays invoking it until",
+                "+// `ms` milliseconds have elapsed since the last time it was called.",
+                "+function debounce(fn, ms) {",
+                "+  // Holds the pending timer id so it can be cleared on each new call.",
+                "+  let timer;",
+                "+  return function (...args) {",
+                "+    // Cancel any previously scheduled invocation.",
+                "+    clearTimeout(timer);",
+                "+    // Schedule fn to run after the quiet period, preserving `this` and arguments.",
+                "+    timer = setTimeout(() => {",
+                "+      fn.apply(this, args);",
+                "+    }, ms);",
+                "+  };",
+                "+}",
+                " module.exports = {};"
+              ]
+            }
+          ],
+          "userModified": false,
+          "replaceAll": false
+        },
+        "tool_use_id": "toolu_019Q5rtxAeSpsB8qcRRQKgn4",
+        "duration_ms": 68
+      }
+    }
+  ],
+  "delivered": [
+    {
+      "via": "inbox",
+      "t": 61454,
+      "envelope": {
+        "receivedAt": 61454,
+        "snapshots": {
+          "__PROJECT__\\src\\rel.js": "// fill me\nmodule.exports = {};\n"
+        },
+        "payload": {
+          "session_id": "00000000-0000-0000-0000-000000000000",
+          "transcript_path": "__REDACTED__",
+          "cwd": "__PROJECT__",
+          "scratchpad_dir": "__REDACTED__",
+          "prompt_id": "00000000-0000-0000-0000-000000000000",
+          "permission_mode": "acceptEdits",
+          "effort": {
+            "level": "medium"
+          },
+          "hook_event_name": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_input": {
+            "file_path": "__PROJECT__\\src\\rel.js",
+            "old_string": "// fill me",
+            "new_string": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}",
+            "replace_all": false
+          },
+          "tool_response": {
+            "filePath": "src/rel.js",
+            "oldString": "// fill me",
+            "newString": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}",
+            "originalFile": "// fill me\nmodule.exports = {};\n",
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 2,
+                "newStart": 1,
+                "newLines": 15,
+                "lines": [
+                  "-// fill me",
+                  "+// Returns a debounced version of fn that delays invoking it until",
+                  "+// `ms` milliseconds have elapsed since the last time it was called.",
+                  "+function debounce(fn, ms) {",
+                  "+  // Holds the pending timer id so it can be cleared on each new call.",
+                  "+  let timer;",
+                  "+  return function (...args) {",
+                  "+    // Cancel any previously scheduled invocation.",
+                  "+    clearTimeout(timer);",
+                  "+    // Schedule fn to run after the quiet period, preserving `this` and arguments.",
+                  "+    timer = setTimeout(() => {",
+                  "+      fn.apply(this, args);",
+                  "+    }, ms);",
+                  "+  };",
+                  "+}",
+                  " module.exports = {};"
+                ]
+              }
+            ],
+            "userModified": false,
+            "replaceAll": false
+          },
+          "tool_use_id": "toolu_019Q5rtxAeSpsB8qcRRQKgn4",
+          "duration_ms": 68
+        }
+      }
+    }
+  ],
+  "finalFiles": {
+    "src\\rel.js": "// Returns a debounced version of fn that delays invoking it until\n// `ms` milliseconds have elapsed since the last time it was called.\nfunction debounce(fn, ms) {\n  // Holds the pending timer id so it can be cleared on each new call.\n  let timer;\n  return function (...args) {\n    // Cancel any previously scheduled invocation.\n    clearTimeout(timer);\n    // Schedule fn to run after the quiet period, preserving `this` and arguments.\n    timer = setTimeout(() => {\n      fn.apply(this, args);\n    }, ms);\n  };\n}\nmodule.exports = {};\n"
+  }
+}

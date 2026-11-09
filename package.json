@@ -188,11 +188,21 @@
     "package": "vsce package",
     "install:cursor": "npm run package && node scripts/install-cursor.mjs",
     "eval:judge": "npx -y tsx eval/run.ts",
-    "test:agent": "npx -y tsx --test test/agentDetection.test.ts && node --test scripts/cursor-ide.test.mjs"
+    "test:agent": "npx -y tsx --test test/agentDetection.test.ts && node --test scripts/cursor-ide.test.mjs",
+    "test:unit": "npm run test:network && npm run test:claude-walkthrough",
+    "test:network": "npx -y tsx --test \"test/network/*.test.ts\"",
+    "test:network:slow": "npx -y tsx --test \"test/network/slow/*.slow.test.ts\"",
+    "test:claude-walkthrough": "npx -y tsx --test test/claudeCodePayloads.test.ts test/walkthrough.test.ts",
+    "test:integration": "npx -y tsx test/integration/runTest.ts",
+    "test:interference": "node esbuild.js && node test/interference/runInterference.js",
+    "test:e2e:walkthrough": "node esbuild.js && node test/e2e/run.js",
+    "test:e2e:network": "node test/network/e2e/run.mjs",
+    "capture:claude": "npx -y tsx test/claude-live/run-scenario.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^2.24.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.4.0"

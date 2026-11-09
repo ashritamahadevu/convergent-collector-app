@@ -126,7 +126,55 @@ function getWebviewHtml(
       margin: 0 0 12px;
       font-weight: 500;
     }
+    .bubble {
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      border-radius: 14px 14px 14px 4px;
+      padding: 10px 12px;
+    }
     .answer-area { margin-bottom: 12px; }
+    .choice {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 8px 0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      font: inherit;
+      cursor: pointer;
+    }
+    .choice.selected {
+      border-color: var(--vscode-focusBorder);
+      background: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+    .choice.pressed, button.pressed {
+      transform: scale(0.97);
+      opacity: 0.72;
+    }
+    .loading-bubble {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      width: fit-content;
+      margin-top: 8px;
+    }
+    .loading-bubble.visible { display: flex; }
+    .loading-bubble span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--vscode-descriptionForeground);
+      animation: chat-dot 1s infinite ease-in-out;
+    }
+    .loading-bubble span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-bubble span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes chat-dot {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+      40% { transform: translateY(-4px); opacity: 1; }
+    }
     textarea {
       width: 100%;
       min-height: 100px;
@@ -229,6 +277,9 @@ function getWebviewHtml(
     <button type="button" class="dispute hidden" id="dispute-btn">My answer was right</button>
   </div>
   <div id="answer-area" class="answer-area"></div>
+  <div id="loading-bubble" class="bubble loading-bubble" aria-hidden="true">
+    <span></span><span></span><span></span>
+  </div>
   </div>
   <div class="actions">
     <button type="button" class="submit" id="submit-btn">Submit</button>
@@ -263,6 +314,7 @@ function getWebviewHtml(
 
     function renderQuestion(payload) {
       currentKind = payload.kind || "free-text";
+      questionEl.className = "question bubble";
       questionEl.textContent = payload.questionText || "";
       clearFeedback();
       submitBtn.classList.remove("hidden");
@@ -296,17 +348,26 @@ function getWebviewHtml(
           row.appendChild(document.createTextNode(" " + item));
           answerAreaEl.appendChild(row);
         });
-      } else if (currentKind === "multiple-choice" && Array.isArray(payload.options)) {
+      } else if (
+        (currentKind === "multiple-choice" || (Array.isArray(payload.options) && payload.options.length > 0)) &&
+        Array.isArray(payload.options) &&
+        payload.options.length > 0
+      ) {
+        currentKind = "multiple-choice";
         payload.options.forEach(function (opt, idx) {
-          const label = document.createElement("label");
-          label.className = "mcq-option";
-          const input = document.createElement("input");
-          input.type = "radio";
-          input.name = "mcq";
-          input.value = String(idx);
-          label.appendChild(input);
-          label.appendChild(document.createTextNode(opt));
-          answerAreaEl.appendChild(label);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "choice";
+          button.dataset.index = String(idx);
+          button.textContent = opt;
+          button.addEventListener("click", function () {
+            const selected = answerAreaEl.querySelectorAll(".choice");
+            selected.forEach(function (item) { item.classList.remove("selected"); });
+            button.classList.add("selected");
+            button.dataset.index = String(idx);
+            reactThen(button, function () {});
+          });
+          answerAreaEl.appendChild(button);
         });
       } else {
         const ta = document.createElement("textarea");
@@ -375,6 +436,25 @@ function getWebviewHtml(
       }
     }
 
+    function reactThen(button, send) {
+      if (button) {
+        button.classList.add("pressed");
+      }
+      const bubble = document.getElementById("loading-bubble");
+      if (bubble) {
+        bubble.classList.add("visible");
+      }
+      window.setTimeout(function () {
+        if (button) {
+          button.classList.remove("pressed");
+        }
+        if (bubble) {
+          bubble.classList.remove("visible");
+        }
+        send();
+      }, 420);
+    }
+
     function collectSubmit() {
       if (currentKind === "ordering") {
         const order = Array.from(answerAreaEl.querySelectorAll("[data-index]")).map(function (row) {
@@ -384,15 +464,15 @@ function getWebviewHtml(
         return;
       }
       if (currentKind === "multiple-choice") {
-        const selected = answerAreaEl.querySelector('input[name="mcq"]:checked');
+        const selected = answerAreaEl.querySelector(".choice.selected");
         if (!selected) {
           showFeedback({ message: "Please select an option before submitting." });
           return;
         }
-        lastAnswer = selected.parentElement ? selected.parentElement.textContent : "";
+        lastAnswer = selected.textContent || "";
         vscode.postMessage({
           type: "submit",
-          selectedIndex: parseInt(selected.value, 10),
+          selectedIndex: parseInt(selected.dataset.index, 10),
         });
         return;
       }
@@ -402,12 +482,18 @@ function getWebviewHtml(
       vscode.postMessage({ type: "submit", answer: answer });
     }
 
-    submitBtn.addEventListener("click", collectSubmit);
+    submitBtn.addEventListener("click", function () {
+      reactThen(submitBtn, collectSubmit);
+    });
     bypassBtn.addEventListener("click", function () {
-      vscode.postMessage({ type: "bypass" });
+      reactThen(bypassBtn, function () {
+        vscode.postMessage({ type: "bypass" });
+      });
     });
     explainBtn.addEventListener("click", function () {
-      vscode.postMessage({ type: "explain" });
+      reactThen(explainBtn, function () {
+        vscode.postMessage({ type: "explain" });
+      });
     });
     disputeBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "dispute", answer: lastAnswer });

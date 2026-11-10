@@ -86,7 +86,7 @@ async function runWalkSession(context: vscode.ExtensionContext, saved: SavedWalk
   }
   const questions: GeneratedQuestion[] = [];
   const snippet = group.map((file) => file.snippet).join("\n\n").slice(0, 8000);
-  const kinds = ["multiple-choice", "free-text", "ordering"] as const;
+  const kinds = ["multiple-choice", "free-text", "ordering", "debug"] as const;
   for (const kind of kinds) {
     try {
       questions.push(await generateQuestion({

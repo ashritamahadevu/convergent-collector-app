@@ -90,14 +90,7 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
 
     setQuizActive(true);
     state.processing = true;
-    const release = lockDocument(editor.document);
-    let released = false;
-    const unlock = (): void => {
-      if (!released) {
-        released = true;
-        release();
-      }
-    };
+    const lock = lockDocument(editor.document);
     try {
       const passed = await runComprehensionGate(
         snippet,
@@ -106,9 +99,12 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         {
           source: "inline",
           filePath: editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+          editor,
+          range: placed,
+          lock,
         },
       );
-      unlock();
+      lock.release();
       if (!passed && editor.document.getText(placed) === snippet) {
         state.suppressEditGuard = true;
         await editor.edit((builder) => {
@@ -117,7 +113,7 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         state.suppressEditGuard = false;
       }
     } finally {
-      unlock();
+      lock.release();
       if (editor.document.uri.scheme === "file") {
         try {
           noteAccepted(editor.document.uri.fsPath, editor.document.getText());

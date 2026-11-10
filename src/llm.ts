@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { isCliProvider, runCliPrompt } from "./cliRunner";
 import { getApiKey } from "./secrets";
 import { getModel, getNonCriticalPassFraction, getProvider } from "./state";
+import { plantFallbackBug } from "./debugCode";
 import type {
   Criterion,
   CriterionVerdict,
@@ -229,7 +230,7 @@ function parseGeneratedPayload(
   }
   const obj = parsed as Record<string, unknown>;
   const kind =
-    obj.kind === "multiple-choice" || obj.kind === "free-text" || obj.kind === "ordering"
+    obj.kind === "multiple-choice" || obj.kind === "free-text" || obj.kind === "ordering" || obj.kind === "debug"
       ? obj.kind
       : mode;
   const question = typeof obj.question === "string" ? obj.question.trim() : "";
@@ -253,6 +254,22 @@ function parseGeneratedPayload(
     : [];
 
   const flagged = obj.flagged === true;
+
+  if (kind === "debug") {
+    const buggyCode = typeof obj.buggyCode === "string" ? obj.buggyCode : "";
+    if (!buggyCode.trim()) {
+      throw new Error("Debug question needs buggyCode.");
+    }
+    return {
+      kind: "debug",
+      question,
+      referenceAnswer,
+      criteria: [],
+      buggyCode,
+      conceptTags,
+      flagged,
+    };
+  }
 
   if (kind === "ordering") {
     const items = Array.isArray(obj.items)
@@ -332,6 +349,25 @@ Rubric authoring (free-text only): ship 1-3 atomic criteria. One critical criter
 - No reference leakage and no "must say exactly/verbatim/word for word".
 - Each criterion also has a "hint" shown to the student when they miss it. The hint names where to look and must not state the outcome, return value, or correct behavior. Good hint: "Check the first condition and what the function does when it matches." Bad hint: "The function returns immediately."
 `.trim();
+
+  if (mode === "debug") {
+    return `${sharedRules}
+
+Introduce ONE small behavior bug into the code. Do not describe the fix in the question.
+Return STRICT JSON only:
+{
+  "kind": "debug",
+  "question": string,
+  "referenceAnswer": string,
+  "buggyCode": string,
+  "conceptTags": string[],
+  "flagged": boolean
+}
+
+<code language="${language}">
+${code}
+</code>`;
+  }
 
   if (mode === "ordering") {
     return `${sharedRules}
@@ -774,7 +810,25 @@ async function runGenerateOnce(
     0.2,
     true,
   );
-  return parseGeneratedPayload(raw, params.kind ?? params.mode);
+  const parsed = parseGeneratedPayload(raw, params.kind ?? params.mode);
+  if (parsed.kind !== "debug") {
+    return parsed;
+  }
+  const original = params.snippet;
+  let buggy = parsed.buggyCode ?? "";
+  if (buggy.trim() === original.trim()) {
+    const fallback = plantFallbackBug(original);
+    if (!fallback) {
+      throw new Error("Debug question did not change the code.");
+    }
+    buggy = fallback;
+  }
+  return {
+    ...parsed,
+    buggyCode: buggy,
+    referenceAnswer: original,
+    question: parsed.question + "\n\nEdit the code in the editor. Make the smallest change that restores the original behavior.",
+  };
 }
 
 /** Runs generation, retrying transient API errors (429/503/overload) with backoff. */

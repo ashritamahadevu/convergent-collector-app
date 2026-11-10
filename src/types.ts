@@ -16,6 +16,7 @@ export type GeneratedQuestion = {
   correctIndex?: number;     // MCQ only
   items?: string[];          // ordering, shown shuffled
   correctOrder?: number[];   // ordering, indexes into items
+  buggyCode?: string;        // debug: planted in the editor
   conceptTags: string[];
   flagged?: boolean;
 };
@@ -35,7 +36,7 @@ export type Provider =
   | "copilot-cli";
 export type GradingMode = "free-text" | "multiple-choice";
 export type GuardMode = "auto" | "learn" | "walkthrough";
-export type QuestionKind = "free-text" | "multiple-choice" | "ordering";
+export type QuestionKind = "free-text" | "multiple-choice" | "ordering" | "debug";
 /** Bypass is stored but excluded from the pass rate. Disputed counts as correct. */
 export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained";
 export type AttemptSource = "paste" | "inline" | "agent" | "recall" | "walkthrough";

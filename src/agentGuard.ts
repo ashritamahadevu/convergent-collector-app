@@ -363,7 +363,7 @@ async function runAgentQuiz(
         preview: false,
         preserveFocus: false,
       });
-      release = lockDocument(doc);
+      release = lockDocument(doc).release;
     } catch {
       language = undefined;
     }

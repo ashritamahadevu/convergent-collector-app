@@ -3,6 +3,7 @@ import test from "node:test";
 import { discountJudgeScore, nextElo, nextMastery, DEFAULT_BKT, MCQ_GUESS } from "../src/memory/bkt";
 import { isDue, newCard, retrievability, reviewCard } from "../src/memory/scheduler";
 import { chunkSource, extractSymbols } from "../src/memory/symbols";
+import { plantFallbackBug, sameCode } from "../src/debugCode";
 import { gradeOrdering } from "../src/decision";
 import { buildProjectMap } from "../src/memory/projectMap";
 import { fileUnderstanding } from "../src/memory/understanding";
@@ -52,6 +53,12 @@ test("symbol extraction finds a function and chunking keeps it", () => {
   assert.ok(symbols.some((symbol) => symbol.name === "add"));
   const chunks = chunkSource("src/add.ts", source);
   assert.ok(chunks.some((chunk) => chunk.text.includes("return a + b")));
+});
+
+test("fallback bug flips one comparison and sameCode ignores trailing space", () => {
+  const buggy = plantFallbackBug("if (n === 0) return;");
+  assert.equal(buggy, "if (n !== 0) return;");
+  assert.equal(sameCode("return 1;\n", "return 1;"), true);
 });
 
 test("ordering score is 1 for the right order and partial otherwise", () => {

@@ -8,15 +8,35 @@ import {
   getMinAnswerLength,
   getNonCriticalPassFraction,
   getProvider,
+  insertedRange,
+  state,
   subscribeQuizBypass,
   takeQuizBypass,
 } from "./state";
 import { gradedScore, logReview, misconceptionsFor, rememberCheck } from "./memory/remember";
 import { addAttempt, saveMisgradeReport } from "./store";
 import type { AttemptOutcome, AttemptRecord, AttemptSource, CriterionVerdict, GeneratedQuestion } from "./types";
+import { sameCode } from "./debugCode";
+import type { DocumentLock } from "./documentLock";
 import { createQuizPanel, type QuizAction } from "./quizPanel";
 
 let missingApiKeyHintShown = false;
+
+type GateMeta = {
+  source?: AttemptSource;
+  filePath?: string;
+  recall?: boolean;
+  editor?: vscode.TextEditor;
+  range?: vscode.Range;
+  lock?: DocumentLock;
+};
+
+type DebugPlant = {
+  editor: vscode.TextEditor;
+  range: vscode.Range;
+  original: string;
+  dispose: () => void;
+};
 
 /**
  * Runs the comprehension check for a snippet of code.
@@ -29,7 +49,7 @@ export async function runComprehensionGate(
   snippet: string,
   context?: vscode.ExtensionContext,
   language?: string,
-  meta?: { source?: AttemptSource; filePath?: string; recall?: boolean },
+  meta?: GateMeta,
 ): Promise<boolean> {
   if (!context) {
     return fallbackGate(snippet, language);
@@ -64,6 +84,9 @@ export async function runComprehensionGate(
 
   const view = createQuizPanel(snippet, lang);
   view.showQuestion(question);
+  const debug = question.kind === "debug"
+    ? await beginDebug(meta, snippet, question.buggyCode ?? "")
+    : undefined;
 
   let followups = 0;
   const maxFollowups = getMaxFollowups();
@@ -121,11 +144,19 @@ export async function runComprehensionGate(
     });
   };
 
+  if (question.kind === "debug" && !debug) {
+    view.showFeedback({ message: "Could not place the buggy code in the editor." });
+    await recordAttempt(false, "fail");
+    view.close();
+    return false;
+  }
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const payload = await waitForQuizAction(view);
 
     if (payload.type === "explain") {
+      await restoreDebug(debug);
       const explanation = question.referenceAnswer.trim();
       view.showFeedback({
         message: explanation
@@ -142,6 +173,7 @@ export async function runComprehensionGate(
     }
 
     if (payload.type === "bypass") {
+      await restoreDebug(debug);
       await recordAttempt(false, "bypass");
       view.close();
       vscode.window.setStatusBarMessage(
@@ -171,6 +203,7 @@ export async function runComprehensionGate(
     }
 
     if (payload.type === "cancel") {
+      await restoreDebug(debug);
       await recordAttempt(false, "fail");
       view.close();
       vscode.window.setStatusBarMessage(
@@ -181,6 +214,27 @@ export async function runComprehensionGate(
     }
 
     lastStudentAnswer = (payload.answer ?? "").trim();
+
+    if (question.kind === "debug" && debug) {
+      const actual = debug.editor.document.getText(debug.range);
+      if (sameCode(actual, snippet)) {
+        debug.dispose();
+        meta?.lock?.resume();
+        await recordAttempt(true, "pass", undefined, 1);
+        view.close();
+        return true;
+      }
+      followups += 1;
+      lastFeedback = "That is not the original behavior yet. Keep editing the code in the editor.";
+      if (followups < maxFollowups) {
+        view.showFeedback({ message: lastFeedback, allowDispute: true });
+        continue;
+      }
+      await restoreDebug(debug);
+      await recordAttempt(false, "fail", undefined, 0);
+      view.close();
+      return false;
+    }
 
     if (question.kind === "multiple-choice") {
       const selectedIndex = payload.selectedIndex;
@@ -358,6 +412,26 @@ export async function runSession(
     } else if (question.kind === "ordering") {
       score = gradeOrdering(question, action.order ?? []);
       passed = score >= 0.999;
+    } else if (question.kind === "debug") {
+      const plant = await beginDebug(input, input.snippet, question.buggyCode ?? "");
+      if (!plant) {
+        passed = false;
+      } else {
+        view.showFeedback({ message: "Edit the code in the editor, then submit again." });
+        const retry = await waitForQuizAction(view);
+        if (retry.type === "cancel" || retry.type === "bypass" || retry.type === "explain") {
+          await restoreDebug(plant);
+          view.close();
+          return retry.type !== "cancel";
+        }
+        passed = sameCode(plant.editor.document.getText(plant.range), input.snippet);
+        if (!passed) {
+          await restoreDebug(plant);
+        } else {
+          plant.dispose();
+        }
+        score = passed ? 1 : 0;
+      }
     } else {
       const res = await judge({
         context,
@@ -414,6 +488,104 @@ export async function runSession(
   }
   view.close();
   return true;
+}
+
+async function beginDebug(
+  meta: GateMeta | undefined,
+  original: string,
+  buggy: string,
+): Promise<DebugPlant | undefined> {
+  if (!buggy.trim()) {
+    return undefined;
+  }
+  const editor = meta?.editor ?? vscode.window.visibleTextEditors.find((item) => {
+    return meta?.filePath !== undefined && item.document.uri.fsPath === meta.filePath;
+  });
+  if (!editor) {
+    return undefined;
+  }
+  meta?.lock?.pause();
+  const startRange = meta?.range ?? findSnippetRange(editor.document, original);
+  if (!startRange) {
+    meta?.lock?.resume();
+    return undefined;
+  }
+  state.suppressEditGuard = true;
+  let applied = false;
+  try {
+    applied = await editor.edit((builder) => {
+      builder.replace(startRange, buggy);
+    });
+  } finally {
+    state.suppressEditGuard = false;
+  }
+  if (!applied) {
+    meta?.lock?.resume();
+    return undefined;
+  }
+  let live = insertedRange(startRange.start, buggy);
+  const subscription = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (event.document !== editor.document) {
+      return;
+    }
+    for (const change of event.contentChanges) {
+      live = shiftRange(live, change);
+    }
+  });
+  return {
+    editor,
+    get range() {
+      return live;
+    },
+    original,
+    dispose() {
+      subscription.dispose();
+    },
+  };
+}
+
+async function restoreDebug(plant: DebugPlant | undefined): Promise<void> {
+  if (!plant) {
+    return;
+  }
+  state.suppressEditGuard = true;
+  try {
+    await plant.editor.edit((builder) => {
+      builder.replace(plant.range, plant.original);
+    });
+  } finally {
+    state.suppressEditGuard = false;
+    plant.dispose();
+  }
+}
+
+function findSnippetRange(document: vscode.TextDocument, snippet: string): vscode.Range | undefined {
+  const text = document.getText();
+  const index = text.indexOf(snippet);
+  if (index < 0) {
+    return undefined;
+  }
+  return new vscode.Range(document.positionAt(index), document.positionAt(index + snippet.length));
+}
+
+function shiftRange(range: vscode.Range, change: vscode.TextDocumentContentChangeEvent): vscode.Range {
+  return new vscode.Range(shiftPosition(range.start, change), shiftPosition(range.end, change));
+}
+
+function shiftPosition(pos: vscode.Position, change: vscode.TextDocumentContentChangeEvent): vscode.Position {
+  const start = change.range.start;
+  const end = change.range.end;
+  if (pos.isBefore(start)) {
+    return pos;
+  }
+  const inserted = insertedRange(start, change.text).end;
+  if (pos.isAfterOrEqual(end)) {
+    if (pos.line > end.line) {
+      return pos.translate(inserted.line - end.line, 0);
+    }
+    return new vscode.Position(inserted.line, inserted.character + (pos.character - end.character));
+  }
+  return start;
 }
 
 function mapCriterionResults(

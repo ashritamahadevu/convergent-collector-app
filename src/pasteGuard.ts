@@ -78,22 +78,21 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         setQuizActive(false);
         return;
       }
-      const release = lockDocument(editor.document);
-      let released = false;
-      const unlock = (): void => {
-        if (!released) {
-          released = true;
-          release();
-        }
-      };
+      const lock = lockDocument(editor.document);
       try {
         const passed = await runComprehensionGate(
           clipboardText,
           context,
           editor.document.languageId,
-          { source: "paste", filePath: editor.document.uri.fsPath },
+          {
+            source: "paste",
+            filePath: editor.document.uri.fsPath,
+            editor,
+            range: placed,
+            lock,
+          },
         );
-        unlock();
+        lock.release();
         if (!passed && editor.document.getText(placed) === clipboardText) {
           state.suppressEditGuard = true;
           await editor.edit((builder) => {
@@ -102,7 +101,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           state.suppressEditGuard = false;
         }
       } finally {
-        unlock();
+        lock.release();
         if (editor.document.uri.scheme === "file") {
           try {
             noteAccepted(editor.document.uri.fsPath, editor.document.getText());

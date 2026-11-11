@@ -489,27 +489,14 @@ function getWebviewHtml(
     .submit-dots span:nth-child(2) { animation-delay: 0.18s; }
     .submit-dots span:nth-child(3) { animation-delay: 0.36s; }
 
-    /* ── Secondary row (bypass link, Figma: skip/drop-bridge pattern) ────────── */
-    .secondary-row {
-      display: flex;
-      justify-content: center;
-      gap: 16px;
-      margin-top: 10px;
+    /* ── Goblin click-wobble (Figma explanation-troll-wobble pattern) ──────────
+       Fires after the goblin is clicked: squish on press, spring back up.        */
+    .goblin-btn.goblin-clicked {
+      animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
+      pointer-events: none; /* prevent double-click mid-animation */
     }
-    .bypass-link {
-      background: none;
-      border: none;
-      color: var(--accent-muted);
-      font-family: var(--vscode-font-family);
-      font-size: 0.84em;
-      cursor: pointer;
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      transition: color 150ms ease, transform 150ms ease;
-      padding: 4px 8px;
-    }
-    .bypass-link:hover  { color: var(--accent); transform: translateY(-1px); }
-    .bypass-link:active { transform: scale(0.95); }
+    /* Re-enable pointer events after animation */
+    .goblin-btn.goblin-post-click { pointer-events: auto; }
 
     /* ── Feedback panel ────────────────────────────────────────────────────── */
     .feedback-panel {
@@ -618,6 +605,14 @@ function getWebviewHtml(
       from { opacity: 0; transform: scale(0.98); }
       to   { opacity: 1; transform: scale(1);    }
     }
+    /* Goblin click: squish down then spring bounce up (Figma wobble pattern) */
+    @keyframes goblin-click-wobble {
+      0%   { transform: translateY(2px)  scale(1.06, 0.88); }
+      28%  { transform: translateY(-9px) scale(0.94, 1.08); }
+      55%  { transform: translateY(-3px) scale(1.03, 0.98); }
+      75%  { transform: translateY(-6px) scale(0.98, 1.03); }
+      100% { transform: translateY(0)    scale(1); }
+    }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -685,11 +680,6 @@ function getWebviewHtml(
         <span class="submit-dots" aria-hidden="true"><span></span><span></span><span></span></span>
       </button>
 
-      <!-- Bypass as small text link (Figma: "Skip / Drop the bridge" pattern) -->
-      <div class="secondary-row">
-        <button type="button" class="bypass-link" id="bypass-btn">Skip question</button>
-      </div>
-
     </div><!-- /.q-frame -->
 
     <!-- Feedback panel (shown after grading) -->
@@ -715,7 +705,6 @@ function getWebviewHtml(
     const questionEl    = document.getElementById("question");
     const answerAreaEl  = document.getElementById("answer-area");
     const submitBtn     = document.getElementById("submit-btn");
-    const bypassBtn     = document.getElementById("bypass-btn");
     const explainBtn    = document.getElementById("explain-btn");
     const feedbackEl    = document.getElementById("feedback");
     const feedbackMsgEl = document.getElementById("feedback-msg");
@@ -835,21 +824,22 @@ function getWebviewHtml(
     /* ── Render a question (host-driven) ─────────────────────────────────── */
     function renderQuestion(payload) {
       showQCount++;
+      questionNum = showQCount;
 
-      if (showQCount >= 2) {
-        /* Second (or later) showQuestion → go to Q2 screen */
-        transitionToQ2(payload);
-        return;
+      /* Animate frame swap and scroll for Q2+ */
+      if (questionNum > 1) {
+        qFrameEl.classList.add("transitioning");
+        setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
+        qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
-      /* Q1 */
-      questionNum = 1;
-      qLabelEl.textContent = "Question 1";
-      renderDots(1);
+      /* Update question label and progress dots */
+      qLabelEl.textContent = "Question " + questionNum;
+      renderDots(questionNum);
+
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
-      bypassBtn.classList.remove("hidden");
       explainBtn.disabled = false;
       questionEl.textContent = payload.questionText || "";
       renderAnswerArea(payload.kind || "free-text", payload);
@@ -869,7 +859,6 @@ function getWebviewHtml(
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
-      bypassBtn.classList.remove("hidden");
       explainBtn.disabled = false;
       questionEl.textContent = data.questionText || q2Demo.questionText;
       renderAnswerArea(
@@ -913,7 +902,6 @@ function getWebviewHtml(
 
       if (payload.explained) {
         submitBtn.classList.add("hidden");
-        bypassBtn.classList.add("hidden");
         explainBtn.disabled = true;
         disputeBtn.classList.add("hidden");
         nextQBtn.classList.add("hidden");
@@ -968,11 +956,17 @@ function getWebviewHtml(
 
     /* ── Button listeners ────────────────────────────────────────────────── */
     submitBtn.addEventListener("click", collectSubmit);
-    bypassBtn.addEventListener("click", function () {
-      vscode.postMessage({ type: "bypass" });
-    });
+
+    /* Goblin click: spring-wobble animation, then post explain */
     explainBtn.addEventListener("click", function () {
+      /* Trigger the squish-bounce keyframe (Figma wobble pattern) */
+      explainBtn.classList.remove("goblin-clicked");
+      void explainBtn.offsetWidth; /* force reflow to restart */
+      explainBtn.classList.add("goblin-clicked");
       vscode.postMessage({ type: "explain" });
+    });
+    explainBtn.addEventListener("animationend", function () {
+      explainBtn.classList.remove("goblin-clicked");
     });
     disputeBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "dispute", answer: lastAnswer });

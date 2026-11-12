@@ -171,22 +171,35 @@ export async function runComprehensionGate(
 
       if (payload.type === "explain") {
         await restoreDebug(debug);
+        followups += 1;
         const explanation = question.referenceAnswer.trim();
         view.showFeedback({
           message: explanation
             ? "Explanation: " + explanation
             : "No explanation was generated for this check. The code stays.",
           explained: true,
+          allowNextQuestion: followups < maxFollowups,
         });
         await recordAttempt(false, "explained");
         vscode.window.setStatusBarMessage(
           "Comprehension Guard: explanation shown. The code stays and is not counted as correct.",
           5000,
         );
-        // Wait for the user to dismiss the explanation card (expNextBtn posts cancel,
-        // or the user closes the panel). Without this, the panel stays open with no
-        // extension listening, causing any subsequent submit to hang forever.
-        await view.waitForSubmit();
+        const nextAction = await view.waitForSubmit();
+        if (nextAction.type === "next_question" && followups < maxFollowups) {
+          try {
+            question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
+          } catch {
+            view.showFeedback({
+              message: "Could not generate a follow-up question. Please close the panel.",
+            });
+            await view.waitForSubmit();
+            view.close();
+            return true;
+          }
+          view.showQuestion(question);
+          continue;
+        }
         view.close();
         return true;
       }

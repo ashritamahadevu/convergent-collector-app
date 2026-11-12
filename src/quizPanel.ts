@@ -925,6 +925,11 @@ function getWebviewHtml(
         submitBtn.classList.add("hidden");
         /* Figma QuestionExplanation uses the standing troll (idle/arms-out) */
         setGoblinState(URI_IDLE, false);
+        if (payload.allowNextQuestion) {
+          expNextBtn.classList.remove("hidden");
+        } else {
+          expNextBtn.classList.add("hidden");
+        }
         showExplanationCard();
         return;
       }
@@ -1054,10 +1059,9 @@ function getWebviewHtml(
       vscode.postMessage({ type: "next_question" });
     });
     expNextBtn.addEventListener("click", function () {
-      /* Quiz is complete after explanation; signal the host to close the panel.
-         (Navigating to another question here would leave the extension not
-          listening, causing submit messages to be dropped and loading to hang.) */
-      vscode.postMessage({ type: "cancel" });
+      expNextBtn.classList.add("hidden");
+      setLoading(true);
+      vscode.postMessage({ type: "next_question" });
     });
 
     /* ── Startup ─────────────────────────────────────────────────────────── */

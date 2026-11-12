@@ -441,6 +441,7 @@ test("pause hook is added beside notify and a second install is idempotent", () 
   assert.match(cursorJson.hooks.afterFileEdit[0].command, /notify\.js/);
   assert.equal(cursorJson.hooks.preToolUse.length, 1);
   assert.match(cursorJson.hooks.preToolUse[0].command, /pause\.js/);
+  assert.equal(cursorJson.hooks.preToolUse[0].timeout, 600);
   assert.equal(cursorJson.hooks.preToolUse[0].command.includes("notify.js"), false);
 
   const second = planHookInstall({

@@ -933,14 +933,14 @@ function upsertCursorPause(hooks: Record<string, unknown>, pauseCommand: string)
       return entry;
     }
     found = true;
-    if (rec.command !== pauseCommand) {
+    if (rec.command !== pauseCommand || rec.timeout !== 600) {
       changed = true;
-      return { ...rec, command: pauseCommand };
+      return { ...rec, command: pauseCommand, timeout: 600 };
     }
     return entry;
   });
   if (!found) {
-    nextList.push({ command: pauseCommand });
+    nextList.push({ command: pauseCommand, timeout: 600 });
     changed = true;
   }
   hooks.preToolUse = nextList;

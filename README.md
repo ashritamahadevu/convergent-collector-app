@@ -128,7 +128,9 @@ Without hooks, there is a narrower fallback for files you already have open. A l
 
 ### Agent pause
 
-With `comprehensionGuard.agentPause` on (the default), tree-sitter splits each agent edit into functions and scores only the functions that edit wrote. A formula decides when that new logic is enough to pause. The next Write or Edit then waits. The check is a few multiple-choice questions about the control flow of those functions. Passing, or choosing bypass, lets the agent continue. A miss tells the agent to wait and retry. Presets are `quick` (pause after several functions), `standard` (the default, pause on a function with real branching), and `deep` (pause on the first logical unit). Set `comprehensionGuard.agentPause` to false to restore the previous per-edit quiz.
+With `comprehensionGuard.agentPause` on (the default), tree-sitter splits each agent edit into functions and scores only the functions that edit wrote. A formula decides when that new logic is enough to pause. The next Write or Edit then waits. The check is a few multiple-choice questions about the control flow of those functions. Passing, or choosing bypass, lets the agent continue. A miss denies that tool and tells the agent to retry the same edit. Presets are `quick` (pause after several functions), `standard` (the default, pause on a function with real branching), and `deep` (pause on the first logical unit).
+
+The pause runs only for agents that execute the installed hook: Claude Code, Codex, and the Cursor agent. It does not run for Copilot inline chat, Gemini, ChatGPT, Aider, or any other tool that never calls `pause.js`. Claude Code and Codex also do not pause shell commands, because their hook matcher is `Edit`, `Write`, `NotebookEdit`, and `MultiEdit` (Codex adds `apply_patch`). A Read is never paused. If the editor is closed, or the hook cannot get a decision, the tool is allowed so the agent is not trapped. Set `comprehensionGuard.agentPause` to false to restore the previous per-edit quiz.
 
 ## Roadmap
 

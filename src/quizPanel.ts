@@ -42,51 +42,26 @@ function getNonce(): string {
   return nonce;
 }
 
+/**
+ * Builds the webview HTML.
+ *
+ * @param goblinUri - webview URI for media/goblinlogo.png
+ *   TODO: user must place media/goblinlogo.png in the repo root for the goblin image to appear.
+ *         Until then the <img> elements will render as broken-image placeholders.
+ */
 function getWebviewHtml(
   webview: vscode.Webview,
-  snippet: string,
-  language: string,
+  _snippet: string,
+  _language: string,
   nonce: string,
+  goblinUri: string,
 ): string {
   const csp = [
     "default-src 'none'",
+    `img-src ${webview.cspSource}`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `script-src 'nonce-${nonce}'`,
   ].join("; ");
-
-  const langLabel = language.trim()
-    ? `<span class="lang">${escapeHtml(language)}</span>`
-    : "";
-
-  /* Inline SVG goblin character — Figma troll aesthetic in the design palette */
-  const goblinSvg = `<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" width="72" height="72" aria-hidden="true" focusable="false">
-  <ellipse cx="40" cy="76" rx="20" ry="4" fill="rgba(0,0,0,0.25)"/>
-  <polygon points="40,2 54,26 26,26" fill="#3d6645"/>
-  <rect x="24" y="22" width="32" height="7" rx="3.5" fill="#2f5236"/>
-  <rect x="26" y="26" width="28" height="4" rx="2" fill="rgba(200,228,204,0.18)"/>
-  <ellipse cx="40" cy="51" rx="22" ry="21" fill="#74ab7b"/>
-  <polygon points="20,44 10,28 23,47" fill="#74ab7b"/>
-  <polygon points="60,44 70,28 57,47" fill="#74ab7b"/>
-  <polygon points="20,44 13,31 22,45" fill="#5a9060" opacity="0.55"/>
-  <polygon points="60,44 67,31 58,45" fill="#5a9060" opacity="0.55"/>
-  <ellipse cx="31" cy="47" rx="7" ry="7.5" fill="#1a2b1c"/>
-  <ellipse cx="49" cy="47" rx="7" ry="7.5" fill="#1a2b1c"/>
-  <circle cx="33.5" cy="44.5" r="2.5" fill="white" opacity="0.9"/>
-  <circle cx="51.5" cy="44.5" r="2.5" fill="white" opacity="0.9"/>
-  <circle cx="31" cy="47" r="4.5" fill="#0d1a0f"/>
-  <circle cx="49" cy="47" r="4.5" fill="#0d1a0f"/>
-  <circle cx="33" cy="45" r="1.6" fill="white"/>
-  <circle cx="51" cy="45" r="1.6" fill="white"/>
-  <ellipse cx="40" cy="56" rx="4.5" ry="3" fill="#5a9060"/>
-  <circle cx="38" cy="56" r="1.3" fill="#4a7a50"/>
-  <circle cx="42" cy="56" r="1.3" fill="#4a7a50"/>
-  <path d="M30 63 Q40 71 50 63" fill="#2b4a2e"/>
-  <path d="M32 63 Q40 69 48 63" fill="#c8e4cc"/>
-  <rect x="37" y="62" width="4.5" height="6" rx="1" fill="white"/>
-  <rect x="43.5" y="62" width="4" height="5" rx="1" fill="white"/>
-  <ellipse cx="22" cy="58" rx="5" ry="3.5" fill="#90c896" opacity="0.35"/>
-  <ellipse cx="58" cy="58" rx="5" ry="3.5" fill="#90c896" opacity="0.35"/>
-</svg>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -96,13 +71,13 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Comprehension check</title>
   <style>
-    /* ── Figma design tokens (Animate Chat Loading Transition) ─────────────── */
+    /* ── Figma design tokens (Animate Chat Loading Transition / DrawBridge) ── */
     :root {
       --accent:        #74ab7b;
       --accent-light:  #c8e4cc;
       --accent-dim:    rgba(116,171,123,0.16);
       --accent-muted:  rgba(116,171,123,0.55);
-      --surface:       rgba(43,43,43,0.52);
+      --surface:       rgba(43,43,43,0.50);
       --surface-solid: #2b2b2b;
       --on-accent:     #2b2b2b;
       --r-pill:        999px;
@@ -110,22 +85,27 @@ function getWebviewHtml(
       --r-sm:          8px;
     }
 
-    /* ── Reset / body ──────────────────────────────────────────────────────── */
+    /* ── Reset / body ───────────────────────────────────────────────────────── */
     html, body { height: 100%; margin: 0; }
     body {
       font-family: var(--vscode-font-family);
       font-size:   var(--vscode-font-size);
       color: var(--accent);
-      /* Figma app-shell radial gradient */
+      /*
+       * Figma app-shell gradient: center far below (50% 215%) so only the
+       * bottom edge shows the green glow; the upper/question area is near-black.
+       */
       background:
         radial-gradient(
-          ellipse 160% 90% at 50% 110%,
-          #74ab7b 0%,
-          #4d584f 22%,
-          #202421 46%,
-          #0d0f0d 72%,
+          ellipse 140% 120% at 50% 210%,
+          #74ab7b  0%,
+          #647366 40%,
+          #373e38 62%,
+          #202421 78%,
+          #0d0f0d 90%,
           #0a0a0a 100%
         );
+      background-color: #0a0a0a;
       line-height: 1.5;
       box-sizing: border-box;
       overflow: hidden;
@@ -143,11 +123,7 @@ function getWebviewHtml(
       align-items: center;
       justify-content: center;
       gap: 18px;
-      background:
-        radial-gradient(
-          ellipse 160% 90% at 50% 110%,
-          #74ab7b 0%, #4d584f 22%, #202421 46%, #0d0f0d 72%, #0a0a0a 100%
-        );
+      background: #0a0a0a;
       opacity: 0;
       pointer-events: none;
       transition: opacity 240ms ease;
@@ -156,8 +132,10 @@ function getWebviewHtml(
       opacity: 1;
       pointer-events: all;
     }
-    .loading-goblin {
+    .loading-goblin img {
+      display: block;
       animation: goblin-bounce 800ms ease-in-out infinite alternate;
+      object-fit: contain;
     }
     .loading-label {
       margin: 0;
@@ -188,41 +166,11 @@ function getWebviewHtml(
     .brand-title {
       font-size: 1.25em;
       font-weight: 700;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.02em;
       color: var(--accent);
       text-align: center;
-      margin: 0 0 16px;
+      margin: 0 0 14px;
     }
-
-    /* ── Code snippet ──────────────────────────────────────────────────────── */
-    .snippet-wrap {
-      border: 1px solid rgba(116,171,123,0.28);
-      border-radius: var(--r-card);
-      margin-bottom: 16px;
-      overflow: auto;
-      max-height: 240px;
-      background: var(--surface);
-    }
-    .snippet-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 5px 14px;
-      font-size: 0.8em;
-      color: var(--accent-muted);
-      background: rgba(43,43,43,0.6);
-      border-bottom: 1px solid rgba(116,171,123,0.15);
-      border-radius: var(--r-card) var(--r-card) 0 0;
-    }
-    pre {
-      margin: 0;
-      padding: 12px 14px;
-      overflow-x: auto;
-      font-family: var(--vscode-editor-font-family);
-      font-size:   var(--vscode-editor-font-size);
-      color: var(--accent-light);
-    }
-    pre, code { white-space: pre; word-break: normal; }
 
     /* ── Question frame (Q1 / Q2 share this area) ──────────────────────────── */
     .q-frame {
@@ -247,7 +195,8 @@ function getWebviewHtml(
       letter-spacing: 0.02em;
       color: var(--accent);
     }
-    /* Progress dots (Figma: ProgressDots) */
+
+    /* ── Progress dots (Figma: ProgressDots) ───────────────────────────────── */
     .progress-dots {
       display: flex;
       gap: 7px;
@@ -263,12 +212,13 @@ function getWebviewHtml(
     .dot-active  { background: var(--accent);           opacity: 1; animation: dot-activate 320ms cubic-bezier(0.34,1.56,0.64,1); }
     .dot-inactive{ background: rgba(116,171,123,0.22); opacity: 1; }
 
-    /* ── Goblin button area (Figma: .question-two-goblin / .q3-troll-button) ── */
+    /* ── Goblin button (Figma: .question-two-goblin / .q3-troll-button) ──────── */
     .goblin-area {
       display: flex;
       justify-content: center;
-      margin: 8px 0 14px;
+      margin: 6px 0 12px;
     }
+    /* Figma .q3-troll-button */
     .goblin-btn {
       position: relative;
       display: grid;
@@ -276,23 +226,29 @@ function getWebviewHtml(
       background: transparent;
       border: none;
       border-radius: 50%;
-      padding: 6px;
+      padding: 4px;
       cursor: pointer;
       transition:
         transform  220ms cubic-bezier(0.34,1.56,0.64,1),
         filter     220ms ease;
       -webkit-tap-highlight-color: transparent;
     }
+    .goblin-btn img {
+      display: block;
+      object-fit: contain;
+      width: 80px;
+      height: 80px;
+    }
     .goblin-btn:hover {
-      transform: translateY(-4px) scale(1.09);
-      filter: drop-shadow(0 0 14px rgba(116,171,123,0.4));
+      transform: translateY(-3px) scale(1.08);
+      filter: drop-shadow(0 0 14px rgba(116,171,123,0.38));
     }
     .goblin-btn:active {
-      transform: translateY(1px) scale(0.95);
+      transform: translateY(1px) scale(0.96);
     }
     .goblin-btn:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 6px;
+      outline: 3px solid var(--accent);
+      outline-offset: 8px;
     }
     .goblin-btn:disabled {
       cursor: default;
@@ -301,13 +257,13 @@ function getWebviewHtml(
     /* Tooltip (Figma: .q3-troll-tooltip) */
     .goblin-tooltip {
       position: absolute;
-      top: calc(100% + 12px);
+      top: calc(100% + 14px);
       left: 50%;
       width: max-content;
-      max-width: 180px;
-      border-radius: var(--r-pill);
+      max-width: 190px;
+      border-radius: 30px;
       background: var(--accent);
-      padding: 6px 14px;
+      padding: 7px 14px;
       color: var(--on-accent);
       font-size: 0.82em;
       letter-spacing: 0.03em;
@@ -323,6 +279,16 @@ function getWebviewHtml(
       transform: translate(-50%, 0) scale(1);
     }
     .goblin-arrive { animation: goblin-arrive 560ms cubic-bezier(0.22,1,0.36,1) both; }
+
+    /* ── Question card: flat dark background (Figma: question section on #0a0a0a) */
+    .question-card {
+      background: #0a0a0a;
+      border-radius: var(--r-card);
+      padding: 16px 0 4px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
 
     /* ── Question text ─────────────────────────────────────────────────────── */
     .question-text {
@@ -345,8 +311,8 @@ function getWebviewHtml(
       font-size:   var(--vscode-font-size);
       color: var(--accent);
       background: var(--surface);
-      border: 2px solid var(--accent);
-      border-radius: var(--r-card);
+      border: 3px solid var(--accent);
+      border-radius: 30px;
       resize: vertical;
       transition: border-color 180ms ease, box-shadow 180ms ease;
       outline: none;
@@ -355,7 +321,7 @@ function getWebviewHtml(
       border-color: var(--accent-light);
       box-shadow: 0 0 0 3px rgba(116,171,123,0.15);
     }
-    textarea::placeholder { color: rgba(116,171,123,0.3); opacity: 1; }
+    textarea::placeholder { color: rgba(116,171,123,0.25); opacity: 1; }
 
     /* ── MCQ fieldset (Figma: .mcq-card / .mcq-options) ────────────────────── */
     .mcq-fieldset { margin: 0; padding: 0; border: 0; }
@@ -364,48 +330,49 @@ function getWebviewHtml(
       width: 1px; height: 1px;
       overflow: hidden; opacity: 0; pointer-events: none;
     }
-    .mcq-options { display: grid; gap: 14px; }
+    .mcq-options { display: grid; gap: 18px; }
 
-    /* ── MCQ Option (Figma: .mcq-option with custom .mcq-radio) ─────────────── */
+    /* ── MCQ Option (Figma: .mcq-option / .mcq-radio) ───────────────────────── */
     .mcq-option {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 18px;
       cursor: pointer;
       color: var(--accent);
       font-family: var(--vscode-font-family);
       font-size:   var(--vscode-font-size);
-      line-height: 1.4;
+      line-height: 1.5;
       user-select: none;
-      animation: option-enter 320ms ease-out both;
+      animation: q2-option-enter 360ms ease-out both;
     }
     .mcq-option:nth-child(1) { animation-delay:   0ms; }
-    .mcq-option:nth-child(2) { animation-delay:  65ms; }
-    .mcq-option:nth-child(3) { animation-delay: 130ms; }
-    .mcq-option:nth-child(4) { animation-delay: 195ms; }
-    .mcq-option:nth-child(5) { animation-delay: 260ms; }
+    .mcq-option:nth-child(2) { animation-delay:  55ms; }
+    .mcq-option:nth-child(3) { animation-delay: 110ms; }
+    .mcq-option:nth-child(4) { animation-delay: 165ms; }
+    .mcq-option:nth-child(5) { animation-delay: 220ms; }
 
     .mcq-option input[type="radio"] {
       position: absolute;
       width: 1px; height: 1px;
       overflow: hidden; opacity: 0; pointer-events: none;
     }
+    /* Figma: 50px → scaled to 28px for VS Code panel */
     .mcq-radio {
-      flex: 0 0 24px;
-      width: 24px; height: 24px;
-      border: 2px solid var(--accent);
+      flex: 0 0 28px;
+      width: 28px; height: 28px;
+      border: 3px solid var(--accent);
       border-radius: 50%;
       background: var(--surface);
       transition: background-color 160ms ease, transform 160ms ease;
     }
-    .mcq-option:hover .mcq-radio { transform: scale(1.1); }
+    .mcq-option:hover .mcq-radio { transform: scale(1.06); }
     .mcq-option input:checked + .mcq-radio {
       background: var(--accent);
-      animation: radio-select 280ms cubic-bezier(0.34,1.56,0.64,1);
+      animation: q2-radio-select 260ms cubic-bezier(0.34,1.56,0.64,1);
     }
     .mcq-option input:focus-visible + .mcq-radio {
-      outline: 2px solid var(--accent-light);
-      outline-offset: 3px;
+      outline: 3px solid var(--accent-light);
+      outline-offset: 4px;
     }
     .mcq-option input:disabled ~ * { cursor: default; }
 
@@ -434,7 +401,7 @@ function getWebviewHtml(
     .ordering-row button:hover  { background: rgba(116,171,123,0.3); }
     .ordering-row button:active { transform: scale(0.94); }
 
-    /* ── Submit pill (Figma: .submit-button large pill, centered) ───────────── */
+    /* ── Submit pill (Figma: .submit-button — dark transparent + green border) ─ */
     .submit-pill {
       display: flex;
       align-items: center;
@@ -449,8 +416,8 @@ function getWebviewHtml(
       letter-spacing: 0.04em;
       color: var(--accent);
       background: var(--surface);
-      border: 2px solid var(--accent);
-      border-radius: var(--r-pill);
+      border: 3px solid var(--accent);
+      border-radius: 100px;
       cursor: pointer;
       transition:
         background-color 180ms ease,
@@ -459,18 +426,19 @@ function getWebviewHtml(
         box-shadow       180ms ease;
       -webkit-tap-highlight-color: transparent;
     }
+    /* Figma .submit-button:hover */
     .submit-pill:hover:not(:disabled):not(.loading) {
       background: var(--accent);
       color: var(--on-accent);
     }
-    /* Figma .submit-button:active — press + inset ring */
+    /* Figma .submit-button:active */
     .submit-pill:active:not(:disabled):not(.loading) {
-      transform: scale(0.97);
-      box-shadow: inset 0 0 0 10px var(--surface-solid);
-      color: var(--surface-solid);
+      transform: scale(0.98);
+      border-color: var(--on-accent);
       background: var(--accent);
+      box-shadow: inset 0 0 0 17px var(--surface-solid);
+      color: var(--surface-solid);
     }
-    /* Loading state: swap label for animated dots */
     .submit-pill.loading {
       pointer-events: none;
       animation: submit-loading-pulse 1.4s ease-in-out infinite;
@@ -489,14 +457,12 @@ function getWebviewHtml(
     .submit-dots span:nth-child(2) { animation-delay: 0.18s; }
     .submit-dots span:nth-child(3) { animation-delay: 0.36s; }
 
-    /* ── Goblin click-wobble (Figma explanation-troll-wobble pattern) ──────────
-       Fires after the goblin is clicked: squish on press, spring back up.        */
+    /* ── Goblin click-wobble (Figma: explanation-troll-wobble pattern) ─────────
+       Fires after the goblin is clicked: squish on press, spring back up.         */
     .goblin-btn.goblin-clicked {
       animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
-      pointer-events: none; /* prevent double-click mid-animation */
+      pointer-events: none;
     }
-    /* Re-enable pointer events after animation */
-    .goblin-btn.goblin-post-click { pointer-events: auto; }
 
     /* ── Feedback panel ────────────────────────────────────────────────────── */
     .feedback-panel {
@@ -542,7 +508,6 @@ function getWebviewHtml(
       transform: translateY(-1px);
     }
     .dispute-btn:active, .next-q-btn:active { transform: scale(0.95); }
-    /* Next Q button uses accent fill */
     .next-q-btn {
       background: var(--accent);
       color: var(--on-accent);
@@ -561,17 +526,17 @@ function getWebviewHtml(
       0%, 80%, 100% { transform: scale(0.5); opacity: 0.4; }
       40%           { transform: scale(1);   opacity: 1;   }
     }
-    @keyframes radio-select {
-      0%   { transform: scale(1);   }
-      55%  { transform: scale(1.2); }
-      100% { transform: scale(1);   }
+    @keyframes q2-radio-select {
+      0%   { transform: scale(1);    }
+      55%  { transform: scale(1.13); }
+      100% { transform: scale(1);    }
     }
     @keyframes dot-activate {
       0%   { transform: scale(0.4); opacity: 0.3; }
       65%  { transform: scale(1.3); }
       100% { transform: scale(1);   opacity: 1;   }
     }
-    @keyframes option-enter {
+    @keyframes q2-option-enter {
       from { opacity: 0; transform: translateX(-12px); }
       to   { opacity: 1; transform: translateX(0);     }
     }
@@ -596,16 +561,16 @@ function getWebviewHtml(
       50%      { border-color: var(--accent);          }
     }
     @keyframes q-swap {
-      0%  { opacity: 1; transform: translateX(0);  }
-      35% { opacity: 0; transform: translateX(-14px); }
-      65% { opacity: 0; transform: translateX(14px);  }
-      100%{ opacity: 1; transform: translateX(0);  }
+      0%   { opacity: 1; transform: translateX(0);     }
+      35%  { opacity: 0; transform: translateX(-14px); }
+      65%  { opacity: 0; transform: translateX(14px);  }
+      100% { opacity: 1; transform: translateX(0);     }
     }
     @keyframes screen-enter {
-      from { opacity: 0; transform: scale(0.98); }
-      to   { opacity: 1; transform: scale(1);    }
+      from { opacity: 0; transform: scale(0.985); filter: blur(3px); }
+      to   { opacity: 1; transform: scale(1);     filter: blur(0);   }
     }
-    /* Goblin click: squish down then spring bounce up (Figma wobble pattern) */
+    /* Figma explanation-troll-wobble: float-bounce on click */
     @keyframes goblin-click-wobble {
       0%   { transform: translateY(2px)  scale(1.06, 0.88); }
       28%  { transform: translateY(-9px) scale(0.94, 1.08); }
@@ -619,14 +584,17 @@ function getWebviewHtml(
         animation-duration: 1ms !important;
         transition-duration: 1ms !important;
         animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
       }
     }
   </style>
 </head>
 <body>
-  <!-- Fullscreen loading overlay (shown while grading, matches Figma QuestionLoading) -->
+  <!-- Fullscreen loading overlay shown while grading (Figma: QuestionLoading / .answer-loading-troll) -->
   <div class="loading-overlay" id="loading-overlay" role="status" aria-label="Checking your answer">
-    <div class="loading-goblin">${goblinSvg}</div>
+    <div class="loading-goblin">
+      <img src="${goblinUri}" width="80" height="80" alt="" aria-hidden="true">
+    </div>
     <p class="loading-label">Checking your answer\u2026</p>
   </div>
 
@@ -635,20 +603,6 @@ function getWebviewHtml(
 
     <!-- Brand title (Figma: .brand-title) -->
     <h1 class="brand-title">Comprehension check</h1>
-
-    <!-- Lock note -->
-    <p style="margin:0 0 14px; color:var(--accent-muted); font-size:0.82em; text-align:center; line-height:1.4;">
-      Editing locked \u2014 submit, bypass, explain, or close to unlock.
-    </p>
-
-    <!-- Code snippet -->
-    <div class="snippet-wrap">
-      <div class="snippet-head">
-        <span>Code</span>
-        ${langLabel}
-      </div>
-      <pre><code>${escapeHtml(snippet)}</code></pre>
-    </div>
 
     <!-- Question frame (Q1 and Q2 share this — content swaps on transition) -->
     <div class="q-frame" id="q-frame">
@@ -659,26 +613,31 @@ function getWebviewHtml(
         <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
       </header>
 
-      <!-- Goblin button (Figma: .q3-troll-button) — clicking = "explain" -->
+      <!-- Goblin button (Figma: .question-two-goblin / .q3-troll-button) — clicking = "explain" -->
       <div class="goblin-area">
         <button type="button" class="goblin-btn goblin-arrive" id="explain-btn"
                 aria-label="Show explanation and skip this question">
-          ${goblinSvg}
+          <img src="${goblinUri}" width="80" height="80" alt="" aria-hidden="true">
           <span class="goblin-tooltip">Show explanation</span>
         </button>
       </div>
 
-      <!-- Question text -->
-      <p id="question" class="question-text"></p>
+      <!-- Flat dark question card (Figma: question content on #0a0a0a background) -->
+      <div class="question-card">
 
-      <!-- Answer area (textarea / MCQ / ordering) -->
-      <div id="answer-area" class="answer-area"></div>
+        <!-- Question text -->
+        <p id="question" class="question-text"></p>
 
-      <!-- Large centred Submit pill (Figma: .submit-button) -->
-      <button type="button" class="submit-pill" id="submit-btn" aria-label="Submit answer">
-        <span class="submit-label">Submit!</span>
-        <span class="submit-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-      </button>
+        <!-- Answer area (textarea / MCQ / ordering) -->
+        <div id="answer-area" class="answer-area"></div>
+
+        <!-- Large centred Submit pill (Figma: .submit-button) -->
+        <button type="button" class="submit-pill" id="submit-btn" aria-label="Submit answer">
+          <span class="submit-label">Submit!</span>
+          <span class="submit-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+
+      </div><!-- /.question-card -->
 
     </div><!-- /.q-frame -->
 
@@ -716,14 +675,14 @@ function getWebviewHtml(
     const loadingOverlay= document.getElementById("loading-overlay");
 
     /* ── State ───────────────────────────────────────────────────────────── */
-    let currentKind    = "free-text";
-    let lastAnswer     = "";
-    let questionNum    = 1;      // 1 or 2
-    let showQCount     = 0;      // how many showQuestion messages received
-    const TOTAL_DOTS   = 5;
+    var currentKind  = "free-text";
+    var lastAnswer   = "";
+    var questionNum  = 1;   // current question number (1-indexed)
+    var showQCount   = 0;   // total showQuestion messages received
+    var TOTAL_DOTS   = 5;
 
-    /* Hardcoded Q2 fallback data (shown until host sends its own Q2) */
-    const q2Demo = {
+    /* Demo fallback data for Q2+ when host hasn't sent data yet */
+    var q2Demo = {
       kind: "multiple-choice",
       questionText: "Which statement best describes this code\u2019s behavior?",
       options: [
@@ -826,14 +785,13 @@ function getWebviewHtml(
       showQCount++;
       questionNum = showQCount;
 
-      /* Animate frame swap and scroll for Q2+ */
+      /* Animate frame swap for Q2+ */
       if (questionNum > 1) {
         qFrameEl.classList.add("transitioning");
         setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
         qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
-      /* Update question label and progress dots */
       qLabelEl.textContent = "Question " + questionNum;
       renderDots(questionNum);
 
@@ -845,12 +803,11 @@ function getWebviewHtml(
       renderAnswerArea(payload.kind || "free-text", payload);
     }
 
-    /* ── Transition to Q2 ────────────────────────────────────────────────── */
+    /* ── Transition to Q2 (demo fallback from Next Question button) ──────── */
     function transitionToQ2(payload) {
       var data = payload || q2Demo;
       questionNum = 2;
 
-      /* Animate the frame swap */
       qFrameEl.classList.add("transitioning");
       setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
 
@@ -867,8 +824,6 @@ function getWebviewHtml(
           options: (data.options && data.options.length) ? data.options : q2Demo.options,
           items:   (data.items  && data.items.length)   ? data.items   : q2Demo.items  }
       );
-
-      /* Scroll back to top of question frame */
       qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
@@ -911,12 +866,10 @@ function getWebviewHtml(
       } else {
         disputeBtn.classList.add("hidden");
       }
-      /* Show "Next Question" button after Q1 feedback (not on explained or Q2) */
       if (questionNum === 1 && !payload.explained) {
         nextQBtn.classList.remove("hidden");
       }
 
-      /* Reset answer input */
       if (currentKind === "free-text") {
         var ta = document.getElementById("answer-input");
         if (ta) { ta.value = ""; ta.focus(); }
@@ -957,22 +910,21 @@ function getWebviewHtml(
     /* ── Button listeners ────────────────────────────────────────────────── */
     submitBtn.addEventListener("click", collectSubmit);
 
-    /* Goblin click: spring-wobble animation, then post explain */
+    /* Goblin IS the explain button: spring-wobble animation (Figma: explanation-troll-wobble) */
     explainBtn.addEventListener("click", function () {
-      /* Trigger the squish-bounce keyframe (Figma wobble pattern) */
       explainBtn.classList.remove("goblin-clicked");
-      void explainBtn.offsetWidth; /* force reflow to restart */
+      void explainBtn.offsetWidth; /* force reflow to restart animation */
       explainBtn.classList.add("goblin-clicked");
       vscode.postMessage({ type: "explain" });
     });
     explainBtn.addEventListener("animationend", function () {
       explainBtn.classList.remove("goblin-clicked");
     });
+
     disputeBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
     nextQBtn.addEventListener("click", function () {
-      /* Advance to Q2 using demo data (host data overrides if available) */
       transitionToQ2(null);
     });
 
@@ -995,15 +947,31 @@ function getWebviewHtml(
 </html>`;
 }
 
-export function createQuizPanel(snippet: string, language: string): QuizView {
+export function createQuizPanel(
+  snippet: string,
+  language: string,
+  extensionUri?: vscode.Uri,
+): QuizView {
   const nonce = getNonce();
+
+  const localResourceRoots = extensionUri
+    ? [vscode.Uri.joinPath(extensionUri, "media")]
+    : [];
+
   const panel = vscode.window.createWebviewPanel(
     "comprehensionGuard.quiz",
     "Comprehension check",
     { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-    { enableScripts: true, retainContextWhenHidden: true },
+    { enableScripts: true, retainContextWhenHidden: true, localResourceRoots },
   );
   panel.reveal(vscode.ViewColumn.Active, false);
+
+  /* Build the webview URI for the goblin logo image.
+     TODO: user must place media/goblinlogo.png at the repo root.
+     Until then the <img> elements show broken-image placeholders. */
+  const goblinUri = extensionUri
+    ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "goblinlogo.png")).toString()
+    : "";
 
   let disposed = false;
   let ready = false;
@@ -1078,7 +1046,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
     resolvePending({ type: "cancel" });
   });
 
-  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce);
+  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce, goblinUri);
 
   return {
     showQuestion(question: GeneratedQuestion): void {

@@ -213,7 +213,9 @@ function getWebviewHtml(
     .goblin-area {
       display: flex;
       justify-content: center;
-      margin: 4px 0 10px;
+      /* reserve space for the absolutely-positioned tooltip so question text starts below it */
+      margin: 4px 0 0;
+      padding-bottom: 54px;
     }
     .goblin-btn {
       position: relative;

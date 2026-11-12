@@ -574,6 +574,10 @@ async function installAgentHooks(
     codex: readConfig(path.join(home, ".codex", "hooks.json")),
     cursor: readConfig(path.join(home, ".cursor", "hooks.json")),
     gemini: readConfig(path.join(home, ".gemini", "settings.json")),
+    copilot: readConfig(path.join(home, ".copilot", "hooks", "comprehension-guard.json")),
+    droid: readConfig(path.join(home, ".factory", "hooks.json")),
+    goose: readConfig(path.join(home, ".agents", "plugins", "comprehension-guard", "hooks", "hooks.json")),
+    antigravity: readConfig(path.join(home, ".gemini", "config", "hooks.json")),
   });
   for (const write of plan.writes) {
     await fs.promises.mkdir(path.dirname(write.path), { recursive: true });
@@ -1020,6 +1024,15 @@ function agentLabel(agent: string): string {
   }
   if (agent === "gemini") {
     return "Gemini CLI";
+  }
+  if (agent === "droid") {
+    return "Droid";
+  }
+  if (agent === "goose") {
+    return "Goose";
+  }
+  if (agent === "antigravity") {
+    return "Antigravity";
   }
   if (agent === "disk") {
     return "an external edit";

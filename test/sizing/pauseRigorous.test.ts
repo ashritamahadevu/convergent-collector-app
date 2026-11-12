@@ -145,7 +145,7 @@ function forwardedContent(body: unknown): string {
   return record.payload?.tool_input?.content ?? "";
 }
 
-test("installed hooks pause Claude, Codex, Cursor, and Gemini CLI, and not their shell tools", () => {
+test("installed hooks pause every agent with a pre-tool gate, and not their shell tools", () => {
   const plan = planHookInstall({
     homeDir: "/tmp/guard-coverage",
     nodePath: "/usr/bin/node",
@@ -160,7 +160,11 @@ test("installed hooks pause Claude, Codex, Cursor, and Gemini CLI, and not their
   assert.ok(paths.some((file) => file.endsWith("/.codex/hooks.json")));
   assert.ok(paths.some((file) => file.endsWith("/.cursor/hooks.json")));
   assert.ok(paths.some((file) => file.endsWith("/.gemini/settings.json")));
-  assert.equal(paths.some((file) => /copilot|aider|continue/i.test(file)), false);
+  assert.ok(paths.some((file) => file.endsWith("/.copilot/hooks/comprehension-guard.json")));
+  assert.ok(paths.some((file) => file.endsWith("/.factory/hooks.json")));
+  assert.ok(paths.some((file) => file.endsWith("/comprehension-guard/hooks/hooks.json")));
+  assert.ok(paths.some((file) => file.endsWith("/.gemini/config/hooks.json")));
+  assert.equal(paths.some((file) => /aider|continue|clinerules/i.test(file)), false);
 
   const claude = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.claude${path.sep}`))!.contents);
   const codex = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.codex${path.sep}`))!.contents);
@@ -186,6 +190,25 @@ test("installed hooks pause Claude, Codex, Cursor, and Gemini CLI, and not their
   assert.equal(before.matcher.includes("run_shell_command"), false);
   assert.equal(gemini.hooks.AfterTool[0].hooks.length, 1);
   assert.match(gemini.hooks.AfterTool[0].hooks[0].command, /notify\.js/);
+
+  const copilot = JSON.parse(
+    plan.writes.find((write) => write.path.includes(`${path.sep}.copilot${path.sep}`))!.contents,
+  );
+  assert.equal(copilot.version, 1);
+  assert.equal(copilot.hooks.PreToolUse.some((hook: { command: string }) => hook.command.includes("--agent=copilot")), true);
+  assert.equal(copilot.hooks.PreToolUse.some((hook: { matcher: string }) => hook.matcher.includes("Bash")), false);
+  const droid = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.factory${path.sep}`))!.contents);
+  assert.equal(droid.PreToolUse[0].matcher, "Create|Edit|ApplyPatch");
+  assert.equal(droid.PreToolUse[0].matcher.includes("Execute"), false);
+  const goose = JSON.parse(
+    plan.writes.find((write) => write.path.includes(`${path.sep}comprehension-guard${path.sep}hooks${path.sep}`))!.contents,
+  );
+  assert.equal(goose.hooks.PreToolUse[0].matcher, "^(write|edit)$");
+  const antigravity = JSON.parse(
+    plan.writes.find((write) => write.path.includes(`${path.sep}.gemini${path.sep}config${path.sep}`))!.contents,
+  );
+  assert.equal(antigravity["comprehension-guard"].PreToolUse[0].matcher.includes("run_command"), false);
+  assert.match(antigravity["comprehension-guard"].PreToolUse[0].hooks[1].command, /--agent=antigravity/);
 });
 
 test("a held Write keeps the planned edit and tells the model to write one chunk next", async () => {
@@ -214,7 +237,7 @@ test("a held Write keeps the planned edit and tells the model to write one chunk
     const decision = JSON.parse(result.stdout);
     assert.equal(decision.hookSpecificOutput.permissionDecision, "allow");
     assert.equal(decision.hookSpecificOutput.hookEventName, "PreToolUse");
-    assert.match(decision.hookSpecificOutput.additionalContext, /one function or method/);
+    assert.match(decision.hookSpecificOutput.additionalContext, /You choose the next chunk/);
     assert.equal(decision.hookSpecificOutput.additionalContext.includes(COALESCE), false);
     assert.equal(result.stdout.includes(COALESCE), false);
     assert.equal(result.stdout.includes(gate.prompts[0][0]), false);
@@ -475,11 +498,14 @@ test("quick pauses one chunk and picks ordering when the function has two branch
   assert.equal(decision.agentMessage.includes(COALESCE), false);
 });
 
-test("two new functions in one write are refused until the student has passed the previous chunk", async () => {
+test("the model may send a whole file as one chunk, and the next chunk waits on one answer", async () => {
   const prompts: string[][] = [];
+  let release: (ok: boolean) => void = () => undefined;
   const session = new PauseSession((questions) => {
     prompts.push(questions.map((question) => question.prompt));
-    return Promise.resolve(true);
+    return new Promise((resolve) => {
+      release = resolve;
+    });
   });
   const two = `function first(bp) {
   if (!bp) return 0;
@@ -490,33 +516,27 @@ function second(bp) {
   return bp + 1;
 }
 `;
-  const blocked = await session.onPause(claudeWrite(two, "s"), {
+  const chosen = await session.onPause(claudeWrite(two, "s"), {
     enabled: true,
-    preferences: prefs("standard"),
+    preferences: prefs("quick"),
   });
-  assert.equal(blocked.allow, false);
-  assert.equal(blocked.reason, "one-chunk");
-  assert.match(blocked.agentMessage, /one chunk only/);
-  assert.equal(blocked.agentMessage.includes("function first"), false);
+  assert.equal(chosen.allow, true);
+  assert.match(chosen.agentMessage, /whole file/);
   assert.equal(prompts.length, 0);
 
-  await session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
-    snippet: COALESCE,
-    hunks: [{ newText: COALESCE }],
+  await session.noteFile("s", prefs("quick"), "/tmp/mm.js", two, {
+    snippet: two,
+    hunks: [{ newText: two }],
   });
-  const held = session.onPause(claudeWrite(two, "s"), {
+  const held = session.onPause(claudeWrite("function next(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n", "s"), {
     enabled: true,
-    preferences: prefs("standard"),
+    preferences: prefs("quick"),
   });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(prompts.length, 1);
+  release(true);
   const afterPass = await held;
-  assert.equal(prompts.length, 1);
-  assert.equal(afterPass.allow, false);
-  assert.equal(afterPass.reason, "one-chunk");
-
-  const one = await session.onPause(
-    claudeWrite("function next(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n", "s"),
-    { enabled: true, preferences: prefs("standard") },
-  );
-  assert.equal(one.allow, true);
-  assert.equal(prompts.length, 1);
+  assert.equal(afterPass.allow, true);
+  assert.equal(afterPass.reason, "passed");
+  assert.match(afterPass.agentMessage, /You choose the next chunk/);
 });

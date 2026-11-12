@@ -211,7 +211,7 @@ function writeInbox(body) {
 }
 
 function eventName(payload) {
-  return payload.hook_event_name || payload.hookEventName || "";
+  return payload.hook_event_name || payload.hookEventName || payload.event || "";
 }
 
 async function main() {
@@ -233,7 +233,7 @@ async function main() {
   }
   const filePaths = collectPaths(payload);
   const event = eventName(payload);
-  if (event === "PreToolUse" || event === "BeforeTool") {
+  if (process.argv.includes("--snapshot") || event === "PreToolUse" || event === "BeforeTool") {
     saveSnapshots(filePaths);
     return;
   }

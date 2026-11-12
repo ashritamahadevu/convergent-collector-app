@@ -15,10 +15,11 @@ const PAUSE = path.join(__dirname, "..", "..", "hook", "pause.js");
 function runPause(
   payload: unknown,
   home: string,
+  env: Record<string, string> = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [PAUSE], {
-      env: { ...process.env, COMPREHENSION_GUARD_HOME: home },
+      env: { ...process.env, COMPREHENSION_GUARD_HOME: home, ...env },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -201,6 +202,48 @@ test("Gemini BeforeTool write_file denies with a reason and AfterTool prints not
     );
     assert.equal(after.code, 0);
     assert.equal(after.stdout, "");
+  } finally {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Copilot, Goose, and Antigravity pauses use each host's decision shape", async () => {
+  const home = tempHome();
+  let server: Server | undefined;
+  try {
+    server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ allow: false, reason: "failed", userMessage: "u", agentMessage: "wait" }));
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const dir = path.join(home, ".comprehension-guard");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "endpoint.json"),
+      JSON.stringify({ port: (server.address() as { port: number }).port, token: "tok" }),
+    );
+    const copilot = await runPause(
+      { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "/tmp/a.ts", content: "x" } },
+      home,
+      { COMPREHENSION_GUARD_AGENT: "copilot" },
+    );
+    assert.deepEqual(JSON.parse(copilot.stdout), { permissionDecision: "deny", permissionDecisionReason: "wait" });
+    const goose = await runPause(
+      { event: "PreToolUse", tool_name: "write", tool_input: { path: "/tmp/a.ts", content: "x" } },
+      home,
+      { COMPREHENSION_GUARD_AGENT: "goose" },
+    );
+    assert.deepEqual(JSON.parse(goose.stdout), { decision: "block", reason: "wait" });
+    const antigravity = await runPause(
+      { toolCall: { name: "write_to_file", args: { TargetFile: "/tmp/a.ts", CodeContent: "x" } } },
+      home,
+      { COMPREHENSION_GUARD_AGENT: "antigravity" },
+    );
+    assert.deepEqual(JSON.parse(antigravity.stdout), { decision: "deny", reason: "wait" });
+    assert.equal(antigravity.stdout.includes("CodeContent"), false);
   } finally {
     if (server) {
       await new Promise<void>((resolve) => server!.close(() => resolve()));

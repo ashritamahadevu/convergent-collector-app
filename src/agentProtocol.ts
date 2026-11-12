@@ -31,6 +31,13 @@ const EDIT_TOOLS = new Set([
   "apply_patch",
   "write_file",
   "replace",
+  "Create",
+  "ApplyPatch",
+  "write",
+  "edit",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
 ]);
 
 export type AgentHunk = {
@@ -233,8 +240,8 @@ function isPauseCommand(command: unknown): boolean {
   return isGuardScript(command, "pause.js");
 }
 
-export function hookCommand(nodePath: string, scriptPath: string): string {
-  return `${quoteArg(nodePath)} ${quoteArg(scriptPath)}`;
+export function hookCommand(nodePath: string, scriptPath: string, args: string[] = []): string {
+  return [quoteArg(nodePath), quoteArg(scriptPath), ...args.map((arg) => quoteArg(arg))].join(" ");
 }
 
 /** Puts generated hunks back into a file that does not yet contain them. */
@@ -315,6 +322,40 @@ export function withBaseline(edit: AgentEdit, previous: string | undefined): Age
   };
 }
 
+function flattenToolCall(payload: Record<string, unknown>): Record<string, unknown> {
+  const call = asRecord(payload.toolCall);
+  if (!call) {
+    return payload;
+  }
+  const args = asRecord(call.args) ?? {};
+  const name = stringField(call, "name");
+  const toolInput: Record<string, unknown> = { ...args };
+  let toolName = name;
+  if (name === "write_to_file") {
+    toolName = "Write";
+    toolInput.file_path = args.TargetFile;
+    toolInput.content = args.CodeContent;
+  } else if (name === "replace_file_content") {
+    toolName = "Edit";
+    toolInput.file_path = args.TargetFile;
+    toolInput.old_string = args.TargetContent;
+    toolInput.new_string = args.ReplacementContent;
+    toolInput.allow_multiple = args.AllowMultiple === true;
+  } else if (name === "multi_replace_file_content" && Array.isArray(args.ReplacementChunks)) {
+    toolName = "MultiEdit";
+    toolInput.file_path = args.TargetFile;
+    toolInput.edits = args.ReplacementChunks.map((chunk) => {
+      const item = asRecord(chunk) ?? {};
+      return {
+        old_string: item.TargetContent,
+        new_string: item.ReplacementContent,
+        allow_multiple: item.AllowMultiple === true,
+      };
+    });
+  }
+  return { ...payload, tool_name: toolName, tool_input: toolInput };
+}
+
 export function editsFromHookEnvelope(
   body: unknown,
   opts?: {
@@ -326,8 +367,9 @@ export function editsFromHookEnvelope(
   if (!record) {
     return [];
   }
-  const payload = asRecord(record.payload) ?? record;
-  const eventName = stringField(payload, "hook_event_name") || stringField(payload, "hookEventName");
+  const payload = flattenToolCall(asRecord(record.payload) ?? record);
+  const eventName =
+    stringField(payload, "hook_event_name") || stringField(payload, "hookEventName") || stringField(payload, "event");
   if (eventName === "PreToolUse" || eventName === "BeforeTool") {
     return [];
   }
@@ -425,8 +467,12 @@ export function planHookInstall(opts: {
   claude: ConfigInput;
   codex: ConfigInput;
   cursor: ConfigInput;
-  /** Omitted configs are treated as a missing file, so the install still adds Gemini CLI. */
+  /** Omitted configs are treated as a missing file, so the install still adds every supported agent. */
   gemini?: ConfigInput;
+  copilot?: ConfigInput;
+  droid?: ConfigInput;
+  goose?: ConfigInput;
+  antigravity?: ConfigInput;
 }): HookInstallPlan {
   const scriptPath = path.join(guardDirectory(opts.homeDir), "notify.js");
   const command = hookCommand(opts.nodePath, scriptPath);
@@ -437,6 +483,13 @@ export function planHookInstall(opts: {
   const unchanged: string[] = [];
   const errors: string[] = [];
   let pauseCommand: string | undefined;
+  const pauseFor = (agent: string): string | undefined => {
+    if (typeof opts.pauseSource !== "string") {
+      return undefined;
+    }
+    return hookCommand(opts.nodePath, path.join(guardDirectory(opts.homeDir), "pause.js"), [`--agent=${agent}`]);
+  };
+  const snapshotCommand = hookCommand(opts.nodePath, scriptPath, ["--snapshot"]);
   if (typeof opts.pauseSource === "string") {
     const pausePath = path.join(guardDirectory(opts.homeDir), "pause.js");
     pauseCommand = hookCommand(opts.nodePath, pausePath);
@@ -483,6 +536,58 @@ export function planHookInstall(opts: {
     unchanged,
     errors,
   );
+  mergeProduct(
+    "Copilot CLI",
+    path.join(opts.homeDir, ".copilot", "hooks", "comprehension-guard.json"),
+    opts.copilot ?? { kind: "missing" },
+    (value) => mergeCopilotHooks(value, command, pauseFor("copilot")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Droid",
+    path.join(opts.homeDir, ".factory", "hooks.json"),
+    opts.droid ?? { kind: "missing" },
+    (value) => mergeDroidHooks(value, command, pauseCommand),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Goose",
+    path.join(opts.homeDir, ".agents", "plugins", "comprehension-guard", "hooks", "hooks.json"),
+    opts.goose ?? { kind: "missing" },
+    (value) => mergeGooseHooks(value, command, pauseFor("goose")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Antigravity",
+    path.join(opts.homeDir, ".gemini", "config", "hooks.json"),
+    opts.antigravity ?? { kind: "missing" },
+    (value) => mergeAntigravityHooks(value, snapshotCommand, command, pauseFor("antigravity")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  const pluginPath = path.join(opts.homeDir, ".agents", "plugins", "comprehension-guard", "plugin.json");
+  const pluginContents =
+    JSON.stringify(
+      {
+        name: "comprehension-guard",
+        version: "1.0.0",
+        description: "Pause Goose after each code chunk until the student answers one question.",
+      },
+      null,
+      2,
+    ) + "\n";
+  writes.push({ path: pluginPath, contents: pluginContents });
 
   return { scriptPath, writes, installed, unchanged, errors };
 }
@@ -602,7 +707,15 @@ function normalizePayload(
     return editsFromHunks(agent, filePath, input.edits);
   }
 
-  if (toolName === "Write" || typeof input.content === "string" || input.contentOmitted === true) {
+  if (
+    toolName === "Write" ||
+    toolName === "Create" ||
+    toolName === "write" ||
+    toolName === "write_file" ||
+    toolName === "write_to_file" ||
+    typeof input.content === "string" ||
+    input.contentOmitted === true
+  ) {
     const filePath = resolveFilePath(filePathFrom(input, payload), cwd);
     if (!filePath) {
       return [];
@@ -620,8 +733,8 @@ function normalizePayload(
     if (!filePath) {
       return [];
     }
-    const newText = stringField(input, "new_string") || stringField(input, "new_source");
-    const oldText = stringField(input, "old_string") || stringField(input, "old_source");
+    const newText = stringField(input, "new_string") || stringField(input, "new_source") || stringField(input, "after");
+    const oldText = stringField(input, "old_string") || stringField(input, "old_source") || stringField(input, "before");
     if (!newText) {
       return [];
     }
@@ -785,6 +898,15 @@ function detectAgent(payload: Record<string, unknown>, toolName: string): string
   if (eventName === "BeforeTool" || eventName === "AfterTool") {
     return "gemini";
   }
+  if (asRecord(payload.toolCall)) {
+    return "antigravity";
+  }
+  if (stringField(payload, "event") === "PreToolUse" || stringField(payload, "event") === "PostToolUse") {
+    return "goose";
+  }
+  if (typeof payload.permission_mode === "string") {
+    return "droid";
+  }
   if (!eventName && (payload.model_id || payload.conversation_id || payload.generation_id)) {
     return "cursor";
   }
@@ -907,6 +1029,128 @@ function mergeGeminiSettings(
       upsertPauseHook(hooks, "BeforeTool", pauseCommand, GEMINI_MATCHER, GEMINI_PAUSE_TIMEOUT_MS) || changed;
   }
   changed = markSequential(hooks, "BeforeTool") || changed;
+  return { next: root, changed };
+}
+
+const COPILOT_MATCHER = "Edit|Write";
+const DROID_MATCHER = "Create|Edit|ApplyPatch";
+const GOOSE_MATCHER = "^(write|edit)$";
+const ANTIGRAVITY_MATCHER = "write_to_file|replace_file_content|multi_replace_file_content";
+
+function mergeCopilotHooks(
+  value: unknown,
+  notifyCommand: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Copilot hooks");
+  let changed = root.version !== 1;
+  root.version = 1;
+  if (!asRecord(root.hooks)) {
+    root.hooks = {};
+    changed = true;
+  }
+  const hooks = asRecord(root.hooks);
+  if (!hooks) {
+    throw new Error("Copilot hooks must be a JSON object");
+  }
+  changed = upsertFlatHook(hooks, "PreToolUse", notifyCommand, COPILOT_MATCHER, 30) || changed;
+  changed = upsertFlatHook(hooks, "PostToolUse", notifyCommand, COPILOT_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertFlatHook(hooks, "PreToolUse", pauseCommand, COPILOT_MATCHER, 600) || changed;
+  }
+  return { next: root, changed };
+}
+
+function upsertFlatHook(
+  hooks: Record<string, unknown>,
+  eventName: string,
+  command: string,
+  matcher: string,
+  timeoutSec: number,
+): boolean {
+  const list = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
+  let changed = !Array.isArray(hooks[eventName]);
+  let found = false;
+  const wantPause = isPauseCommand(command);
+  const next = list.map((entry) => {
+    const rec = asRecord(entry);
+    if (!rec) {
+      return entry;
+    }
+    const sameScript = wantPause ? isPauseCommand(rec.command) : isNotifyCommand(rec.command);
+    if (!sameScript) {
+      return entry;
+    }
+    found = true;
+    if (rec.type !== "command" || rec.command !== command || rec.matcher !== matcher || rec.timeoutSec !== timeoutSec) {
+      changed = true;
+      return { type: "command", command, matcher, timeoutSec };
+    }
+    return entry;
+  });
+  if (!found) {
+    next.push({ type: "command", command, matcher, timeoutSec });
+    changed = true;
+  }
+  hooks[eventName] = next;
+  return changed;
+}
+
+function mergeDroidHooks(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Droid hooks");
+  const wrapped = asRecord(root.hooks);
+  const hooks = wrapped ?? root;
+  let changed = !wrapped && !Array.isArray(root.PreToolUse);
+  changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, DROID_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(hooks, "PostToolUse", command, true, DROID_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, DROID_MATCHER, 600) || changed;
+  }
+  if (wrapped) {
+    root.hooks = hooks;
+    return { next: root, changed };
+  }
+  return { next: hooks, changed };
+}
+
+function mergeGooseHooks(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const { root, hooks, changed: createdHooks } = hooksObject(value, "Goose hooks");
+  let changed = createdHooks;
+  changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, GOOSE_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(hooks, "PostToolUse", command, false, GOOSE_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, GOOSE_MATCHER, 600) || changed;
+  }
+  return { next: root, changed };
+}
+
+function mergeAntigravityHooks(
+  value: unknown,
+  snapshotCommand: string,
+  notifyCommand: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Antigravity hooks");
+  const existing = asRecord(root["comprehension-guard"]);
+  const block: Record<string, unknown> = { ...(existing ?? {}), enabled: true };
+  let changed = !existing || existing.enabled !== true;
+  changed = upsertClaudeEvent(block, "PreToolUse", snapshotCommand, false, ANTIGRAVITY_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(block, "PostToolUse", notifyCommand, false, ANTIGRAVITY_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(block, "PreToolUse", pauseCommand, ANTIGRAVITY_MATCHER, 600) || changed;
+  }
+  if (JSON.stringify(existing) !== JSON.stringify(block)) {
+    root["comprehension-guard"] = block;
+    changed = true;
+  }
   return { next: root, changed };
 }
 

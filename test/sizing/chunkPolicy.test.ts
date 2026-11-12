@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chooseChunk, oneChunkMessage, questionKind } from "../../src/sizing/chunkPolicy";
+import { chooseChunk, chunkGuidance, chunkSizeFor, questionKind } from "../../src/sizing/chunkPolicy";
 import { questionForChunk } from "../../src/sizing/questions";
 import type { UnitFact } from "../../src/sizing/types";
 
@@ -89,10 +89,16 @@ test("the question names the kind and the preferred language, and stays locally 
   assert.equal(question.options.includes(question.explanation), true);
 });
 
-test("a multi-chunk refusal tells the model the preferences and not the source", () => {
-  const message = oneChunkMessage({ preset: "standard", strictness: "strict", preferredLanguage: "Hindi", now: NOW }, 3);
-  assert.match(message, /3 chunks/);
-  assert.match(message, /Preset standard/);
+test("the model chooses a file, a function, or a fragment inside a method", () => {
+  assert.equal(chunkSizeFor({ preset: "quick", now: NOW }), "file");
+  assert.equal(chunkSizeFor({ preset: "standard", strictness: "lenient", now: NOW }), "file");
+  assert.equal(chunkSizeFor({ preset: "standard", now: NOW }), "function");
+  assert.equal(chunkSizeFor({ preset: "deep", now: NOW }), "fragment");
+  assert.equal(chunkSizeFor({ preset: "quick", strictness: "strict", now: NOW }), "fragment");
+  assert.equal(chunkSizeFor({ preset: "quick", examDate: "2026-11-18", now: NOW }), "fragment");
+  const message = chunkGuidance({ preset: "standard", strictness: "strict", preferredLanguage: "Hindi", now: NOW });
+  assert.match(message, /You choose the next chunk/);
+  assert.match(message, /few lines inside a large method/);
   assert.match(message, /Hindi/);
   assert.equal(message.includes("{"), false);
 });

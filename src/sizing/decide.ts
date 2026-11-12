@@ -24,6 +24,10 @@ const MUTATING_TOOLS = new Set([
   "searchreplace",
   "writefile",
   "replace",
+  "create",
+  "writetofile",
+  "replacefilecontent",
+  "multireplacefilecontent",
 ]);
 
 function normalizeToolName(toolName: string): string {

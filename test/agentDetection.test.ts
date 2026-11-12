@@ -327,6 +327,26 @@ test("disk fallback ignores focused single insertions, typing, and bulk checkout
   assert.equal(quizSnippet("x".repeat(30_000)).length, 24_000);
 });
 
+function installedConfigs(writes: { path: string; contents: string }[]) {
+  const read = (needle: string) => {
+    const write = writes.find((item) => item.path.includes(needle));
+    if (!write) {
+      throw new Error("missing " + needle);
+    }
+    return { kind: "ok" as const, value: JSON.parse(write.contents) };
+  };
+  return {
+    claude: read(`${path.sep}.claude${path.sep}`),
+    codex: read(`${path.sep}.codex${path.sep}`),
+    cursor: read(`${path.sep}.cursor${path.sep}`),
+    gemini: read(`${path.sep}.gemini${path.sep}settings.json`),
+    copilot: read(`${path.sep}.copilot${path.sep}`),
+    droid: read(`${path.sep}.factory${path.sep}`),
+    goose: read(`comprehension-guard${path.sep}hooks${path.sep}`),
+    antigravity: read(`${path.sep}.gemini${path.sep}config${path.sep}`),
+  };
+}
+
 test("hook install merges without dropping existing hooks and is idempotent", () => {
   const home = path.join("/tmp", "guard-home");
   const nodePath = "/usr/local/bin/node";
@@ -348,7 +368,16 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
       value: { version: 1, hooks: { sessionStart: [{ command: "echo start" }] } },
     },
   });
-  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
+  assert.deepEqual(first.installed.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
   assert.deepEqual(first.errors, []);
   const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
   const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
@@ -369,15 +398,23 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
     homeDir: home,
     nodePath,
     scriptSource: script,
-    claude: { kind: "ok", value: claudeJson },
-    codex: { kind: "ok", value: JSON.parse(codexWrite.contents) },
-    cursor: { kind: "ok", value: cursorJson },
-    gemini: { kind: "ok", value: JSON.parse(geminiWrite.contents) },
+    ...installedConfigs(first.writes),
   });
   assert.deepEqual(second.installed, []);
-  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
-  assert.equal(second.writes.length, 1);
-  assert.equal(second.writes[0].contents, script);
+  assert.deepEqual(second.unchanged.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
+  assert.deepEqual(
+    second.writes.map((write) => path.basename(write.path)).sort(),
+    ["notify.js", "plugin.json"],
+  );
 
   const invalid = planHookInstall({
     homeDir: home,
@@ -405,7 +442,16 @@ test("pause hook is added beside notify and a second install is idempotent", () 
     codex: { kind: "missing" },
     cursor: { kind: "missing" },
   });
-  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
+  assert.deepEqual(first.installed.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
   const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
   const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
   const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
@@ -451,22 +497,22 @@ test("pause hook is added beside notify and a second install is idempotent", () 
     nodePath,
     scriptSource: script,
     pauseSource: pause,
-    claude: { kind: "ok", value: claudeJson },
-    codex: { kind: "ok", value: codexJson },
-    cursor: { kind: "ok", value: cursorJson },
-    gemini: {
-      kind: "ok",
-      value: JSON.parse(
-        first.writes.find((write) => write.path.endsWith(`${path.sep}.gemini${path.sep}settings.json`))!.contents,
-      ),
-    },
+    ...installedConfigs(first.writes),
   });
   assert.deepEqual(second.installed, []);
-  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
-  assert.equal(second.writes.length, 2);
+  assert.deepEqual(second.unchanged.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
   assert.deepEqual(
-    second.writes.map((write) => write.contents).sort(),
-    [pause, script].sort(),
+    second.writes.map((write) => path.basename(write.path)).sort(),
+    ["notify.js", "pause.js", "plugin.json"],
   );
 });
 

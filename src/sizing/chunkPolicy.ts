@@ -83,20 +83,40 @@ export function questionKind(unit: UnitFact, prefs: LearnerPreferences): Questio
   return "multiple_choice";
 }
 
-export function oneChunkMessage(prefs: LearnerPreferences, chunkCount: number): string {
+export type ChunkSize = "file" | "function" | "fragment";
+
+/** A hint for the coding model. The model still chooses the actual chunk. */
+export function chunkSizeFor(prefs: LearnerPreferences): ChunkSize {
+  const preset = effectivePreset(prefs);
+  const strictness = normalizeStrictness(prefs.strictness);
+  if (preset === "deep" || strictness === "strict" || examSoon(prefs) || interviewSoon(prefs)) {
+    return "fragment";
+  }
+  if (preset === "quick" || strictness === "lenient") {
+    return "file";
+  }
+  return "function";
+}
+
+export function chunkGuidance(prefs: LearnerPreferences): string {
+  const size = chunkSizeFor(prefs);
+  const preference =
+    size === "file"
+      ? "A whole file is a reasonable chunk when the student already knows the ideas."
+      : size === "fragment"
+        ? "Prefer a few lines inside a large method, or one small function, when the code is new or an exam is close."
+        : "Prefer one function or method, and split a very large method into the part you are changing.";
   return (
-    "Write one chunk only, a single function or method, then stop. " +
-    `This edit has ${chunkCount} chunks. ` +
+    "You choose the next chunk. It can be a whole file, one function, or a small part of a large method. " +
+    preference +
+    " " +
     preferenceSummary(prefs) +
-    " After that chunk lands, the student answers one question. Retry with the first chunk."
+    " After that chunk lands, the student answers one question before you write the next chunk."
   );
 }
 
 export function nextChunkMessage(prefs: LearnerPreferences): string {
-  return (
-    "The check passed. Write the next chunk as one function or method, then stop. " +
-    preferenceSummary(prefs)
-  );
+  return "The check passed. " + chunkGuidance(prefs);
 }
 
 export function conceptOf(unit: UnitFact): string {

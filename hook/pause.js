@@ -4,7 +4,8 @@
 /**
  * Pause gate installed by "Comprehension Guard: Install AI Agent Hooks".
  *
- * Claude Code, Codex, Cursor, and Gemini CLI run this before a mutating tool. It asks
+ * Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI, Droid, Goose, and
+ * Antigravity run this before a mutating tool. It asks
  * the editor whether that tool may proceed. The request stays open until
  * the student passes, fails, or bypasses a check. If the editor is closed,
  * the tool is allowed so the agent is not trapped.
@@ -35,6 +36,10 @@ const MUTATING_TOOLS = new Set([
   "searchreplace",
   "writefile",
   "replace",
+  "create",
+  "writetofile",
+  "replacefilecontent",
+  "multireplacefilecontent",
 ]);
 
 function guardHome() {
@@ -73,11 +78,23 @@ function asObject(value) {
 }
 
 function eventName(payload) {
-  const name = payload.hook_event_name || payload.hookEventName || "";
+  const name = payload.hook_event_name || payload.hookEventName || payload.event || "";
   return typeof name === "string" ? name : "";
 }
 
+function agentFlag() {
+  const fromArg = process.argv.find((item) => item.startsWith("--agent="));
+  if (fromArg) {
+    return fromArg.slice("--agent=".length);
+  }
+  return process.env.COMPREHENSION_GUARD_AGENT || "";
+}
+
 function toolName(payload) {
+  const call = asObject(payload.toolCall);
+  if (call && typeof call.name === "string" && call.name.trim()) {
+    return call.name.trim();
+  }
   if (typeof payload.tool_name === "string" && payload.tool_name.trim()) {
     return payload.tool_name.trim();
   }
@@ -135,6 +152,44 @@ function geminiDeny(agentMessage) {
     decision: "deny",
     reason: agentMessage || "Comprehension Guard paused this write.",
   };
+}
+
+function copilotDecision(allow, context) {
+  const decision = { permissionDecision: allow ? "allow" : "deny" };
+  if (context) {
+    decision.permissionDecisionReason = context;
+  }
+  return decision;
+}
+
+function gooseDecision(allow, context) {
+  if (!allow) {
+    return { decision: "block", reason: context || "Comprehension Guard paused this write." };
+  }
+  return context ? { decision: "allow", reason: context } : { decision: "allow" };
+}
+
+function antigravityDecision(allow, context) {
+  return {
+    decision: allow ? "allow" : "deny",
+    reason: context || (allow ? "Continue." : "Comprehension Guard paused this write."),
+  };
+}
+
+function formatDecision(agent, cursor, allow, userMessage, agentMessage) {
+  if (agent === "copilot") {
+    return copilotDecision(allow, agentMessage);
+  }
+  if (agent === "goose") {
+    return gooseDecision(allow, agentMessage);
+  }
+  if (agent === "antigravity") {
+    return antigravityDecision(allow, agentMessage);
+  }
+  if (agent === "gemini") {
+    return allow ? geminiAllow(agentMessage) : geminiDeny(agentMessage);
+  }
+  return allow ? allowDecision(cursor, agentMessage) : denyDecision(cursor, userMessage, agentMessage);
 }
 
 function denyDecision(cursor, userMessage, agentMessage) {
@@ -253,6 +308,7 @@ async function main() {
   }
   const event = eventName(payload);
   const eventKey = event.toLowerCase();
+  const agent = agentFlag() || (event === "BeforeTool" ? "gemini" : "");
   if (
     eventKey === "afterfileedit" ||
     eventKey === "posttooluse" ||
@@ -262,13 +318,13 @@ async function main() {
   ) {
     return undefined;
   }
-  const gemini = event === "BeforeTool";
-  if (eventKey !== "pretooluse" && !gemini) {
+  const pauseEvent = eventKey === "pretooluse" || event === "BeforeTool" || agent === "antigravity";
+  if (!pauseEvent) {
     return undefined;
   }
   const cursor = isCursorPause(event);
   if (!isMutating(toolName(payload))) {
-    return gemini ? geminiAllow("") : allowDecision(cursor, "");
+    return formatDecision(agent, cursor, true, "", "");
   }
   const body = JSON.stringify({
     receivedAt: Date.now(),
@@ -277,11 +333,15 @@ async function main() {
   });
   const responseText = await postPause(body);
   const decision = parseDecision(responseText);
-  const context = decision && decision.allow ? decision.agentMessage : "";
-  if (!decision || decision.allow) {
-    return gemini ? geminiAllow(context) : allowDecision(cursor, context);
-  }
-  return gemini ? geminiDeny(decision.agentMessage) : denyDecision(cursor, decision.userMessage, decision.agentMessage);
+  const allowed = !decision || decision.allow;
+  const context = allowed && decision ? decision.agentMessage : decision ? decision.agentMessage : "";
+  return formatDecision(
+    agent,
+    cursor,
+    allowed,
+    decision ? decision.userMessage : "",
+    context,
+  );
 }
 
 main()

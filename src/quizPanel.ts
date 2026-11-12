@@ -602,7 +602,7 @@ function getWebviewHtml(
     <div class="loading-goblin">
       <img src="${uris.goblinSleep}" alt="" aria-hidden="true">
     </div>
-    <p class="loading-label">Checking your answer\u2026</p>
+    <p class="loading-label" style="display:none"></p>
   </div>
 
   <div class="quiz-scroll">

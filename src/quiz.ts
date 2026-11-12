@@ -158,6 +158,11 @@ export async function runComprehensionGate(
           "Comprehension Guard: explanation shown. The code stays and is not counted as correct.",
           5000,
         );
+        // Wait for the user to dismiss the explanation card (expNextBtn posts cancel,
+        // or the user closes the panel). Without this, the panel stays open with no
+        // extension listening, causing any subsequent submit to hang forever.
+        await view.waitForSubmit();
+        view.close();
         return true;
       }
 

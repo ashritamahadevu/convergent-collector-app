@@ -1033,7 +1033,10 @@ function getWebviewHtml(
       transitionToQ2(null);
     });
     expNextBtn.addEventListener("click", function () {
-      transitionToQ2(null);
+      /* Quiz is complete after explanation; signal the host to close the panel.
+         (Navigating to another question here would leave the extension not
+          listening, causing submit messages to be dropped and loading to hang.) */
+      vscode.postMessage({ type: "cancel" });
     });
 
     /* ── Startup ─────────────────────────────────────────────────────────── */

@@ -252,6 +252,7 @@ export async function runComprehensionGate(
             message: lastFeedback,
             allowDispute: true,
             passed: false,
+            allowNextQuestion: followups < maxFollowups,
             correctOption:
               typeof question.correctIndex === "number" && question.options
                 ? question.options[question.correctIndex]
@@ -279,7 +280,7 @@ export async function runComprehensionGate(
         followups += 1;
         lastFeedback = "That order is not quite right. Move the steps and try again.";
         if (followups <= maxFollowups) {
-          view.showFeedback({ message: lastFeedback, allowDispute: true, passed: false });
+          view.showFeedback({ message: lastFeedback, allowDispute: true, passed: false, allowNextQuestion: followups < maxFollowups });
           continue;
         }
         await recordAttempt(false, "fail", undefined, score);
@@ -351,6 +352,7 @@ export async function runComprehensionGate(
           message: lastFeedback,
           allowDispute: true,
           passed: false,
+          allowNextQuestion: followups < maxFollowups,
         });
         continue;
       }

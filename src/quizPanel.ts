@@ -21,6 +21,8 @@ export type QuizView = {
     explained?: boolean;
     /** true = correct answer, false = wrong answer. Drives goblin state image. */
     passed?: boolean;
+    /** Whether to show the "Next Question" button. Defaults to true. */
+    allowNextQuestion?: boolean;
   }): void;
   waitForSubmit(): Promise<QuizAction>;
   close(): void;
@@ -975,9 +977,11 @@ function getWebviewHtml(
       } else {
         disputeBtn.classList.add("hidden");
       }
-      /* Show "Next Question" for any wrong answer so users see all follow-up rounds */
-      if (!payload.explained && payload.passed !== true) {
+      /* Show "Next Question" only when the extension says more questions are available */
+      if (payload.allowNextQuestion && !payload.explained && payload.passed !== true) {
         nextQBtn.classList.remove("hidden");
+      } else {
+        nextQBtn.classList.add("hidden");
       }
       if (currentKind === "free-text") {
         var ta = document.getElementById("answer-input");
@@ -1196,6 +1200,7 @@ export function createQuizPanel(
         allowDispute: opts.allowDispute === true,
         explained: opts.explained === true,
         passed: opts.passed,
+        allowNextQuestion: opts.allowNextQuestion !== false,
       });
     },
 

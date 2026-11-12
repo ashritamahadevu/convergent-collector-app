@@ -232,7 +232,8 @@ async function main() {
     return;
   }
   const filePaths = collectPaths(payload);
-  if (eventName(payload) === "PreToolUse") {
+  const event = eventName(payload);
+  if (event === "PreToolUse" || event === "BeforeTool") {
     saveSnapshots(filePaths);
     return;
   }

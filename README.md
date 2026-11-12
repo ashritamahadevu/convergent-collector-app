@@ -6,7 +6,7 @@ A VS Code extension that makes sure you actually understand code before it lands
 
 - Intercepts `Ctrl+V` / `Cmd+V` and, if the clipboard content is large enough, pastes it and locks the file. You cannot edit or switch files until you answer, press Bypass, or close the quiz. A pass or Bypass keeps the paste. Closing or failing deletes it.
 - Detects large inline insertions (AI completions, apply-from-chat, snippet expansion) via document change events. The insertion is taken back out immediately and written again only if you pass or press Bypass.
-- Detects file edits from AI coding agents (Claude Code, Codex, and the Cursor agent) after you install their hooks, and runs the same check. A large change that lands on an open file from outside the focused editor can raise the check even without hooks.
+- Detects file edits from AI coding agents (Claude Code, Codex, the Cursor agent, and Gemini CLI) after you install their hooks, and runs the same check. A large change that lands on an open file from outside the focused editor can raise the check even without hooks.
 - **AI-powered comprehension checks:** when an API key is configured, the extension generates a context-specific question for the snippet and opens a webview quiz. In **free-text** mode your answer is graded by an LLM-as-judge against atomic criteria; in **multiple-choice** mode you pick an option and grading is deterministic. Without an API key, it falls back to the simple modal prompt ("What does this code do?") with a minimum explanation length.
 - **Local learning stats:** attempts (including concept tags and pass/fail) are stored in the extension's global state.
 - **Bypass** button on the quiz, plus a one-shot "Bypass Next Insertion" command. Either one inserts the code without answering.
@@ -42,7 +42,7 @@ Design details for question generation and grading: [docs/llm-grading.md](docs/l
 - `Comprehension Guard: Set API Key`.
 - `Comprehension Guard: Clear API Key`.
 - `Comprehension Guard: Show Learning Stats` - summary in the **Comprehension Guard** output channel.
-- `Comprehension Guard: Install AI Agent Hooks` - register Claude Code, Codex, and Cursor hooks so edits from those agents raise the same check. Safe to run again.
+- `Comprehension Guard: Install AI Agent Hooks` - register Claude Code, Codex, Cursor, and Gemini CLI hooks so edits from those agents raise the same check. Safe to run again.
 
 ## Output channel and judge validation
 
@@ -100,11 +100,11 @@ Reload the window after installing. The status bar should show a shield icon wit
 
 - **Paste path:** a keybinding remaps `Ctrl+V` to `comprehensionGuard.paste`, which reads the clipboard, checks the threshold, runs the gate, and then calls the built-in paste command. See [src/pasteGuard.ts](src/pasteGuard.ts).
 - **Inline path:** `workspace.onDidChangeTextDocument` flags any single insertion at or above the threshold in the focused editor. The inserted code stays visible during the check and is removed if you do not pass. A re-entrancy flag ensures the guard ignores its own edits. See [src/editGuard.ts](src/editGuard.ts).
-- **Agent path:** Claude Code, Codex, and Cursor can run `hook/notify.js` after they edit a file. The script posts the edit to the extension on localhost, or leaves it in an inbox if the editor is closed. The same check runs, and a failed check reverts that edit. See [AI coding agents](#ai-coding-agents) and [src/agentGuard.ts](src/agentGuard.ts).
+- **Agent path:** Claude Code, Codex, Cursor, and Gemini CLI can run `hook/notify.js` after they edit a file. The script posts the edit to the extension on localhost, or leaves it in an inbox if the editor is closed. The same check runs, and a failed check reverts that edit. See [AI coding agents](#ai-coding-agents) and [src/agentGuard.ts](src/agentGuard.ts).
 
 ## AI coding agents
 
-Paste and inline detection only see edits made inside the editor. Claude Code, Codex, and the Cursor agent write files from their own processes. Hooks are how the extension hears about those writes. A command installs them for you.
+Paste and inline detection only see edits made inside the editor. Claude Code, Codex, the Cursor agent, and Gemini CLI write files from their own processes. Hooks are how the extension hears about those writes. A command installs them for you.
 
 1. Open this extension (F5 for a development host, or an installed VSIX).
 2. Run **Comprehension Guard: Install AI Agent Hooks** from the Command Palette.
@@ -117,6 +117,7 @@ The command copies `hook/notify.js` to `~/.comprehension-guard/notify.js` and me
 | Claude Code | `~/.claude/settings.json` | `PreToolUse` snapshots the file, then `PostToolUse` on `Edit`, `Write`, `NotebookEdit`, and `MultiEdit` notifies the extension |
 | Codex | `~/.codex/hooks.json` | Same pair of hooks for `apply_patch` (also matched as Edit/Write). Open `/hooks` in Codex and trust the comprehension-guard hook |
 | Cursor agent (`cursor agent` or `agent`) | `.cursor/hooks.json` in this repo, and `~/.cursor/hooks.json` from the install command | `afterFileEdit` runs `node hook/notify.js`. Trust the folder when Cursor asks. The Cursor app has to be open with this extension running so the quiz can appear |
+| Gemini CLI | `~/.gemini/settings.json` | `BeforeTool` snapshots the file and can pause `write_file` and `replace`. `AfterTool` notifies the extension. Shell commands are not paused. This is the `gemini` command, not Gemini inside another chat app |
 
 The notifier needs Node.js on your PATH (Node 20+, the same requirement as building this extension). It always exits successfully and prints nothing, so the agent is not blocked and is not asked to judge the quiz. Re-run the install command after you upgrade the extension or switch Node installs (for example nvm).
 
@@ -130,7 +131,7 @@ Without hooks, there is a narrower fallback for files you already have open. A l
 
 With `comprehensionGuard.agentPause` on (the default), the agent writes one chunk, then waits. A chunk is one function or method. The check uses your preset, strictness, preferred language, mastery, and any exam or interview date within 14 days to pick that chunk and the question type. A correct answer lets the agent write the next chunk. A miss keeps the next chunk blocked. A write that contains two or more new functions is refused so the agent splits it. Presets are `quick`, `standard` (the default), and `deep`. Set them with `comprehensionGuard.checkPreset`, `comprehensionGuard.strictness`, `comprehensionGuard.preferredLanguage`, and **Comprehension Guard: Set Study Preferences**.
 
-The pause runs only for agents that execute the installed hook: Claude Code, Codex, and the Cursor agent. It does not run for Copilot inline chat, Gemini, ChatGPT, Aider, or any other tool that never calls `pause.js`. Claude Code and Codex also do not pause shell commands, because their hook matcher is `Edit`, `Write`, `NotebookEdit`, and `MultiEdit` (Codex adds `apply_patch`). A Read is never paused. If the editor is closed, or the hook cannot get a decision, the tool is allowed so the agent is not trapped. Set `comprehensionGuard.agentPause` to false to restore the previous per-edit quiz.
+The pause runs for agents that execute the installed hook: Claude Code, Codex, the Cursor agent, and Gemini CLI. It does not run for Copilot inline chat, Gemini inside another app, ChatGPT, Aider, Continue, or any other tool that never calls `pause.js`. Claude Code and Codex do not pause shell commands, because their hook matcher is `Edit`, `Write`, `NotebookEdit`, and `MultiEdit` (Codex adds `apply_patch`). Gemini CLI pauses `write_file` and `replace` only. A Read is never paused. If the editor is closed, or the hook cannot get a decision, the tool is allowed so the agent is not trapped. Set `comprehensionGuard.agentPause` to false to restore the previous per-edit quiz.
 
 ## Roadmap
 

@@ -23,6 +23,7 @@ const MUTATING_TOOLS = new Set([
   "editnotebook",
   "searchreplace",
   "writefile",
+  "replace",
 ]);
 
 function normalizeToolName(toolName: string): string {

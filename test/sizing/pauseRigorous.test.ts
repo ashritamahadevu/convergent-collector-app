@@ -3,7 +3,7 @@
  * PauseSession the extension uses.
  *
  * What this locks in:
- * - Only Claude Code, Codex, and the Cursor agent are wired to pause.
+ * - Claude Code, Codex, the Cursor agent, and Gemini CLI are wired to pause.
  * - A pause holds the tool until the student answers. It does not rewrite
  *   the tool call the model already chose.
  * - An allow can add one sentence telling the model to write the next chunk.
@@ -145,7 +145,7 @@ function forwardedContent(body: unknown): string {
   return record.payload?.tool_input?.content ?? "";
 }
 
-test("installed hooks pause Claude, Codex, and Cursor only, and not their shell tools", () => {
+test("installed hooks pause Claude, Codex, Cursor, and Gemini CLI, and not their shell tools", () => {
   const plan = planHookInstall({
     homeDir: "/tmp/guard-coverage",
     nodePath: "/usr/bin/node",
@@ -159,7 +159,8 @@ test("installed hooks pause Claude, Codex, and Cursor only, and not their shell 
   assert.ok(paths.some((file) => file.endsWith("/.claude/settings.json")));
   assert.ok(paths.some((file) => file.endsWith("/.codex/hooks.json")));
   assert.ok(paths.some((file) => file.endsWith("/.cursor/hooks.json")));
-  assert.equal(paths.some((file) => /copilot|gemini|aider|continue/i.test(file)), false);
+  assert.ok(paths.some((file) => file.endsWith("/.gemini/settings.json")));
+  assert.equal(paths.some((file) => /copilot|aider|continue/i.test(file)), false);
 
   const claude = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.claude${path.sep}`))!.contents);
   const codex = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.codex${path.sep}`))!.contents);
@@ -172,6 +173,19 @@ test("installed hooks pause Claude, Codex, and Cursor only, and not their shell 
   assert.equal(claudeTools.includes("PowerShell"), false);
   assert.ok(codexTools.includes("apply_patch"));
   assert.equal(codexTools.includes("Bash"), false);
+
+  const gemini = JSON.parse(plan.writes.find((write) => write.path.includes(`${path.sep}.gemini${path.sep}`))!.contents);
+  const before = gemini.hooks.BeforeTool[0];
+  assert.equal(before.matcher, "write_file|replace");
+  assert.equal(before.sequential, true);
+  assert.equal(before.hooks.length, 2);
+  assert.match(before.hooks[0].command, /notify\.js/);
+  assert.equal(before.hooks[0].timeout, 30_000);
+  assert.match(before.hooks[1].command, /pause\.js/);
+  assert.equal(before.hooks[1].timeout, 600_000);
+  assert.equal(before.matcher.includes("run_shell_command"), false);
+  assert.equal(gemini.hooks.AfterTool[0].hooks.length, 1);
+  assert.match(gemini.hooks.AfterTool[0].hooks[0].command, /notify\.js/);
 });
 
 test("a held Write keeps the planned edit and tells the model to write one chunk next", async () => {

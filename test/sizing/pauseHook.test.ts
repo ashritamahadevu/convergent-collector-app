@@ -139,6 +139,76 @@ test("PreToolUse Write denies when the editor answers allow false", async () => 
   }
 });
 
+test("Gemini BeforeTool read_file allows without contacting the editor", async () => {
+  const home = tempHome();
+  try {
+    const result = await runPause(
+      {
+        hook_event_name: "BeforeTool",
+        tool_name: "read_file",
+        tool_input: { file_path: "/tmp/a.ts" },
+      },
+      home,
+    );
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), { decision: "allow" });
+    assert.equal(fs.existsSync(path.join(home, ".comprehension-guard", "endpoint.json")), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Gemini BeforeTool write_file denies with a reason and AfterTool prints nothing", async () => {
+  const home = tempHome();
+  let server: Server | undefined;
+  try {
+    server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          allow: false,
+          reason: "one-chunk",
+          userMessage: "Write one function at a time.",
+          agentMessage: "Write one chunk only.",
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const dir = path.join(home, ".comprehension-guard");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "endpoint.json"),
+      JSON.stringify({ port: (server.address() as { port: number }).port, token: "tok" }),
+    );
+    const denied = await runPause(
+      {
+        hook_event_name: "BeforeTool",
+        session_id: "g",
+        tool_name: "write_file",
+        tool_input: { file_path: "/tmp/a.ts", content: "function a(){ if (x) return 1; }\n" },
+      },
+      home,
+    );
+    assert.equal(denied.code, 0);
+    assert.equal(denied.stderr, "");
+    assert.deepEqual(JSON.parse(denied.stdout), { decision: "deny", reason: "Write one chunk only." });
+    assert.equal(denied.stdout.includes("function a"), false);
+
+    const after = await runPause(
+      { hook_event_name: "AfterTool", tool_name: "write_file", tool_input: { content: "function a(){}" } },
+      home,
+    );
+    assert.equal(after.code, 0);
+    assert.equal(after.stdout, "");
+  } finally {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("Cursor preToolUse Read prints a permission allow decision", async () => {
   const home = tempHome();
   try {

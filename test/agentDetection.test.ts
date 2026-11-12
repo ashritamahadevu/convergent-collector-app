@@ -348,12 +348,13 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
       value: { version: 1, hooks: { sessionStart: [{ command: "echo start" }] } },
     },
   });
-  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
   assert.deepEqual(first.errors, []);
   const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
   const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
   const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
-  assert.ok(claudeWrite && codexWrite && cursorWrite);
+  const geminiWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.gemini${path.sep}settings.json`));
+  assert.ok(claudeWrite && codexWrite && cursorWrite && geminiWrite);
   const claudeJson = JSON.parse(claudeWrite.contents);
   assert.equal(claudeJson.theme, "dark");
   assert.equal(claudeJson.hooks.Notification[0].hooks[0].command, "echo hi");
@@ -371,9 +372,10 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
     claude: { kind: "ok", value: claudeJson },
     codex: { kind: "ok", value: JSON.parse(codexWrite.contents) },
     cursor: { kind: "ok", value: cursorJson },
+    gemini: { kind: "ok", value: JSON.parse(geminiWrite.contents) },
   });
   assert.deepEqual(second.installed, []);
-  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
   assert.equal(second.writes.length, 1);
   assert.equal(second.writes[0].contents, script);
 
@@ -403,7 +405,7 @@ test("pause hook is added beside notify and a second install is idempotent", () 
     codex: { kind: "missing" },
     cursor: { kind: "missing" },
   });
-  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
   const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
   const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
   const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
@@ -452,14 +454,62 @@ test("pause hook is added beside notify and a second install is idempotent", () 
     claude: { kind: "ok", value: claudeJson },
     codex: { kind: "ok", value: codexJson },
     cursor: { kind: "ok", value: cursorJson },
+    gemini: {
+      kind: "ok",
+      value: JSON.parse(
+        first.writes.find((write) => write.path.endsWith(`${path.sep}.gemini${path.sep}settings.json`))!.contents,
+      ),
+    },
   });
   assert.deepEqual(second.installed, []);
-  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor", "Gemini CLI"]);
   assert.equal(second.writes.length, 2);
   assert.deepEqual(
     second.writes.map((write) => write.contents).sort(),
     [pause, script].sort(),
   );
+});
+
+test("a Gemini CLI AfterTool write becomes one edit and a BeforeTool does not", () => {
+  const source = "function coalesce(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n";
+  const after = editsFromHookEnvelope({
+    payload: {
+      hook_event_name: "AfterTool",
+      session_id: "g",
+      cwd: "/tmp",
+      tool_name: "write_file",
+      tool_input: { file_path: "/tmp/mm.js", content: source },
+    },
+  });
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.agent, "gemini");
+  assert.equal(after[0]?.filePath.endsWith("mm.js"), true);
+  assert.equal(after[0]?.snippet, source);
+  assert.deepEqual(
+    editsFromHookEnvelope({
+      payload: {
+        hook_event_name: "BeforeTool",
+        tool_name: "write_file",
+        tool_input: { file_path: "/tmp/mm.js", content: source },
+      },
+    }),
+    [],
+  );
+  const replaced = editsFromHookEnvelope({
+    payload: {
+      hook_event_name: "AfterTool",
+      tool_name: "replace",
+      tool_input: {
+        file_path: "/tmp/mm.js",
+        old_string: "return 0;",
+        new_string: "return 1;",
+        allow_multiple: true,
+      },
+    },
+  });
+  assert.equal(replaced[0]?.agent, "gemini");
+  assert.equal(replaced[0]?.hunks[0]?.replaceAll, true);
+  assert.equal(looksLikeAgentInvocation("gemini fix the parser"), true);
 });
 
 test("stale inbox events and overlapping gates are ignored", () => {

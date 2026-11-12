@@ -48,7 +48,7 @@ import { offerWalkthrough } from "./walkthrough";
 import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, wantsWalkthrough } from "./state";
 
 /**
- * Quizzes code written by Claude Code, Codex, or the Cursor agent.
+ * Quizzes code written by Claude Code, Codex, the Cursor agent, or Gemini CLI.
  *
  * Hooks are the reliable signal: a notifier posts the tool payload to a
  * localhost port, or leaves a file in an inbox if the editor is closed.
@@ -573,6 +573,7 @@ async function installAgentHooks(
     claude: readConfig(path.join(home, ".claude", "settings.json")),
     codex: readConfig(path.join(home, ".codex", "hooks.json")),
     cursor: readConfig(path.join(home, ".cursor", "hooks.json")),
+    gemini: readConfig(path.join(home, ".gemini", "settings.json")),
   });
   for (const write of plan.writes) {
     await fs.promises.mkdir(path.dirname(write.path), { recursive: true });
@@ -1016,6 +1017,9 @@ function agentLabel(agent: string): string {
   }
   if (agent === "cursor") {
     return "Cursor agent";
+  }
+  if (agent === "gemini") {
+    return "Gemini CLI";
   }
   if (agent === "disk") {
     return "an external edit";

@@ -18,12 +18,19 @@ export const QUIZ_SNIPPET_MAX = 24_000;
 
 const CLAUDE_MATCHER = "Edit|Write|NotebookEdit|MultiEdit";
 const CODEX_MATCHER = "apply_patch|Edit|Write";
+/** Gemini CLI matchers are regular expressions. Shell writes stay out. */
+const GEMINI_MATCHER = "write_file|replace";
+/** Gemini counts hook timeouts in milliseconds. Claude and Codex count seconds. */
+const GEMINI_NOTIFY_TIMEOUT_MS = 30_000;
+const GEMINI_PAUSE_TIMEOUT_MS = 600_000;
 const EDIT_TOOLS = new Set([
   "Edit",
   "Write",
   "NotebookEdit",
   "MultiEdit",
   "apply_patch",
+  "write_file",
+  "replace",
 ]);
 
 export type AgentHunk = {
@@ -33,7 +40,7 @@ export type AgentHunk = {
 };
 
 export type AgentEdit = {
-  /** claude-code, codex, cursor, disk, or unknown. */
+  /** claude-code, codex, cursor, gemini, disk, or unknown. */
   agent: string;
   filePath: string;
   /** Generated code the student has to explain. Not the user's prompt. */
@@ -321,7 +328,7 @@ export function editsFromHookEnvelope(
   }
   const payload = asRecord(record.payload) ?? record;
   const eventName = stringField(payload, "hook_event_name") || stringField(payload, "hookEventName");
-  if (eventName === "PreToolUse") {
+  if (eventName === "PreToolUse" || eventName === "BeforeTool") {
     return [];
   }
   const snapshots = stringMap(record.snapshots);
@@ -418,6 +425,8 @@ export function planHookInstall(opts: {
   claude: ConfigInput;
   codex: ConfigInput;
   cursor: ConfigInput;
+  /** Omitted configs are treated as a missing file, so the install still adds Gemini CLI. */
+  gemini?: ConfigInput;
 }): HookInstallPlan {
   const scriptPath = path.join(guardDirectory(opts.homeDir), "notify.js");
   const command = hookCommand(opts.nodePath, scriptPath);
@@ -459,6 +468,16 @@ export function planHookInstall(opts: {
     path.join(opts.homeDir, ".cursor", "hooks.json"),
     opts.cursor,
     (value) => mergeCursorHooks(value, command, pauseCommand),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Gemini CLI",
+    path.join(opts.homeDir, ".gemini", "settings.json"),
+    opts.gemini ?? { kind: "missing" },
+    (value) => mergeGeminiSettings(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -615,7 +634,7 @@ function normalizePayload(
           {
             oldText,
             newText,
-            replaceAll: input.replace_all === true,
+            replaceAll: input.replace_all === true || input.allow_multiple === true,
           },
         ],
       },
@@ -763,6 +782,9 @@ function detectAgent(payload: Record<string, unknown>, toolName: string): string
   if (eventName === "afterFileEdit") {
     return "cursor";
   }
+  if (eventName === "BeforeTool" || eventName === "AfterTool") {
+    return "gemini";
+  }
   if (!eventName && (payload.model_id || payload.conversation_id || payload.generation_id)) {
     return "cursor";
   }
@@ -869,6 +891,25 @@ function mergeClaudeSettings(
   return { next: root, changed };
 }
 
+function mergeGeminiSettings(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const { root, hooks, changed: createdHooks } = hooksObject(value, "Gemini settings");
+  let changed = createdHooks;
+  changed =
+    upsertClaudeEvent(hooks, "BeforeTool", command, false, GEMINI_MATCHER, GEMINI_NOTIFY_TIMEOUT_MS) || changed;
+  changed =
+    upsertClaudeEvent(hooks, "AfterTool", command, false, GEMINI_MATCHER, GEMINI_NOTIFY_TIMEOUT_MS) || changed;
+  if (pauseCommand) {
+    changed =
+      upsertPauseHook(hooks, "BeforeTool", pauseCommand, GEMINI_MATCHER, GEMINI_PAUSE_TIMEOUT_MS) || changed;
+  }
+  changed = markSequential(hooks, "BeforeTool") || changed;
+  return { next: root, changed };
+}
+
 function mergeCodexHooks(
   value: unknown,
   command: string,
@@ -953,6 +994,7 @@ function upsertClaudeEvent(
   command: string,
   asyncHook: boolean,
   matcher = CLAUDE_MATCHER,
+  timeout = 10,
 ): boolean {
   const groups = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
   let found = false;
@@ -969,7 +1011,7 @@ function upsertClaudeEvent(
         return hook;
       }
       found = true;
-      const refreshed = refreshHook(item, command, asyncHook);
+      const refreshed = refreshHook(item, command, asyncHook, timeout);
       if (JSON.stringify(refreshed) !== JSON.stringify(item)) {
         groupChanged = true;
       }
@@ -984,7 +1026,7 @@ function upsertClaudeEvent(
   if (!found) {
     nextGroups.push({
       matcher,
-      hooks: [refreshHook({}, command, asyncHook)],
+      hooks: [refreshHook({}, command, asyncHook, timeout)],
     });
     changed = true;
   }
@@ -1012,6 +1054,7 @@ function upsertPauseHook(
   eventName: string,
   command: string,
   matcher: string,
+  timeout = 600,
 ): boolean {
   const groups = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
   let found = false;
@@ -1028,7 +1071,7 @@ function upsertPauseHook(
         return hook;
       }
       found = true;
-      const refreshed = refreshHook(item, command, false, 600);
+      const refreshed = refreshHook(item, command, false, timeout);
       if (JSON.stringify(refreshed) !== JSON.stringify(item)) {
         groupChanged = true;
       }
@@ -1041,7 +1084,7 @@ function upsertPauseHook(
     return { ...rec, hooks: nextHooks };
   });
   if (!found) {
-    const pauseHook = refreshHook({}, command, false, 600);
+    const pauseHook = refreshHook({}, command, false, timeout);
     const target = nextGroups.findIndex((group) => {
       const rec = asRecord(group);
       if (!rec || !Array.isArray(rec.hooks)) {
@@ -1063,6 +1106,30 @@ function upsertPauseHook(
     changed = true;
   }
   hooks[eventName] = nextGroups;
+  return changed;
+}
+
+function markSequential(hooks: Record<string, unknown>, eventName: string): boolean {
+  const groups = hooks[eventName];
+  if (!Array.isArray(groups)) {
+    return false;
+  }
+  let changed = false;
+  hooks[eventName] = groups.map((group) => {
+    const rec = asRecord(group);
+    if (!rec || !Array.isArray(rec.hooks) || rec.sequential === true) {
+      return group;
+    }
+    const ours = rec.hooks.some((hook) => {
+      const item = asRecord(hook);
+      return !!item && (isNotifyCommand(item.command) || isPauseCommand(item.command));
+    });
+    if (!ours) {
+      return group;
+    }
+    changed = true;
+    return { ...rec, sequential: true };
+  });
   return changed;
 }
 
@@ -1154,7 +1221,7 @@ export function looksLikeAgentInvocation(text: string): boolean {
   if (lines.length === 0 || lines.length > 3) {
     return false;
   }
-  const invocation = /^(?:\$\s*)?(?:agent|cursor-agent|cursor|claude|codex)\b/;
+  const invocation = /^(?:\$\s*)?(?:agent|cursor-agent|cursor|claude|codex|gemini)\b/;
   return lines.every((line) => invocation.test(line));
 }
 

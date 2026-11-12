@@ -4,7 +4,7 @@
 /**
  * Pause gate installed by "Comprehension Guard: Install AI Agent Hooks".
  *
- * Claude Code, Codex, and Cursor run this before a mutating tool. It asks
+ * Claude Code, Codex, Cursor, and Gemini CLI run this before a mutating tool. It asks
  * the editor whether that tool may proceed. The request stays open until
  * the student passes, fails, or bypasses a check. If the editor is closed,
  * the tool is allowed so the agent is not trapped.
@@ -34,6 +34,7 @@ const MUTATING_TOOLS = new Set([
   "editnotebook",
   "searchreplace",
   "writefile",
+  "replace",
 ]);
 
 function guardHome() {
@@ -119,6 +120,21 @@ function allowDecision(cursor, context) {
     output.additionalContext = context;
   }
   return { hookSpecificOutput: output };
+}
+
+function geminiAllow(context) {
+  const decision = { decision: "allow" };
+  if (context) {
+    decision.hookSpecificOutput = { additionalContext: context };
+  }
+  return decision;
+}
+
+function geminiDeny(agentMessage) {
+  return {
+    decision: "deny",
+    reason: agentMessage || "Comprehension Guard paused this write.",
+  };
 }
 
 function denyDecision(cursor, userMessage, agentMessage) {
@@ -240,17 +256,19 @@ async function main() {
   if (
     eventKey === "afterfileedit" ||
     eventKey === "posttooluse" ||
+    eventKey === "aftertool" ||
     eventKey === "stop" ||
     eventKey === "notification"
   ) {
     return undefined;
   }
-  if (eventKey !== "pretooluse") {
+  const gemini = event === "BeforeTool";
+  if (eventKey !== "pretooluse" && !gemini) {
     return undefined;
   }
   const cursor = isCursorPause(event);
   if (!isMutating(toolName(payload))) {
-    return allowDecision(cursor, "");
+    return gemini ? geminiAllow("") : allowDecision(cursor, "");
   }
   const body = JSON.stringify({
     receivedAt: Date.now(),
@@ -259,10 +277,11 @@ async function main() {
   });
   const responseText = await postPause(body);
   const decision = parseDecision(responseText);
+  const context = decision && decision.allow ? decision.agentMessage : "";
   if (!decision || decision.allow) {
-    return allowDecision(cursor, decision && decision.allow ? decision.agentMessage : "");
+    return gemini ? geminiAllow(context) : allowDecision(cursor, context);
   }
-  return denyDecision(cursor, decision.userMessage, decision.agentMessage);
+  return gemini ? geminiDeny(decision.agentMessage) : denyDecision(cursor, decision.userMessage, decision.agentMessage);
 }
 
 main()

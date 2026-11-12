@@ -209,14 +209,18 @@ export async function runComprehensionGate(
         /* User clicked "Next Question" after a wrong answer.  Generate a fresh
            follow-up question and show it.  followups was already incremented
            when the wrong answer was detected, so we don't touch it here. */
+        if (followups >= maxFollowups) {
+          await recordAttempt(false, "fail");
+          view.close();
+          return false;
+        }
         try {
           question = await generateQuestion({ context, snippet, language: lang, mode });
         } catch {
-          /* If generation fails, show a generic error in the feedback panel and
-             let the loop wait for another action (retry, explain, cancel…). */
           view.showFeedback({
             message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",
           });
+          continue;
         }
         view.showQuestion(question);
         continue;

@@ -18,6 +18,8 @@ export type QuizView = {
     correctOption?: string;
     allowDispute?: boolean;
     explained?: boolean;
+    /** true = correct answer, false = wrong answer. Drives goblin state image. */
+    passed?: boolean;
   }): void;
   waitForSubmit(): Promise<QuizAction>;
   close(): void;
@@ -42,18 +44,20 @@ function getNonce(): string {
   return nonce;
 }
 
-/**
- * Builds the webview HTML.
- *
- * @param goblinUri - webview URI for media/goblinlogo.png
- *   TODO: user must place media/goblinlogo.png in the repo root for the goblin image to appear.
- */
+interface MediaUris {
+  logo:          string;
+  goblinSleep:   string;
+  goblinIdle:    string;
+  goblinCorrect: string;
+  goblinWrong:   string;
+}
+
 function getWebviewHtml(
   webview: vscode.Webview,
   _snippet: string,
   _language: string,
   nonce: string,
-  goblinUri: string,
+  uris: MediaUris,
 ): string {
   const csp = [
     "default-src 'none'",
@@ -70,7 +74,7 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Comprehension check</title>
   <style>
-    /* ── Figma design tokens (DrawBridge / Animate Chat Loading Transition) ── */
+    /* ── Figma design tokens ────────────────────────────────────────────────── */
     :root {
       --accent:        #74ab7b;
       --accent-light:  #c8e4cc;
@@ -84,16 +88,11 @@ function getWebviewHtml(
       --r-sm:          8px;
     }
 
-    /* ── Reset / body ───────────────────────────────────────────────────────── */
     html, body { height: 100%; margin: 0; }
     body {
       font-family: var(--vscode-font-family);
       font-size:   var(--vscode-font-size);
       color: var(--accent);
-      /*
-       * Figma .app-shell gradient: center at 50% 215% so only the very bottom
-       * edge shows green; everything above is near-black #0a0a0a.
-       */
       background:
         radial-gradient(
           ellipse 140% 120% at 50% 210%,
@@ -112,7 +111,7 @@ function getWebviewHtml(
       flex-direction: column;
     }
 
-    /* ── Loading overlay (fullscreen, shown while grading) ─────────────────── */
+    /* ── Loading overlay ───────────────────────────────────────────────────── */
     .loading-overlay {
       position: fixed;
       inset: 0;
@@ -133,8 +132,11 @@ function getWebviewHtml(
     }
     .loading-goblin img {
       display: block;
-      animation: goblin-bounce 800ms ease-in-out infinite alternate;
+      width: 90px;
+      height: 90px;
       object-fit: contain;
+      image-rendering: pixelated;
+      animation: goblin-bounce 800ms ease-in-out infinite alternate;
     }
     .loading-label {
       margin: 0;
@@ -144,7 +146,7 @@ function getWebviewHtml(
       animation: loading-label-pulse 1.6s ease-in-out infinite;
     }
 
-    /* ── Main scrollable quiz layout ───────────────────────────────────────── */
+    /* ── Scrollable layout ─────────────────────────────────────────────────── */
     .quiz-scroll {
       flex: 1;
       min-height: 0;
@@ -157,18 +159,33 @@ function getWebviewHtml(
       display: flex;
       flex-direction: column;
       min-height: 100%;
-      padding: 18px 20px 16px;
+      padding: 14px 20px 16px;
       box-sizing: border-box;
     }
 
-    /* ── Brand title (Figma: .brand-title) ─────────────────────────────────── */
+    /* ── Header: bridge logo + brand title ─────────────────────────────────── */
+    .panel-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 6px;
+    }
+    .logo-img {
+      display: block;
+      width: 100%;
+      max-width: 220px;
+      height: auto;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
     .brand-title {
-      font-size: 1.25em;
+      margin: 0;
+      font-size: 1.1em;
       font-weight: 700;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.03em;
       color: var(--accent);
       text-align: center;
-      margin: 0 0 14px;
     }
 
     /* ── Question frame ────────────────────────────────────────────────────── */
@@ -177,11 +194,9 @@ function getWebviewHtml(
       display: flex;
       flex-direction: column;
     }
-    .q-frame.transitioning {
-      animation: q-swap 380ms ease both;
-    }
+    .q-frame.transitioning { animation: q-swap 380ms ease both; }
 
-    /* ── Question meta row (Figma: .question-meta) ─────────────────────────── */
+    /* ── Question meta ─────────────────────────────────────────────────────── */
     .q-meta {
       display: flex;
       justify-content: space-between;
@@ -194,28 +209,21 @@ function getWebviewHtml(
       letter-spacing: 0.02em;
       color: var(--accent);
     }
-
-    /* ── Progress dots (Figma: ProgressDots) ───────────────────────────────── */
-    .progress-dots {
-      display: flex;
-      gap: 7px;
-      align-items: center;
-    }
+    .progress-dots { display: flex; gap: 7px; align-items: center; }
     .dot {
       width: 11px; height: 11px;
-      border-radius: 50%;
-      flex-shrink: 0;
+      border-radius: 50%; flex-shrink: 0;
       transition: background-color 300ms ease, opacity 300ms ease;
     }
-    .dot-done    { background: var(--accent);           opacity: 0.72; }
-    .dot-active  { background: var(--accent);           opacity: 1; animation: dot-activate 320ms cubic-bezier(0.34,1.56,0.64,1); }
+    .dot-done    { background: var(--accent); opacity: 0.72; }
+    .dot-active  { background: var(--accent); opacity: 1; animation: dot-activate 320ms cubic-bezier(0.34,1.56,0.64,1); }
     .dot-inactive{ background: rgba(116,171,123,0.22); opacity: 1; }
 
-    /* ── Goblin button (Figma: .q3-troll-button / .question-two-goblin) ─────── */
+    /* ── Goblin button (Figma: .q3-troll-button) ──────────────────────────── */
     .goblin-area {
       display: flex;
       justify-content: center;
-      margin: 6px 0 12px;
+      margin: 4px 0 10px;
     }
     .goblin-btn {
       position: relative;
@@ -231,28 +239,29 @@ function getWebviewHtml(
         filter     220ms ease;
       -webkit-tap-highlight-color: transparent;
     }
-    .goblin-btn img {
+    /* Goblin image element — src swaps between states with a short fade */
+    .goblin-img {
       display: block;
+      width: 90px;
+      height: 90px;
       object-fit: contain;
-      width: 80px;
-      height: 80px;
+      image-rendering: pixelated;
+      transition: opacity 160ms ease;
     }
-    .goblin-btn:hover {
+    .goblin-btn:not([disabled]):hover {
       transform: translateY(-3px) scale(1.08);
       filter: drop-shadow(0 0 14px rgba(116,171,123,0.38));
     }
-    .goblin-btn:active {
+    .goblin-btn:not([disabled]):active {
       transform: translateY(1px) scale(0.96);
     }
     .goblin-btn:focus-visible {
       outline: 3px solid var(--accent);
       outline-offset: 8px;
     }
-    .goblin-btn:disabled {
-      cursor: default;
-      opacity: 0.5;
-    }
-    /* Figma: .q3-troll-tooltip */
+    /* Non-interactive states: no pointer, no hover effect */
+    .goblin-btn[disabled] { cursor: default; }
+    /* Tooltip (hidden when button is disabled) */
     .goblin-tooltip {
       position: absolute;
       top: calc(100% + 14px);
@@ -271,16 +280,18 @@ function getWebviewHtml(
       transition: opacity 180ms ease, transform 220ms cubic-bezier(0.34,1.56,0.64,1);
       white-space: nowrap;
     }
-    .goblin-btn:hover .goblin-tooltip,
-    .goblin-btn:focus-visible .goblin-tooltip {
+    .goblin-btn:not([disabled]):hover .goblin-tooltip,
+    .goblin-btn:not([disabled]):focus-visible .goblin-tooltip {
       opacity: 1;
       transform: translate(-50%, 0) scale(1);
     }
+    .goblin-btn.goblin-clicked {
+      animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
+      pointer-events: none;
+    }
     .goblin-arrive { animation: goblin-arrive 560ms cubic-bezier(0.22,1,0.36,1) both; }
-    /* On explanation state the goblin re-triggers arrive */
-    .goblin-explaining { animation: goblin-arrive 560ms 120ms cubic-bezier(0.22,1,0.36,1) both; }
 
-    /* ── Question card: flat dark bg (Figma: question content section) ───────── */
+    /* ── Question card: flat dark bg ──────────────────────────────────────── */
     .question-card {
       background: #0a0a0a;
       border-radius: var(--r-card);
@@ -289,8 +300,6 @@ function getWebviewHtml(
       display: flex;
       flex-direction: column;
     }
-
-    /* ── Question text ─────────────────────────────────────────────────────── */
     .question-text {
       margin: 0 0 16px;
       font-weight: 600;
@@ -301,7 +310,7 @@ function getWebviewHtml(
     }
     .answer-area { margin-bottom: 14px; }
 
-    /* ── Textarea (Figma: .answer-field textarea) ───────────────────────────── */
+    /* ── Textarea ──────────────────────────────────────────────────────────── */
     textarea {
       width: 100%;
       min-height: 110px;
@@ -323,7 +332,7 @@ function getWebviewHtml(
     }
     textarea::placeholder { color: rgba(116,171,123,0.25); opacity: 1; }
 
-    /* ── MCQ fieldset (Figma: .mcq-card / .mcq-options) ────────────────────── */
+    /* ── MCQ ──────────────────────────────────────────────────────────────── */
     .mcq-fieldset { margin: 0; padding: 0; border: 0; }
     .mcq-legend {
       position: absolute;
@@ -331,8 +340,6 @@ function getWebviewHtml(
       overflow: hidden; opacity: 0; pointer-events: none;
     }
     .mcq-options { display: grid; gap: 18px; }
-
-    /* ── MCQ option (Figma: .mcq-option / .mcq-radio 50px → scaled 28px) ────── */
     .mcq-option {
       display: flex;
       align-items: center;
@@ -374,59 +381,43 @@ function getWebviewHtml(
     }
     .mcq-option input:disabled ~ * { cursor: default; }
 
-    /* ── Ordering rows ─────────────────────────────────────────────────────── */
+    /* ── Ordering ──────────────────────────────────────────────────────────── */
     .ordering-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 14px;
-      margin: 5px 0;
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 14px; margin: 5px 0;
       background: var(--surface);
       border: 1px solid rgba(116,171,123,0.28);
       border-radius: var(--r-sm);
       color: var(--accent);
     }
     .ordering-row button {
-      padding: 3px 9px;
-      font-size: 0.8em;
-      color: var(--accent);
-      background: var(--accent-dim);
-      border: 1px solid rgba(116,171,123,0.3);
-      border-radius: 4px;
+      padding: 3px 9px; font-size: 0.8em;
+      color: var(--accent); background: var(--accent-dim);
+      border: 1px solid rgba(116,171,123,0.3); border-radius: 4px;
       cursor: pointer;
       transition: background-color 150ms ease, transform 120ms ease;
     }
     .ordering-row button:hover  { background: rgba(116,171,123,0.3); }
     .ordering-row button:active { transform: scale(0.94); }
 
-    /* ── Submit pill (Figma: .submit-button — dark transparent + green border) ─ */
+    /* ── Submit pill ──────────────────────────────────────────────────────── */
     .submit-pill {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      width: 180px;
-      margin: 16px auto 0;
-      padding: 11px 0;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      width: 180px; margin: 16px auto 0; padding: 11px 0;
       font-family: var(--vscode-font-family);
-      font-size:   1em;
-      font-weight: 600;
-      letter-spacing: 0.04em;
+      font-size: 1em; font-weight: 600; letter-spacing: 0.04em;
       color: var(--accent);
       background: var(--surface);
       border: 3px solid var(--accent);
       border-radius: 100px;
       cursor: pointer;
       transition:
-        background-color 180ms ease,
-        color            180ms ease,
-        transform        180ms ease,
-        box-shadow       180ms ease;
+        background-color 180ms ease, color 180ms ease,
+        transform 180ms ease, box-shadow 180ms ease;
       -webkit-tap-highlight-color: transparent;
     }
     .submit-pill:hover:not(:disabled):not(.loading) {
-      background: var(--accent);
-      color: var(--on-accent);
+      background: var(--accent); color: var(--on-accent);
     }
     .submit-pill:active:not(:disabled):not(.loading) {
       transform: scale(0.98);
@@ -435,106 +426,62 @@ function getWebviewHtml(
       box-shadow: inset 0 0 0 17px var(--surface-solid);
       color: var(--surface-solid);
     }
-    .submit-pill.loading {
-      pointer-events: none;
-      animation: submit-loading-pulse 1.4s ease-in-out infinite;
-    }
+    .submit-pill.loading { pointer-events: none; animation: submit-loading-pulse 1.4s ease-in-out infinite; }
     .submit-label {}
-    .submit-dots  { display: none; gap: 5px; align-items: center; }
+    .submit-dots { display: none; gap: 5px; align-items: center; }
     .submit-pill.loading .submit-label { display: none; }
     .submit-pill.loading .submit-dots  { display: flex; }
     .submit-dots span {
-      display: block;
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: currentColor;
+      display: block; width: 7px; height: 7px;
+      border-radius: 50%; background: currentColor;
       animation: dot-pulse 1.1s ease-in-out infinite;
     }
     .submit-dots span:nth-child(2) { animation-delay: 0.18s; }
     .submit-dots span:nth-child(3) { animation-delay: 0.36s; }
 
-    /* ── Goblin click wobble ─────────────────────────────────────────────────── */
-    .goblin-btn.goblin-clicked {
-      animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
-      pointer-events: none;
-    }
-
-    /* ────────────────────────────────────────────────────────────────────────
-     * Explanation screen (Figma: QuestionExplanation component)
-     * Shown after clicking the goblin (explain action).
-     * Replaces the question-card; goblin stays in goblin-area above.
-     * ──────────────────────────────────────────────────────────────────────── */
+    /* ── Explanation card (Figma: QuestionExplanation) ────────────────────── */
     .exp-card {
       background: #0a0a0a;
       border-radius: var(--r-card);
       padding: 16px 0 4px;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
+      flex: 1; display: flex; flex-direction: column;
     }
-
-    /* Figma: .q3-explanation-copy h2 — centered question heading */
     .exp-heading {
       margin: 0 0 14px;
-      font-size: 1em;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      color: var(--accent);
-      line-height: 1.5;
-      text-align: center;
+      font-size: 1em; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--accent); line-height: 1.5; text-align: center;
       animation: q3-copy-enter 380ms 180ms ease-out both;
     }
-
-    /* Figma: .q3-explanation-text — explanation text card */
+    /* Figma: .q3-explanation-text */
     .exp-text-box {
       border: 1px solid rgba(116,171,123,0.24);
       border-radius: var(--r-card);
       background: rgba(43,43,43,0.32);
       padding: 12px 16px;
       color: var(--accent);
-      font-size: 0.93em;
-      font-weight: 400;
-      line-height: 1.55;
-      letter-spacing: 0.02em;
+      font-size: 0.93em; font-weight: 400; line-height: 1.55; letter-spacing: 0.02em;
       margin-bottom: 12px;
       animation: q3-copy-enter 420ms 260ms ease-out both;
     }
-
-    /* Figma: .explanation-answer-label */
     .exp-answer-label {
       margin: 8px 0 6px;
-      font-size: 0.9em;
-      font-weight: 600;
-      letter-spacing: 0.02em;
+      font-size: 0.9em; font-weight: 600; letter-spacing: 0.02em;
       color: var(--accent);
       animation: q3-copy-enter 360ms 320ms ease-out both;
     }
-
     /* Figma: .q3-explanation-answer */
     .exp-answer-block {
       border-radius: var(--r-card);
       background: rgba(43,43,43,0.22);
       padding: 12px 16px;
       color: var(--accent);
-      font-size: 0.93em;
-      font-weight: 500;
-      line-height: 1.5;
-      letter-spacing: 0.02em;
+      font-size: 0.93em; font-weight: 500; line-height: 1.5; letter-spacing: 0.02em;
       margin-bottom: 14px;
       animation: q3-answer-reveal 420ms 360ms cubic-bezier(0.34,1.56,0.64,1) both;
     }
+    .exp-next-label { display: inline-block; animation: q3-copy-enter 260ms 180ms ease-out both; }
 
-    /* Figma: .q3-next-button — same shape as submit but labeled "Next Question" */
-    .exp-next-btn {
-      margin-top: auto;
-      padding-top: 14px;
-    }
-    .exp-next-label {
-      display: inline-block;
-      animation: q3-copy-enter 260ms 180ms ease-out both;
-    }
-
-    /* ── Feedback panel ────────────────────────────────────────────────────── */
+    /* ── Feedback panel (regular) ─────────────────────────────────────────── */
     .feedback-panel {
       margin: 14px 0 8px;
       padding: 14px 16px;
@@ -548,47 +495,28 @@ function getWebviewHtml(
     .missed-list     { margin: 8px 0 0; padding-left: 18px; color: var(--accent-muted); }
     .missed-list li  { margin-bottom: 6px; }
     .evidence {
-      display: block;
-      margin-top: 4px;
-      font-size: 0.88em;
-      color: rgba(116,171,123,0.5);
-      font-style: italic;
+      display: block; margin-top: 4px;
+      font-size: 0.88em; color: rgba(116,171,123,0.5); font-style: italic;
     }
     .correct-option { margin-top: 8px; font-weight: 600; color: var(--accent); }
     .feedback-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-
-    /* ── Dispute / Next-Q buttons in feedback ───────────────────────────────── */
     .dispute-btn, .next-q-btn {
-      display: inline-flex;
-      align-items: center;
+      display: inline-flex; align-items: center;
       padding: 7px 16px;
-      font-family: var(--vscode-font-family);
-      font-size:   var(--vscode-font-size);
-      font-weight: 500;
-      color: var(--accent);
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+      font-weight: 500; color: var(--accent);
       background: var(--surface);
-      border: 2px solid rgba(116,171,123,0.45);
-      border-radius: var(--r-pill);
+      border: 2px solid rgba(116,171,123,0.45); border-radius: var(--r-pill);
       cursor: pointer;
       transition: background-color 180ms ease, border-color 180ms ease, transform 220ms cubic-bezier(0.34,1.56,0.64,1);
     }
     .dispute-btn:hover, .next-q-btn:hover {
-      background: var(--accent-dim);
-      border-color: var(--accent);
-      transform: translateY(-1px);
+      background: var(--accent-dim); border-color: var(--accent); transform: translateY(-1px);
     }
     .dispute-btn:active, .next-q-btn:active { transform: scale(0.95); }
-    .next-q-btn {
-      background: var(--accent);
-      color: var(--on-accent);
-      border-color: var(--accent);
-    }
-    .next-q-btn:hover {
-      background: var(--accent-light);
-      border-color: var(--accent-light);
-    }
+    .next-q-btn { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .next-q-btn:hover { background: var(--accent-light); border-color: var(--accent-light); }
 
-    /* ── Utility ───────────────────────────────────────────────────────────── */
     .hidden { display: none !important; }
 
     /* ── Keyframes ─────────────────────────────────────────────────────────── */
@@ -640,7 +568,6 @@ function getWebviewHtml(
       from { opacity: 0; transform: scale(0.985); filter: blur(3px); }
       to   { opacity: 1; transform: scale(1);     filter: blur(0);   }
     }
-    /* Figma: goblin click wobble */
     @keyframes goblin-click-wobble {
       0%   { transform: translateY(2px)  scale(1.06, 0.88); }
       28%  { transform: translateY(-9px) scale(0.94, 1.08); }
@@ -648,12 +575,10 @@ function getWebviewHtml(
       75%  { transform: translateY(-6px) scale(0.98, 1.03); }
       100% { transform: translateY(0)    scale(1); }
     }
-    /* Figma: .q3-explanation-copy animations */
     @keyframes q3-copy-enter {
       from { opacity: 0; transform: translateY(12px); filter: blur(2px); }
       to   { opacity: 1; transform: translateY(0);    filter: blur(0);   }
     }
-    /* Figma: .q3-explanation-answer reveal */
     @keyframes q3-answer-reveal {
       from { opacity: 0; transform: translateX(-16px) scale(0.97); }
       to   { opacity: 1; transform: translateX(0)     scale(1);    }
@@ -661,19 +586,17 @@ function getWebviewHtml(
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
-        animation-duration: 1ms !important;
-        transition-duration: 1ms !important;
-        animation-iteration-count: 1 !important;
-        scroll-behavior: auto !important;
+        animation-duration: 1ms !important; transition-duration: 1ms !important;
+        animation-iteration-count: 1 !important; scroll-behavior: auto !important;
       }
     }
   </style>
 </head>
 <body>
-  <!-- Fullscreen loading overlay shown while grading -->
+  <!-- Loading overlay shown while grading -->
   <div class="loading-overlay" id="loading-overlay" role="status" aria-label="Checking your answer">
     <div class="loading-goblin">
-      <img src="${goblinUri}" width="80" height="80" alt="" aria-hidden="true">
+      <img src="${uris.goblinIdle}" alt="" aria-hidden="true">
     </div>
     <p class="loading-label">Checking your answer\u2026</p>
   </div>
@@ -681,34 +604,35 @@ function getWebviewHtml(
   <div class="quiz-scroll">
   <div class="quiz-wrap" style="animation: screen-enter 420ms ease both;">
 
-    <!-- Brand title — extension name, not the Figma demo "DrawBridge" brand -->
-    <h1 class="brand-title">Comprehension check</h1>
+    <!-- Header: pixel bridge logo + extension name -->
+    <header class="panel-header">
+      <img src="${uris.logo}" class="logo-img" alt="" aria-hidden="true">
+      <h1 class="brand-title">Comprehension check</h1>
+    </header>
 
     <!-- Question frame -->
     <div class="q-frame" id="q-frame">
 
-      <!-- Question meta: label + progress dots (Figma: .question-meta) -->
+      <!-- Question meta: label + progress dots -->
       <header class="q-meta">
         <span class="q-label" id="q-label">Question 1</span>
         <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
       </header>
 
       <!--
-        Goblin button (Figma: .q3-troll-button inside .question-two-goblin).
-        Clicking = post "explain". Stays visible in both question and explanation states.
+        Goblin button (Figma: .q3-troll-button).
+        src swaps between sleep / idle / correct / wrong based on quiz state.
+        Initially sleep (disabled). Becomes idle+enabled on showQuestion.
       -->
       <div class="goblin-area">
         <button type="button" class="goblin-btn goblin-arrive" id="explain-btn"
-                aria-label="Show explanation and skip this question">
-          <img src="${goblinUri}" width="80" height="80" alt="" aria-hidden="true">
+                aria-label="Show explanation and skip this question" disabled>
+          <img id="goblin-img" src="${uris.goblinSleep}" class="goblin-img" alt="" aria-hidden="true">
           <span class="goblin-tooltip">Show explanation</span>
         </button>
       </div>
 
-      <!--
-        Question card: flat dark background (Figma: question content on #0a0a0a).
-        Hidden when explanation screen is shown.
-      -->
+      <!-- Question card: flat #0a0a0a background (Figma: question content section) -->
       <div class="question-card" id="question-card">
         <p id="question" class="question-text"></p>
         <div id="answer-area" class="answer-area"></div>
@@ -718,20 +642,12 @@ function getWebviewHtml(
         </button>
       </div>
 
-      <!--
-        Explanation card (Figma: QuestionExplanation component).
-        Shown after clicking the goblin (explain action), hidden otherwise.
-        Layout: centered question heading → explanation text card → Next Question button.
-      -->
+      <!-- Explanation card (Figma: QuestionExplanation) — shown after clicking goblin -->
       <div class="exp-card hidden" id="exp-card">
-        <!-- Figma: .q3-explanation-copy h2 -->
         <h2 id="exp-heading" class="exp-heading"></h2>
-        <!-- Figma: .q3-explanation-text -->
         <div class="exp-text-box" id="exp-text-box"></div>
-        <!-- Figma: .explanation-answer-label + .q3-explanation-answer (only when answer present) -->
         <p class="exp-answer-label hidden" id="exp-answer-label">Correct answer</p>
         <div class="exp-answer-block hidden" id="exp-answer-block"></div>
-        <!-- Figma: .q3-next-button / .submit-button — labeled "Next Question" -->
         <button type="button" class="submit-pill" id="exp-next-btn">
           <span class="exp-next-label">Next Question</span>
         </button>
@@ -739,7 +655,7 @@ function getWebviewHtml(
 
     </div><!-- /.q-frame -->
 
-    <!-- Feedback panel (shown after grading — correct / incorrect) -->
+    <!-- Feedback panel (correct / incorrect after grading) -->
     <div class="feedback-panel hidden" id="feedback" aria-live="polite">
       <p id="feedback-msg" class="feedback-msg"></p>
       <ul id="missed-list" class="missed-list hidden"></ul>
@@ -756,38 +672,44 @@ function getWebviewHtml(
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
 
+    /* ── Goblin URI constants (injected from extension host) ─────────────── */
+    var URI_SLEEP   = ${JSON.stringify(uris.goblinSleep)};
+    var URI_IDLE    = ${JSON.stringify(uris.goblinIdle)};
+    var URI_CORRECT = ${JSON.stringify(uris.goblinCorrect)};
+    var URI_WRONG   = ${JSON.stringify(uris.goblinWrong)};
+
     /* ── Element refs ────────────────────────────────────────────────────── */
-    const qLabelEl       = document.getElementById("q-label");
-    const progressEl     = document.getElementById("progress-dots");
-    const questionEl     = document.getElementById("question");
-    const answerAreaEl   = document.getElementById("answer-area");
-    const submitBtn      = document.getElementById("submit-btn");
-    const explainBtn     = document.getElementById("explain-btn");
-    const feedbackEl     = document.getElementById("feedback");
-    const feedbackMsgEl  = document.getElementById("feedback-msg");
-    const missedListEl   = document.getElementById("missed-list");
-    const correctOptEl   = document.getElementById("correct-option");
-    const disputeBtn     = document.getElementById("dispute-btn");
-    const nextQBtn       = document.getElementById("next-q-btn");
-    const qFrameEl       = document.getElementById("q-frame");
-    const loadingOverlay = document.getElementById("loading-overlay");
-    const questionCardEl = document.getElementById("question-card");
-    const expCardEl      = document.getElementById("exp-card");
-    const expHeadingEl   = document.getElementById("exp-heading");
-    const expTextBoxEl   = document.getElementById("exp-text-box");
-    const expAnswerLblEl = document.getElementById("exp-answer-label");
-    const expAnswerBlkEl = document.getElementById("exp-answer-block");
-    const expNextBtn     = document.getElementById("exp-next-btn");
+    var qLabelEl       = document.getElementById("q-label");
+    var progressEl     = document.getElementById("progress-dots");
+    var questionEl     = document.getElementById("question");
+    var answerAreaEl   = document.getElementById("answer-area");
+    var submitBtn      = document.getElementById("submit-btn");
+    var explainBtn     = document.getElementById("explain-btn");
+    var goblinImg      = document.getElementById("goblin-img");
+    var feedbackEl     = document.getElementById("feedback");
+    var feedbackMsgEl  = document.getElementById("feedback-msg");
+    var missedListEl   = document.getElementById("missed-list");
+    var correctOptEl   = document.getElementById("correct-option");
+    var disputeBtn     = document.getElementById("dispute-btn");
+    var nextQBtn       = document.getElementById("next-q-btn");
+    var qFrameEl       = document.getElementById("q-frame");
+    var loadingOverlay = document.getElementById("loading-overlay");
+    var questionCardEl = document.getElementById("question-card");
+    var expCardEl      = document.getElementById("exp-card");
+    var expHeadingEl   = document.getElementById("exp-heading");
+    var expTextBoxEl   = document.getElementById("exp-text-box");
+    var expAnswerLblEl = document.getElementById("exp-answer-label");
+    var expAnswerBlkEl = document.getElementById("exp-answer-block");
+    var expNextBtn     = document.getElementById("exp-next-btn");
 
     /* ── State ───────────────────────────────────────────────────────────── */
-    var currentKind  = "free-text";
-    var lastAnswer   = "";
-    var questionNum  = 1;
-    var showQCount   = 0;
-    var TOTAL_DOTS   = 5;
-    var explaining   = false; /* true while explanation card is shown */
+    var currentKind = "free-text";
+    var lastAnswer  = "";
+    var questionNum = 1;
+    var showQCount  = 0;
+    var TOTAL_DOTS  = 5;
+    var explaining  = false;
 
-    /* Demo fallback data for Q2 */
     var q2Demo = {
       kind: "multiple-choice",
       questionText: "Which statement best describes this code\u2019s behavior?",
@@ -799,6 +721,24 @@ function getWebviewHtml(
       ],
       items: []
     };
+
+    /* ── Goblin state machine ─────────────────────────────────────────────
+     *
+     *  sleep   — panel waiting, no question yet  (disabled, non-clickable)
+     *  idle    — question active, goblin = explain button (enabled, clickable)
+     *  correct — correct answer shown              (disabled)
+     *  wrong   — incorrect answer shown            (disabled)
+     *
+     *  Transitions have a 160ms opacity crossfade.
+     * ──────────────────────────────────────────────────────────────────── */
+    function setGoblinState(uri, canExplain) {
+      goblinImg.style.opacity = "0";
+      setTimeout(function() {
+        goblinImg.src = uri;
+        goblinImg.style.opacity = "1";
+        explainBtn.disabled = !canExplain;
+      }, 160);
+    }
 
     /* ── Progress dots ───────────────────────────────────────────────────── */
     function renderDots(current) {
@@ -819,26 +759,18 @@ function getWebviewHtml(
       }
     }
 
-    /* ── Switch to explanation card / question card ──────────────────────── */
+    /* ── Switch between question card and explanation card ───────────────── */
     function showExplanationCard() {
       explaining = true;
       questionCardEl.classList.add("hidden");
       feedbackEl.classList.add("hidden");
       expCardEl.classList.remove("hidden");
-      /* Re-trigger goblin arrive animation */
-      explainBtn.classList.remove("goblin-arrive", "goblin-explaining");
-      void explainBtn.offsetWidth;
-      explainBtn.classList.add("goblin-explaining");
     }
 
     function showQuestionCard() {
       explaining = false;
       expCardEl.classList.add("hidden");
       questionCardEl.classList.remove("hidden");
-      /* Re-trigger goblin arrive animation */
-      explainBtn.classList.remove("goblin-arrive", "goblin-explaining");
-      void explainBtn.offsetWidth;
-      explainBtn.classList.add("goblin-arrive");
     }
 
     /* ── Clear feedback ──────────────────────────────────────────────────── */
@@ -911,7 +843,6 @@ function getWebviewHtml(
       showQCount++;
       questionNum = showQCount;
 
-      /* Animate frame swap for Q2+ */
       if (questionNum > 1) {
         qFrameEl.classList.add("transitioning");
         setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
@@ -921,18 +852,20 @@ function getWebviewHtml(
       qLabelEl.textContent = "Question " + questionNum;
       renderDots(questionNum);
 
-      /* If explanation was showing, go back to question card */
       if (explaining) { showQuestionCard(); }
 
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
-      explainBtn.disabled = false;
+
+      /* Goblin → idle (clickable explain button) */
+      setGoblinState(URI_IDLE, true);
+
       questionEl.textContent = payload.questionText || "";
       renderAnswerArea(payload.kind || "free-text", payload);
     }
 
-    /* ── Transition to Q2 (demo fallback from Next Question / exp-next-btn) ─ */
+    /* ── Transition to Q2 (demo fallback) ────────────────────────────────── */
     function transitionToQ2(payload) {
       var data = payload || q2Demo;
       questionNum = 2;
@@ -943,13 +876,15 @@ function getWebviewHtml(
       qLabelEl.textContent = "Question 2";
       renderDots(2);
 
-      /* If explanation was showing, switch back to question card */
       if (explaining) { showQuestionCard(); }
 
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
-      explainBtn.disabled = false;
+
+      /* Goblin → idle */
+      setGoblinState(URI_IDLE, true);
+
       questionEl.textContent = data.questionText || q2Demo.questionText;
       renderAnswerArea(
         data.kind || q2Demo.kind,
@@ -960,24 +895,22 @@ function getWebviewHtml(
       qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    /* ── Show feedback (regular) or explanation screen ───────────────────── */
+    /* ── Show feedback ──────────────────────────────────────────────────────
+     *
+     *  passed === true  → goblin-correct, explanation card stays hidden
+     *  passed === false → goblin-wrong, feedback panel shows
+     *  explained === true → explanation card shown, goblin stays idle
+     * ──────────────────────────────────────────────────────────────────── */
     function showFeedback(payload) {
       setLoading(false);
 
-      /* ── Explanation state: show the Figma QuestionExplanation layout ──── */
+      /* Explanation state: full Figma QuestionExplanation screen */
       if (payload.explained) {
-        /* Populate explanation heading with current question text */
         expHeadingEl.textContent = questionEl.textContent || "";
-
-        /* Parse explanation text — strip "Explanation: " prefix from quiz.ts */
         var rawMsg = payload.message || "";
-        var explainText = rawMsg.startsWith("Explanation: ")
+        expTextBoxEl.textContent = rawMsg.startsWith("Explanation: ")
           ? rawMsg.slice("Explanation: ".length)
           : rawMsg;
-
-        expTextBoxEl.textContent = explainText;
-
-        /* Show correct-answer block if provided via correctOption */
         if (payload.correctOption) {
           expAnswerBlkEl.textContent = payload.correctOption;
           expAnswerLblEl.classList.remove("hidden");
@@ -986,17 +919,31 @@ function getWebviewHtml(
           expAnswerLblEl.classList.add("hidden");
           expAnswerBlkEl.classList.add("hidden");
         }
-
-        /* Disable the goblin button (explanation already shown) */
-        explainBtn.disabled = true;
         submitBtn.classList.add("hidden");
-
-        /* Switch to explanation card */
+        explainBtn.disabled = true;
         showExplanationCard();
         return;
       }
 
-      /* ── Regular feedback ────────────────────────────────────────────── */
+      /* Correct answer: swap goblin, show positive feedback */
+      if (payload.passed === true) {
+        setGoblinState(URI_CORRECT, false);
+        feedbackMsgEl.textContent = payload.message || "Correct!";
+        missedListEl.classList.add("hidden");
+        correctOptEl.classList.add("hidden");
+        disputeBtn.classList.add("hidden");
+        nextQBtn.classList.add("hidden");
+        feedbackEl.classList.remove("hidden");
+        submitBtn.classList.add("hidden");
+        return;
+      }
+
+      /* Wrong answer: swap goblin to wrong, show feedback panel */
+      if (payload.passed === false) {
+        setGoblinState(URI_WRONG, false);
+      }
+
+      /* Regular feedback (wrong answer or validation message) */
       feedbackMsgEl.textContent = payload.message || "";
       missedListEl.innerHTML = "";
       if (Array.isArray(payload.missed) && payload.missed.length > 0) {
@@ -1021,18 +968,14 @@ function getWebviewHtml(
         correctOptEl.classList.add("hidden");
       }
       feedbackEl.classList.remove("hidden");
-
       if (payload.allowDispute) {
         disputeBtn.classList.remove("hidden");
       } else {
         disputeBtn.classList.add("hidden");
       }
-      /* Show "Next Question" after Q1 regular feedback */
       if (questionNum === 1 && !payload.explained) {
         nextQBtn.classList.remove("hidden");
       }
-
-      /* Reset answer input */
       if (currentKind === "free-text") {
         var ta = document.getElementById("answer-input");
         if (ta) { ta.value = ""; ta.focus(); }
@@ -1073,7 +1016,6 @@ function getWebviewHtml(
     /* ── Button listeners ────────────────────────────────────────────────── */
     submitBtn.addEventListener("click", collectSubmit);
 
-    /* Goblin = explain button (Figma: .q3-troll-button) */
     explainBtn.addEventListener("click", function () {
       explainBtn.classList.remove("goblin-clicked");
       void explainBtn.offsetWidth;
@@ -1089,13 +1031,9 @@ function getWebviewHtml(
     disputeBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
-
-    /* Next Question in regular feedback panel */
     nextQBtn.addEventListener("click", function () {
       transitionToQ2(null);
     });
-
-    /* Next Question in explanation card */
     expNextBtn.addEventListener("click", function () {
       transitionToQ2(null);
     });
@@ -1126,6 +1064,11 @@ export function createQuizPanel(
 ): QuizView {
   const nonce = getNonce();
 
+  const makeUri = (file: string): string =>
+    extensionUri
+      ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", file)).toString()
+      : "";
+
   const localResourceRoots = extensionUri
     ? [vscode.Uri.joinPath(extensionUri, "media")]
     : [];
@@ -1138,11 +1081,13 @@ export function createQuizPanel(
   );
   panel.reveal(vscode.ViewColumn.Active, false);
 
-  /* Build webview URI for the goblin logo.
-     TODO: place media/goblinlogo.png in the repo root (media/ folder). */
-  const goblinUri = extensionUri
-    ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "goblinlogo.png")).toString()
-    : "";
+  const uris: MediaUris = {
+    logo:          makeUri("drawbridge-logo.png"),
+    goblinSleep:   makeUri("goblin-sleep.png"),
+    goblinIdle:    makeUri("goblin-idle.png"),
+    goblinCorrect: makeUri("goblin-correct.png"),
+    goblinWrong:   makeUri("goblin-wrong.png"),
+  };
 
   let disposed = false;
   let ready = false;
@@ -1151,13 +1096,8 @@ export function createQuizPanel(
   let queuedAction: QuizAction | null = null;
 
   const post = (message: unknown): void => {
-    if (disposed) {
-      return;
-    }
-    if (!ready) {
-      queued.push(message);
-      return;
-    }
+    if (disposed) return;
+    if (!ready) { queued.push(message); return; }
     void panel.webview.postMessage(message);
   };
 
@@ -1172,9 +1112,7 @@ export function createQuizPanel(
   };
 
   panel.webview.onDidReceiveMessage((message: unknown) => {
-    if (disposed || !message || typeof message !== "object") {
-      return;
-    }
+    if (disposed || !message || typeof message !== "object") return;
     const msg = message as { type?: string; answer?: string; selectedIndex?: number; order?: number[] };
     if (msg.type === "ready") {
       ready = true;
@@ -1183,32 +1121,21 @@ export function createQuizPanel(
       }
       return;
     }
-    if (msg.type === "bypass") {
-      resolvePending({ type: "bypass" });
-      return;
-    }
-    if (msg.type === "explain") {
-      resolvePending({ type: "explain" });
-      return;
-    }
+    if (msg.type === "bypass") { resolvePending({ type: "bypass" }); return; }
+    if (msg.type === "explain") { resolvePending({ type: "explain" }); return; }
     if (msg.type === "dispute") {
-      resolvePending({
-        type: "dispute",
-        answer: typeof msg.answer === "string" ? msg.answer : "",
-      });
+      resolvePending({ type: "dispute", answer: typeof msg.answer === "string" ? msg.answer : "" });
       return;
     }
-    if (msg.type !== "submit") {
-      return;
-    }
+    if (msg.type !== "submit") return;
     resolvePending({
       type: "submit",
       answer: typeof msg.answer === "string" ? msg.answer : undefined,
       selectedIndex:
         typeof msg.selectedIndex === "number" && Number.isFinite(msg.selectedIndex)
-          ? msg.selectedIndex
-          : undefined,
-      order: Array.isArray(msg.order) ? msg.order.filter((item) => typeof item === "number") : undefined,
+          ? msg.selectedIndex : undefined,
+      order: Array.isArray(msg.order)
+        ? msg.order.filter((item) => typeof item === "number") : undefined,
     });
   });
 
@@ -1217,13 +1144,11 @@ export function createQuizPanel(
     resolvePending({ type: "cancel" });
   });
 
-  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce, goblinUri);
+  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce, uris);
 
   return {
     showQuestion(question: GeneratedQuestion): void {
-      if (disposed) {
-        return;
-      }
+      if (disposed) return;
       post({
         type: "showQuestion",
         kind: question.kind,
@@ -1239,10 +1164,9 @@ export function createQuizPanel(
       correctOption?: string;
       allowDispute?: boolean;
       explained?: boolean;
+      passed?: boolean;
     }): void {
-      if (disposed) {
-        return;
-      }
+      if (disposed) return;
       post({
         type: "showFeedback",
         message: opts.message,
@@ -1250,6 +1174,7 @@ export function createQuizPanel(
         correctOption: opts.correctOption ?? "",
         allowDispute: opts.allowDispute === true,
         explained: opts.explained === true,
+        passed: opts.passed,
       });
     },
 
@@ -1259,18 +1184,12 @@ export function createQuizPanel(
         queuedAction = null;
         return Promise.resolve(action);
       }
-      if (disposed) {
-        return Promise.resolve({ type: "cancel" });
-      }
-      return new Promise((resolve) => {
-        pendingResolve = resolve;
-      });
+      if (disposed) return Promise.resolve({ type: "cancel" });
+      return new Promise((resolve) => { pendingResolve = resolve; });
     },
 
     close(): void {
-      if (!disposed) {
-        panel.dispose();
-      }
+      if (!disposed) panel.dispose();
     },
   };
 }

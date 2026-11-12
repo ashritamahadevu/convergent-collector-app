@@ -1125,6 +1125,7 @@ export function createQuizPanel(
     }
     if (msg.type === "bypass") { resolvePending({ type: "bypass" }); return; }
     if (msg.type === "explain") { resolvePending({ type: "explain" }); return; }
+    if (msg.type === "cancel") { resolvePending({ type: "cancel" }); return; }
     if (msg.type === "dispute") {
       resolvePending({ type: "dispute", answer: typeof msg.answer === "string" ? msg.answer : "" });
       return;

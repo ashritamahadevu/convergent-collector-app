@@ -170,10 +170,12 @@ function getWebviewHtml(
       margin-bottom: 12px;
     }
     .brand-title {
-      margin: 0;
-      font-size: 1.1em;
+      margin: 0 0 8px;
+      /* Figma: clamp(2.25rem, 5.33cqw, 3.125rem) — using 2.25rem (Figma minimum) for panel width */
+      font-size: 2.25rem;
       font-weight: 700;
-      letter-spacing: 0.03em;
+      line-height: 1.5;
+      letter-spacing: 0.02em;
       color: var(--accent);
       text-align: center;
     }
@@ -1063,14 +1065,15 @@ export function createQuizPanel(
     ? [vscode.Uri.joinPath(extensionUri, "media")]
     : [];
 
-  // Panel must be created before makeUri so panel.webview is available
+  // Panel must be created before makeUri so panel.webview is available.
+  // Open Beside so the decorated text editor stays visible while the user answers.
   const panel = vscode.window.createWebviewPanel(
     "comprehensionGuard.quiz",
     "Comprehension check",
-    { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots },
   );
-  panel.reveal(vscode.ViewColumn.Active, false);
+  panel.reveal(vscode.ViewColumn.Beside, false);
 
   const makeUri = (file: string): string =>
     extensionUri

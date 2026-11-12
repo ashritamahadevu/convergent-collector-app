@@ -242,7 +242,7 @@ export async function runComprehensionGate(
           return false;
         }
         try {
-          question = await generateQuestion({ context, snippet, language: lang, mode });
+          question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
         } catch {
           view.showFeedback({
             message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",

@@ -215,9 +215,9 @@ function getWebviewHtml(
     .goblin-area {
       display: flex;
       justify-content: center;
-      /* reserve space for the absolutely-positioned tooltip so question text starts below it */
+      /* reserve space for the absolutely-positioned tooltip (14px gap + ~22px height) */
       margin: 4px 0 0;
-      padding-bottom: 54px;
+      padding-bottom: 38px;
     }
     .goblin-btn {
       position: relative;
@@ -858,16 +858,16 @@ function getWebviewHtml(
       renderAnswerArea(payload.kind || "free-text", payload);
     }
 
-    /* ── Transition to Q2 (demo fallback) ────────────────────────────────── */
+    /* ── Advance to the next question (called by "Next Question" and explanation next) */
     function transitionToQ2(payload) {
       var data = payload || q2Demo;
-      questionNum = 2;
+      questionNum = questionNum + 1;
 
       qFrameEl.classList.add("transitioning");
       setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
 
-      qLabelEl.textContent = "Question 2";
-      renderDots(2);
+      qLabelEl.textContent = "Question " + questionNum;
+      renderDots(questionNum);
 
       if (explaining) { showQuestionCard(); }
 
@@ -967,7 +967,8 @@ function getWebviewHtml(
       } else {
         disputeBtn.classList.add("hidden");
       }
-      if (questionNum === 1 && !payload.explained) {
+      /* Show "Next Question" for any wrong answer so users see all follow-up rounds */
+      if (!payload.explained && payload.passed !== true) {
         nextQBtn.classList.remove("hidden");
       }
       if (currentKind === "free-text") {

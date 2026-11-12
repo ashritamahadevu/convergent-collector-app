@@ -47,7 +47,6 @@ function getNonce(): string {
  *
  * @param goblinUri - webview URI for media/goblinlogo.png
  *   TODO: user must place media/goblinlogo.png in the repo root for the goblin image to appear.
- *         Until then the <img> elements will render as broken-image placeholders.
  */
 function getWebviewHtml(
   webview: vscode.Webview,
@@ -71,7 +70,7 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Comprehension check</title>
   <style>
-    /* ── Figma design tokens (Animate Chat Loading Transition / DrawBridge) ── */
+    /* ── Figma design tokens (DrawBridge / Animate Chat Loading Transition) ── */
     :root {
       --accent:        #74ab7b;
       --accent-light:  #c8e4cc;
@@ -92,8 +91,8 @@ function getWebviewHtml(
       font-size:   var(--vscode-font-size);
       color: var(--accent);
       /*
-       * Figma app-shell gradient: center far below (50% 215%) so only the
-       * bottom edge shows the green glow; the upper/question area is near-black.
+       * Figma .app-shell gradient: center at 50% 215% so only the very bottom
+       * edge shows green; everything above is near-black #0a0a0a.
        */
       background:
         radial-gradient(
@@ -172,7 +171,7 @@ function getWebviewHtml(
       margin: 0 0 14px;
     }
 
-    /* ── Question frame (Q1 / Q2 share this area) ──────────────────────────── */
+    /* ── Question frame ────────────────────────────────────────────────────── */
     .q-frame {
       flex: 1;
       display: flex;
@@ -212,13 +211,12 @@ function getWebviewHtml(
     .dot-active  { background: var(--accent);           opacity: 1; animation: dot-activate 320ms cubic-bezier(0.34,1.56,0.64,1); }
     .dot-inactive{ background: rgba(116,171,123,0.22); opacity: 1; }
 
-    /* ── Goblin button (Figma: .question-two-goblin / .q3-troll-button) ──────── */
+    /* ── Goblin button (Figma: .q3-troll-button / .question-two-goblin) ─────── */
     .goblin-area {
       display: flex;
       justify-content: center;
       margin: 6px 0 12px;
     }
-    /* Figma .q3-troll-button */
     .goblin-btn {
       position: relative;
       display: grid;
@@ -254,7 +252,7 @@ function getWebviewHtml(
       cursor: default;
       opacity: 0.5;
     }
-    /* Tooltip (Figma: .q3-troll-tooltip) */
+    /* Figma: .q3-troll-tooltip */
     .goblin-tooltip {
       position: absolute;
       top: calc(100% + 14px);
@@ -279,8 +277,10 @@ function getWebviewHtml(
       transform: translate(-50%, 0) scale(1);
     }
     .goblin-arrive { animation: goblin-arrive 560ms cubic-bezier(0.22,1,0.36,1) both; }
+    /* On explanation state the goblin re-triggers arrive */
+    .goblin-explaining { animation: goblin-arrive 560ms 120ms cubic-bezier(0.22,1,0.36,1) both; }
 
-    /* ── Question card: flat dark background (Figma: question section on #0a0a0a) */
+    /* ── Question card: flat dark bg (Figma: question content section) ───────── */
     .question-card {
       background: #0a0a0a;
       border-radius: var(--r-card);
@@ -332,7 +332,7 @@ function getWebviewHtml(
     }
     .mcq-options { display: grid; gap: 18px; }
 
-    /* ── MCQ Option (Figma: .mcq-option / .mcq-radio) ───────────────────────── */
+    /* ── MCQ option (Figma: .mcq-option / .mcq-radio 50px → scaled 28px) ────── */
     .mcq-option {
       display: flex;
       align-items: center;
@@ -350,13 +350,11 @@ function getWebviewHtml(
     .mcq-option:nth-child(3) { animation-delay: 110ms; }
     .mcq-option:nth-child(4) { animation-delay: 165ms; }
     .mcq-option:nth-child(5) { animation-delay: 220ms; }
-
     .mcq-option input[type="radio"] {
       position: absolute;
       width: 1px; height: 1px;
       overflow: hidden; opacity: 0; pointer-events: none;
     }
-    /* Figma: 50px → scaled to 28px for VS Code panel */
     .mcq-radio {
       flex: 0 0 28px;
       width: 28px; height: 28px;
@@ -426,12 +424,10 @@ function getWebviewHtml(
         box-shadow       180ms ease;
       -webkit-tap-highlight-color: transparent;
     }
-    /* Figma .submit-button:hover */
     .submit-pill:hover:not(:disabled):not(.loading) {
       background: var(--accent);
       color: var(--on-accent);
     }
-    /* Figma .submit-button:active */
     .submit-pill:active:not(:disabled):not(.loading) {
       transform: scale(0.98);
       border-color: var(--on-accent);
@@ -457,11 +453,85 @@ function getWebviewHtml(
     .submit-dots span:nth-child(2) { animation-delay: 0.18s; }
     .submit-dots span:nth-child(3) { animation-delay: 0.36s; }
 
-    /* ── Goblin click-wobble (Figma: explanation-troll-wobble pattern) ─────────
-       Fires after the goblin is clicked: squish on press, spring back up.         */
+    /* ── Goblin click wobble ─────────────────────────────────────────────────── */
     .goblin-btn.goblin-clicked {
       animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
       pointer-events: none;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+     * Explanation screen (Figma: QuestionExplanation component)
+     * Shown after clicking the goblin (explain action).
+     * Replaces the question-card; goblin stays in goblin-area above.
+     * ──────────────────────────────────────────────────────────────────────── */
+    .exp-card {
+      background: #0a0a0a;
+      border-radius: var(--r-card);
+      padding: 16px 0 4px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Figma: .q3-explanation-copy h2 — centered question heading */
+    .exp-heading {
+      margin: 0 0 14px;
+      font-size: 1em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+      line-height: 1.5;
+      text-align: center;
+      animation: q3-copy-enter 380ms 180ms ease-out both;
+    }
+
+    /* Figma: .q3-explanation-text — explanation text card */
+    .exp-text-box {
+      border: 1px solid rgba(116,171,123,0.24);
+      border-radius: var(--r-card);
+      background: rgba(43,43,43,0.32);
+      padding: 12px 16px;
+      color: var(--accent);
+      font-size: 0.93em;
+      font-weight: 400;
+      line-height: 1.55;
+      letter-spacing: 0.02em;
+      margin-bottom: 12px;
+      animation: q3-copy-enter 420ms 260ms ease-out both;
+    }
+
+    /* Figma: .explanation-answer-label */
+    .exp-answer-label {
+      margin: 8px 0 6px;
+      font-size: 0.9em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+      animation: q3-copy-enter 360ms 320ms ease-out both;
+    }
+
+    /* Figma: .q3-explanation-answer */
+    .exp-answer-block {
+      border-radius: var(--r-card);
+      background: rgba(43,43,43,0.22);
+      padding: 12px 16px;
+      color: var(--accent);
+      font-size: 0.93em;
+      font-weight: 500;
+      line-height: 1.5;
+      letter-spacing: 0.02em;
+      margin-bottom: 14px;
+      animation: q3-answer-reveal 420ms 360ms cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+
+    /* Figma: .q3-next-button — same shape as submit but labeled "Next Question" */
+    .exp-next-btn {
+      margin-top: auto;
+      padding-top: 14px;
+    }
+    .exp-next-label {
+      display: inline-block;
+      animation: q3-copy-enter 260ms 180ms ease-out both;
     }
 
     /* ── Feedback panel ────────────────────────────────────────────────────── */
@@ -570,13 +640,23 @@ function getWebviewHtml(
       from { opacity: 0; transform: scale(0.985); filter: blur(3px); }
       to   { opacity: 1; transform: scale(1);     filter: blur(0);   }
     }
-    /* Figma explanation-troll-wobble: float-bounce on click */
+    /* Figma: goblin click wobble */
     @keyframes goblin-click-wobble {
       0%   { transform: translateY(2px)  scale(1.06, 0.88); }
       28%  { transform: translateY(-9px) scale(0.94, 1.08); }
       55%  { transform: translateY(-3px) scale(1.03, 0.98); }
       75%  { transform: translateY(-6px) scale(0.98, 1.03); }
       100% { transform: translateY(0)    scale(1); }
+    }
+    /* Figma: .q3-explanation-copy animations */
+    @keyframes q3-copy-enter {
+      from { opacity: 0; transform: translateY(12px); filter: blur(2px); }
+      to   { opacity: 1; transform: translateY(0);    filter: blur(0);   }
+    }
+    /* Figma: .q3-explanation-answer reveal */
+    @keyframes q3-answer-reveal {
+      from { opacity: 0; transform: translateX(-16px) scale(0.97); }
+      to   { opacity: 1; transform: translateX(0)     scale(1);    }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -590,7 +670,7 @@ function getWebviewHtml(
   </style>
 </head>
 <body>
-  <!-- Fullscreen loading overlay shown while grading (Figma: QuestionLoading / .answer-loading-troll) -->
+  <!-- Fullscreen loading overlay shown while grading -->
   <div class="loading-overlay" id="loading-overlay" role="status" aria-label="Checking your answer">
     <div class="loading-goblin">
       <img src="${goblinUri}" width="80" height="80" alt="" aria-hidden="true">
@@ -601,10 +681,10 @@ function getWebviewHtml(
   <div class="quiz-scroll">
   <div class="quiz-wrap" style="animation: screen-enter 420ms ease both;">
 
-    <!-- Brand title (Figma: .brand-title) -->
+    <!-- Brand title — extension name, not the Figma demo "DrawBridge" brand -->
     <h1 class="brand-title">Comprehension check</h1>
 
-    <!-- Question frame (Q1 and Q2 share this — content swaps on transition) -->
+    <!-- Question frame -->
     <div class="q-frame" id="q-frame">
 
       <!-- Question meta: label + progress dots (Figma: .question-meta) -->
@@ -613,7 +693,10 @@ function getWebviewHtml(
         <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
       </header>
 
-      <!-- Goblin button (Figma: .question-two-goblin / .q3-troll-button) — clicking = "explain" -->
+      <!--
+        Goblin button (Figma: .q3-troll-button inside .question-two-goblin).
+        Clicking = post "explain". Stays visible in both question and explanation states.
+      -->
       <div class="goblin-area">
         <button type="button" class="goblin-btn goblin-arrive" id="explain-btn"
                 aria-label="Show explanation and skip this question">
@@ -622,33 +705,48 @@ function getWebviewHtml(
         </button>
       </div>
 
-      <!-- Flat dark question card (Figma: question content on #0a0a0a background) -->
-      <div class="question-card">
-
-        <!-- Question text -->
+      <!--
+        Question card: flat dark background (Figma: question content on #0a0a0a).
+        Hidden when explanation screen is shown.
+      -->
+      <div class="question-card" id="question-card">
         <p id="question" class="question-text"></p>
-
-        <!-- Answer area (textarea / MCQ / ordering) -->
         <div id="answer-area" class="answer-area"></div>
-
-        <!-- Large centred Submit pill (Figma: .submit-button) -->
         <button type="button" class="submit-pill" id="submit-btn" aria-label="Submit answer">
           <span class="submit-label">Submit!</span>
           <span class="submit-dots" aria-hidden="true"><span></span><span></span><span></span></span>
         </button>
+      </div>
 
-      </div><!-- /.question-card -->
+      <!--
+        Explanation card (Figma: QuestionExplanation component).
+        Shown after clicking the goblin (explain action), hidden otherwise.
+        Layout: centered question heading → explanation text card → Next Question button.
+      -->
+      <div class="exp-card hidden" id="exp-card">
+        <!-- Figma: .q3-explanation-copy h2 -->
+        <h2 id="exp-heading" class="exp-heading"></h2>
+        <!-- Figma: .q3-explanation-text -->
+        <div class="exp-text-box" id="exp-text-box"></div>
+        <!-- Figma: .explanation-answer-label + .q3-explanation-answer (only when answer present) -->
+        <p class="exp-answer-label hidden" id="exp-answer-label">Correct answer</p>
+        <div class="exp-answer-block hidden" id="exp-answer-block"></div>
+        <!-- Figma: .q3-next-button / .submit-button — labeled "Next Question" -->
+        <button type="button" class="submit-pill" id="exp-next-btn">
+          <span class="exp-next-label">Next Question</span>
+        </button>
+      </div>
 
     </div><!-- /.q-frame -->
 
-    <!-- Feedback panel (shown after grading) -->
+    <!-- Feedback panel (shown after grading — correct / incorrect) -->
     <div class="feedback-panel hidden" id="feedback" aria-live="polite">
       <p id="feedback-msg" class="feedback-msg"></p>
       <ul id="missed-list" class="missed-list hidden"></ul>
       <p id="correct-option" class="correct-option hidden"></p>
       <div class="feedback-actions">
         <button type="button" class="dispute-btn hidden" id="dispute-btn">My answer was right</button>
-        <button type="button" class="next-q-btn hidden" id="next-q-btn">Next Question \u2192</button>
+        <button type="button" class="next-q-btn hidden" id="next-q-btn">Next Question</button>
       </div>
     </div>
 
@@ -659,29 +757,37 @@ function getWebviewHtml(
     const vscode = acquireVsCodeApi();
 
     /* ── Element refs ────────────────────────────────────────────────────── */
-    const qLabelEl      = document.getElementById("q-label");
-    const progressEl    = document.getElementById("progress-dots");
-    const questionEl    = document.getElementById("question");
-    const answerAreaEl  = document.getElementById("answer-area");
-    const submitBtn     = document.getElementById("submit-btn");
-    const explainBtn    = document.getElementById("explain-btn");
-    const feedbackEl    = document.getElementById("feedback");
-    const feedbackMsgEl = document.getElementById("feedback-msg");
-    const missedListEl  = document.getElementById("missed-list");
-    const correctOptEl  = document.getElementById("correct-option");
-    const disputeBtn    = document.getElementById("dispute-btn");
-    const nextQBtn      = document.getElementById("next-q-btn");
-    const qFrameEl      = document.getElementById("q-frame");
-    const loadingOverlay= document.getElementById("loading-overlay");
+    const qLabelEl       = document.getElementById("q-label");
+    const progressEl     = document.getElementById("progress-dots");
+    const questionEl     = document.getElementById("question");
+    const answerAreaEl   = document.getElementById("answer-area");
+    const submitBtn      = document.getElementById("submit-btn");
+    const explainBtn     = document.getElementById("explain-btn");
+    const feedbackEl     = document.getElementById("feedback");
+    const feedbackMsgEl  = document.getElementById("feedback-msg");
+    const missedListEl   = document.getElementById("missed-list");
+    const correctOptEl   = document.getElementById("correct-option");
+    const disputeBtn     = document.getElementById("dispute-btn");
+    const nextQBtn       = document.getElementById("next-q-btn");
+    const qFrameEl       = document.getElementById("q-frame");
+    const loadingOverlay = document.getElementById("loading-overlay");
+    const questionCardEl = document.getElementById("question-card");
+    const expCardEl      = document.getElementById("exp-card");
+    const expHeadingEl   = document.getElementById("exp-heading");
+    const expTextBoxEl   = document.getElementById("exp-text-box");
+    const expAnswerLblEl = document.getElementById("exp-answer-label");
+    const expAnswerBlkEl = document.getElementById("exp-answer-block");
+    const expNextBtn     = document.getElementById("exp-next-btn");
 
     /* ── State ───────────────────────────────────────────────────────────── */
     var currentKind  = "free-text";
     var lastAnswer   = "";
-    var questionNum  = 1;   // current question number (1-indexed)
-    var showQCount   = 0;   // total showQuestion messages received
+    var questionNum  = 1;
+    var showQCount   = 0;
     var TOTAL_DOTS   = 5;
+    var explaining   = false; /* true while explanation card is shown */
 
-    /* Demo fallback data for Q2+ when host hasn't sent data yet */
+    /* Demo fallback data for Q2 */
     var q2Demo = {
       kind: "multiple-choice",
       questionText: "Which statement best describes this code\u2019s behavior?",
@@ -708,11 +814,31 @@ function getWebviewHtml(
     function setLoading(on) {
       if (on) {
         loadingOverlay.classList.add("active");
-        submitBtn.setAttribute("aria-label", "Checking your answer\u2026");
       } else {
         loadingOverlay.classList.remove("active");
-        submitBtn.setAttribute("aria-label", "Submit answer");
       }
+    }
+
+    /* ── Switch to explanation card / question card ──────────────────────── */
+    function showExplanationCard() {
+      explaining = true;
+      questionCardEl.classList.add("hidden");
+      feedbackEl.classList.add("hidden");
+      expCardEl.classList.remove("hidden");
+      /* Re-trigger goblin arrive animation */
+      explainBtn.classList.remove("goblin-arrive", "goblin-explaining");
+      void explainBtn.offsetWidth;
+      explainBtn.classList.add("goblin-explaining");
+    }
+
+    function showQuestionCard() {
+      explaining = false;
+      expCardEl.classList.add("hidden");
+      questionCardEl.classList.remove("hidden");
+      /* Re-trigger goblin arrive animation */
+      explainBtn.classList.remove("goblin-arrive", "goblin-explaining");
+      void explainBtn.offsetWidth;
+      explainBtn.classList.add("goblin-arrive");
     }
 
     /* ── Clear feedback ──────────────────────────────────────────────────── */
@@ -795,6 +921,9 @@ function getWebviewHtml(
       qLabelEl.textContent = "Question " + questionNum;
       renderDots(questionNum);
 
+      /* If explanation was showing, go back to question card */
+      if (explaining) { showQuestionCard(); }
+
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
@@ -803,7 +932,7 @@ function getWebviewHtml(
       renderAnswerArea(payload.kind || "free-text", payload);
     }
 
-    /* ── Transition to Q2 (demo fallback from Next Question button) ──────── */
+    /* ── Transition to Q2 (demo fallback from Next Question / exp-next-btn) ─ */
     function transitionToQ2(payload) {
       var data = payload || q2Demo;
       questionNum = 2;
@@ -813,6 +942,10 @@ function getWebviewHtml(
 
       qLabelEl.textContent = "Question 2";
       renderDots(2);
+
+      /* If explanation was showing, switch back to question card */
+      if (explaining) { showQuestionCard(); }
+
       clearFeedback();
       setLoading(false);
       submitBtn.classList.remove("hidden");
@@ -827,9 +960,43 @@ function getWebviewHtml(
       qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    /* ── Show feedback ───────────────────────────────────────────────────── */
+    /* ── Show feedback (regular) or explanation screen ───────────────────── */
     function showFeedback(payload) {
       setLoading(false);
+
+      /* ── Explanation state: show the Figma QuestionExplanation layout ──── */
+      if (payload.explained) {
+        /* Populate explanation heading with current question text */
+        expHeadingEl.textContent = questionEl.textContent || "";
+
+        /* Parse explanation text — strip "Explanation: " prefix from quiz.ts */
+        var rawMsg = payload.message || "";
+        var explainText = rawMsg.startsWith("Explanation: ")
+          ? rawMsg.slice("Explanation: ".length)
+          : rawMsg;
+
+        expTextBoxEl.textContent = explainText;
+
+        /* Show correct-answer block if provided via correctOption */
+        if (payload.correctOption) {
+          expAnswerBlkEl.textContent = payload.correctOption;
+          expAnswerLblEl.classList.remove("hidden");
+          expAnswerBlkEl.classList.remove("hidden");
+        } else {
+          expAnswerLblEl.classList.add("hidden");
+          expAnswerBlkEl.classList.add("hidden");
+        }
+
+        /* Disable the goblin button (explanation already shown) */
+        explainBtn.disabled = true;
+        submitBtn.classList.add("hidden");
+
+        /* Switch to explanation card */
+        showExplanationCard();
+        return;
+      }
+
+      /* ── Regular feedback ────────────────────────────────────────────── */
       feedbackMsgEl.textContent = payload.message || "";
       missedListEl.innerHTML = "";
       if (Array.isArray(payload.missed) && payload.missed.length > 0) {
@@ -855,21 +1022,17 @@ function getWebviewHtml(
       }
       feedbackEl.classList.remove("hidden");
 
-      if (payload.explained) {
-        submitBtn.classList.add("hidden");
-        explainBtn.disabled = true;
-        disputeBtn.classList.add("hidden");
-        nextQBtn.classList.add("hidden");
-      }
       if (payload.allowDispute) {
         disputeBtn.classList.remove("hidden");
       } else {
         disputeBtn.classList.add("hidden");
       }
+      /* Show "Next Question" after Q1 regular feedback */
       if (questionNum === 1 && !payload.explained) {
         nextQBtn.classList.remove("hidden");
       }
 
+      /* Reset answer input */
       if (currentKind === "free-text") {
         var ta = document.getElementById("answer-input");
         if (ta) { ta.value = ""; ta.focus(); }
@@ -910,21 +1073,30 @@ function getWebviewHtml(
     /* ── Button listeners ────────────────────────────────────────────────── */
     submitBtn.addEventListener("click", collectSubmit);
 
-    /* Goblin IS the explain button: spring-wobble animation (Figma: explanation-troll-wobble) */
+    /* Goblin = explain button (Figma: .q3-troll-button) */
     explainBtn.addEventListener("click", function () {
       explainBtn.classList.remove("goblin-clicked");
-      void explainBtn.offsetWidth; /* force reflow to restart animation */
+      void explainBtn.offsetWidth;
       explainBtn.classList.add("goblin-clicked");
       vscode.postMessage({ type: "explain" });
     });
-    explainBtn.addEventListener("animationend", function () {
-      explainBtn.classList.remove("goblin-clicked");
+    explainBtn.addEventListener("animationend", function (e) {
+      if (e.animationName === "goblin-click-wobble") {
+        explainBtn.classList.remove("goblin-clicked");
+      }
     });
 
     disputeBtn.addEventListener("click", function () {
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
+
+    /* Next Question in regular feedback panel */
     nextQBtn.addEventListener("click", function () {
+      transitionToQ2(null);
+    });
+
+    /* Next Question in explanation card */
+    expNextBtn.addEventListener("click", function () {
       transitionToQ2(null);
     });
 
@@ -966,9 +1138,8 @@ export function createQuizPanel(
   );
   panel.reveal(vscode.ViewColumn.Active, false);
 
-  /* Build the webview URI for the goblin logo image.
-     TODO: user must place media/goblinlogo.png at the repo root.
-     Until then the <img> elements show broken-image placeholders. */
+  /* Build webview URI for the goblin logo.
+     TODO: place media/goblinlogo.png in the repo root (media/ folder). */
   const goblinUri = extensionUri
     ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "goblinlogo.png")).toString()
     : "";

@@ -226,11 +226,15 @@ export async function runComprehensionGate(
         followups += 1;
         lastFeedback = "That option is not correct. Look at the code again and try another.";
 
-        if (followups < maxFollowups) {
+        if (followups <= maxFollowups) {
           view.showFeedback({
             message: lastFeedback,
             allowDispute: true,
             passed: false,
+            correctOption:
+              typeof question.correctIndex === "number" && question.options
+                ? question.options[question.correctIndex]
+                : undefined,
           });
           continue;
         }
@@ -253,7 +257,7 @@ export async function runComprehensionGate(
         }
         followups += 1;
         lastFeedback = "That order is not quite right. Move the steps and try again.";
-        if (followups < maxFollowups) {
+        if (followups <= maxFollowups) {
           view.showFeedback({ message: lastFeedback, allowDispute: true, passed: false });
           continue;
         }
@@ -321,7 +325,7 @@ export async function runComprehensionGate(
       lastFeedback =
         "Not quite. Look at the part of the code the question asks about and describe what it does. The answer is not shown.";
 
-      if (followups < maxFollowups) {
+      if (followups <= maxFollowups) {
         view.showFeedback({
           message: lastFeedback,
           allowDispute: true,

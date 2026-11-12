@@ -140,7 +140,7 @@ export function getNonCriticalPassFraction(): number {
 export function getMaxFollowups(): number {
   return vscode.workspace
     .getConfiguration("comprehensionGuard")
-    .get<number>("maxFollowups", 2);
+    .get<number>("maxFollowups", 3);
 }
 
 export function getMode(): GuardMode {

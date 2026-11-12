@@ -327,25 +327,31 @@ function getWebviewHtml(
     textarea::placeholder { color: rgba(116,171,123,0.25); opacity: 1; }
 
     /* ── MCQ ──────────────────────────────────────────────────────────────── */
-    .mcq-fieldset { margin: 0; padding: 0; border: 0; }
+    .mcq-fieldset { margin: 0; padding: 0; border: 0; color: var(--accent); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); letter-spacing: 0.02em; }
     .mcq-legend {
       position: absolute;
       width: 1px; height: 1px;
       overflow: hidden; opacity: 0; pointer-events: none;
     }
-    .mcq-options { display: grid; gap: 18px; }
+    .mcq-options { display: grid; gap: 26px; margin-top: 24px; }
     .mcq-option {
       display: flex;
+      min-width: 0;
       align-items: center;
       gap: 18px;
+      padding: 10px 14px;
+      border: 1.5px solid rgba(116,171,123,0.28);
+      border-radius: 12px;
       cursor: pointer;
       color: var(--accent);
       font-family: var(--vscode-font-family);
       font-size:   var(--vscode-font-size);
       line-height: 1.5;
       user-select: none;
+      transition: border-color 140ms ease, background-color 140ms ease;
       animation: q2-option-enter 360ms ease-out both;
     }
+    .mcq-option:hover { border-color: rgba(116,171,123,0.62); background: rgba(116,171,123,0.05); }
     .mcq-option:nth-child(1) { animation-delay:   0ms; }
     .mcq-option:nth-child(2) { animation-delay:  55ms; }
     .mcq-option:nth-child(3) { animation-delay: 110ms; }
@@ -357,18 +363,19 @@ function getWebviewHtml(
       overflow: hidden; opacity: 0; pointer-events: none;
     }
     .mcq-radio {
-      flex: 0 0 28px;
-      width: 28px; height: 28px;
+      flex: 0 0 40px;
+      width: 40px; height: 40px;
       border: 3px solid var(--accent);
       border-radius: 50%;
       background: var(--surface);
       transition: background-color 160ms ease, transform 160ms ease;
     }
-    .mcq-option:hover .mcq-radio { transform: scale(1.06); }
+    .mcq-option:hover .mcq-radio { transform: scale(1.04); }
     .mcq-option input:checked + .mcq-radio {
       background: var(--accent);
       animation: q2-radio-select 260ms cubic-bezier(0.34,1.56,0.64,1);
     }
+    .mcq-option:has(input:checked) { border-color: var(--accent); background: rgba(116,171,123,0.10); }
     .mcq-option input:focus-visible + .mcq-radio {
       outline: 3px solid var(--accent-light);
       outline-offset: 4px;
@@ -1030,7 +1037,20 @@ function getWebviewHtml(
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
     nextQBtn.addEventListener("click", function () {
-      transitionToQ2(null);
+      /* Advance the visible question counter without replacing the question
+         content — the extension is already waiting for the next submit. */
+      questionNum = questionNum + 1;
+      qFrameEl.classList.add("transitioning");
+      setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
+      qLabelEl.textContent = "Question " + questionNum;
+      renderDots(questionNum);
+      if (explaining) { showQuestionCard(); }
+      clearFeedback();
+      setLoading(false);
+      submitBtn.classList.remove("hidden");
+      setGoblinState(URI_SLEEP, true);
+      qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      /* No postMessage — the host loop is already at waitForSubmit(). */
     });
     expNextBtn.addEventListener("click", function () {
       /* Quiz is complete after explanation; signal the host to close the panel.

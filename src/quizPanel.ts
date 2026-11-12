@@ -45,7 +45,6 @@ function getNonce(): string {
 }
 
 interface MediaUris {
-  logo:          string;
   goblinSleep:   string;
   goblinIdle:    string;
   goblinCorrect: string;
@@ -163,21 +162,12 @@ function getWebviewHtml(
       box-sizing: border-box;
     }
 
-    /* ── Header: bridge logo + brand title ─────────────────────────────────── */
+    /* ── Header ─────────────────────────────────────────────────────────────── */
     .panel-header {
       display: flex;
       flex-direction: column;
       align-items: center;
       margin-bottom: 12px;
-      gap: 6px;
-    }
-    .logo-img {
-      display: block;
-      width: 100%;
-      max-width: 220px;
-      height: auto;
-      object-fit: contain;
-      image-rendering: pixelated;
     }
     .brand-title {
       margin: 0;
@@ -604,10 +594,9 @@ function getWebviewHtml(
   <div class="quiz-scroll">
   <div class="quiz-wrap" style="animation: screen-enter 420ms ease both;">
 
-    <!-- Header: pixel bridge logo + extension name -->
+    <!-- Header: DrawBridge brand title (Figma: brand-title h1) -->
     <header class="panel-header">
-      <img src="${uris.logo}" class="logo-img" alt="" aria-hidden="true">
-      <h1 class="brand-title">Comprehension check</h1>
+      <h1 class="brand-title">DrawBridge</h1>
     </header>
 
     <!-- Question frame -->
@@ -858,8 +847,8 @@ function getWebviewHtml(
       setLoading(false);
       submitBtn.classList.remove("hidden");
 
-      /* Goblin → idle (clickable explain button) */
-      setGoblinState(URI_IDLE, true);
+      /* Goblin → sleep but clickable (Figma: sleeping goblin is the explain button during Q) */
+      setGoblinState(URI_SLEEP, true);
 
       questionEl.textContent = payload.questionText || "";
       renderAnswerArea(payload.kind || "free-text", payload);
@@ -882,8 +871,8 @@ function getWebviewHtml(
       setLoading(false);
       submitBtn.classList.remove("hidden");
 
-      /* Goblin → idle */
-      setGoblinState(URI_IDLE, true);
+      /* Goblin → sleep but clickable (Figma: sleeping goblin is the explain button during Q) */
+      setGoblinState(URI_SLEEP, true);
 
       questionEl.textContent = data.questionText || q2Demo.questionText;
       renderAnswerArea(
@@ -920,7 +909,8 @@ function getWebviewHtml(
           expAnswerBlkEl.classList.add("hidden");
         }
         submitBtn.classList.add("hidden");
-        setGoblinState(URI_SLEEP, false);
+        /* Figma QuestionExplanation uses the standing troll (idle/arms-out) */
+        setGoblinState(URI_IDLE, false);
         showExplanationCard();
         return;
       }
@@ -1086,7 +1076,6 @@ export function createQuizPanel(
       : "";
 
   const uris: MediaUris = {
-    logo:          makeUri("drawbridge-logo.png"),
     goblinSleep:   makeUri("goblin-sleep.png"),
     goblinIdle:    makeUri("goblin-idle.png"),
     goblinCorrect: makeUri("goblin-correct.png"),

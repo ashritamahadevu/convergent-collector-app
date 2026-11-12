@@ -205,6 +205,23 @@ export async function runComprehensionGate(
         return false;
       }
 
+      if (payload.type === "next_question") {
+        /* User clicked "Next Question" after a wrong answer.  Generate a fresh
+           follow-up question and show it.  followups was already incremented
+           when the wrong answer was detected, so we don't touch it here. */
+        try {
+          question = await generateQuestion({ context, snippet, language: lang, mode });
+        } catch {
+          /* If generation fails, show a generic error in the feedback panel and
+             let the loop wait for another action (retry, explain, cancel…). */
+          view.showFeedback({
+            message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",
+          });
+        }
+        view.showQuestion(question);
+        continue;
+      }
+
       lastStudentAnswer = (payload.answer ?? "").trim();
 
       if (question.kind === "multiple-choice") {
@@ -521,6 +538,9 @@ async function fallbackGate(snippet: string, language?: string, extensionUri?: v
       );
       return false;
     }
+
+    /* Fallback gate never shows the Next Question button, so this is a no-op. */
+    if (payload.type === "next_question") { continue; }
 
     const answer = (payload.answer ?? "").trim();
     if (answer.length < minAnswerLength) {

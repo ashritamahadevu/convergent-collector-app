@@ -8,7 +8,8 @@ export type QuizAction =
   | { type: "bypass" }
   | { type: "explain" }
   | { type: "dispute"; answer?: string }
-  | { type: "cancel" };
+  | { type: "cancel" }
+  | { type: "next_question" };
 
 export type QuizView = {
   showQuestion(question: GeneratedQuestion): void;
@@ -1037,20 +1038,16 @@ function getWebviewHtml(
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
     nextQBtn.addEventListener("click", function () {
-      /* Advance the visible question counter without replacing the question
-         content — the extension is already waiting for the next submit. */
-      questionNum = questionNum + 1;
-      qFrameEl.classList.add("transitioning");
-      setTimeout(function () { qFrameEl.classList.remove("transitioning"); }, 400);
-      qLabelEl.textContent = "Question " + questionNum;
-      renderDots(questionNum);
-      if (explaining) { showQuestionCard(); }
-      clearFeedback();
-      setLoading(false);
-      submitBtn.classList.remove("hidden");
-      setGoblinState(URI_SLEEP, true);
-      qFrameEl.scrollIntoView({ behavior: "smooth", block: "start" });
-      /* No postMessage — the host loop is already at waitForSubmit(). */
+      /* Hide feedback and show checking state while the extension generates
+         the follow-up question.  renderQuestion() will reset the UI once the
+         host sends back a showQuestion message. */
+      nextQBtn.classList.add("hidden");
+      disputeBtn.classList.add("hidden");
+      feedbackEl.classList.add("hidden");
+      submitBtn.classList.add("hidden");
+      setGoblinState(URI_SLEEP, false);
+      setLoading(true);
+      vscode.postMessage({ type: "next_question" });
     });
     expNextBtn.addEventListener("click", function () {
       /* Quiz is complete after explanation; signal the host to close the panel.
@@ -1146,6 +1143,7 @@ export function createQuizPanel(
     if (msg.type === "bypass") { resolvePending({ type: "bypass" }); return; }
     if (msg.type === "explain") { resolvePending({ type: "explain" }); return; }
     if (msg.type === "cancel") { resolvePending({ type: "cancel" }); return; }
+    if (msg.type === "next_question") { resolvePending({ type: "next_question" }); return; }
     if (msg.type === "dispute") {
       resolvePending({ type: "dispute", answer: typeof msg.answer === "string" ? msg.answer : "" });
       return;

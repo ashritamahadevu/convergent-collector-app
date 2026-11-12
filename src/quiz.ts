@@ -212,6 +212,8 @@ export async function runComprehensionGate(
         const ok = gradeMcq(question, selectedIndex);
         if (ok) {
           await recordAttempt(true, "pass");
+          view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
+          await new Promise<void>((resolve) => setTimeout(resolve, 1200));
           view.close();
           return true;
         }
@@ -223,6 +225,7 @@ export async function runComprehensionGate(
           view.showFeedback({
             message: lastFeedback,
             allowDispute: true,
+            passed: false,
           });
           continue;
         }
@@ -238,13 +241,15 @@ export async function runComprehensionGate(
         const ok = score >= 0.999;
         if (ok) {
           await recordAttempt(true, "pass", undefined, score);
+          view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
+          await new Promise<void>((resolve) => setTimeout(resolve, 1200));
           view.close();
           return true;
         }
         followups += 1;
         lastFeedback = "That order is not quite right. Move the steps and try again.";
         if (followups < maxFollowups) {
-          view.showFeedback({ message: lastFeedback, allowDispute: true });
+          view.showFeedback({ message: lastFeedback, allowDispute: true, passed: false });
           continue;
         }
         await recordAttempt(false, "fail", undefined, score);
@@ -284,6 +289,8 @@ export async function runComprehensionGate(
 
       if (res.kind === "no_decision") {
         await recordAttempt(true, "pass");
+        view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
+        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
         view.close();
         return true;
       }
@@ -299,6 +306,8 @@ export async function runComprehensionGate(
 
       if (agg.outcome === "pass") {
         await recordAttempt(true, "pass", criterionResults);
+        view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
+        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
         view.close();
         return true;
       }
@@ -311,6 +320,7 @@ export async function runComprehensionGate(
         view.showFeedback({
           message: lastFeedback,
           allowDispute: true,
+          passed: false,
         });
         continue;
       }
@@ -433,7 +443,7 @@ export async function runSession(
       judgeConfigId: record.judgeConfigId,
     });
     if (!passed) {
-      view.showFeedback({ message: "Not quite. The next question is coming, or try to remember this one." });
+      view.showFeedback({ message: "Not quite. The next question is coming, or try to remember this one.", passed: false });
     }
   }
   view.close();

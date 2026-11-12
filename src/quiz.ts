@@ -330,7 +330,8 @@ export async function runComprehensionGate(
       return false;
     }
   } finally {
-    /* Remove the pasted-lines highlight decoration regardless of quiz outcome */
+    /* Dispose here — and ONLY here — so the green decoration persists across all
+       question/feedback cycles and is removed exactly once when the quiz ends. */
     pasteDecoration?.dispose();
   }
 }

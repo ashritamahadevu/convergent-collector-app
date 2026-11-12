@@ -10,6 +10,7 @@ import {
   editsFromHookEnvelope,
   equivalentText,
   generatedCode,
+  isOurHookCommand,
   looksLikeAgentInvocation,
   isFreshEvent,
   parseApplyPatch,
@@ -386,6 +387,78 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
   });
   assert.equal(invalid.errors.length, 1);
   assert.ok(!invalid.writes.some((write) => write.path.includes(`${path.sep}.claude${path.sep}`)));
+});
+
+test("pause hook is added beside notify and a second install is idempotent", () => {
+  const home = path.join("/tmp", "guard-home-pause");
+  const nodePath = "/usr/local/bin/node";
+  const script = "// notifier\n";
+  const pause = "// pause\n";
+  const first = planHookInstall({
+    homeDir: home,
+    nodePath,
+    scriptSource: script,
+    pauseSource: pause,
+    claude: { kind: "missing" },
+    codex: { kind: "missing" },
+    cursor: { kind: "missing" },
+  });
+  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor"]);
+  const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
+  const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
+  const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
+  const pauseWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}pause.js`));
+  assert.ok(claudeWrite && codexWrite && cursorWrite && pauseWrite);
+  assert.equal(pauseWrite.contents, pause);
+
+  const claudeJson = JSON.parse(claudeWrite.contents);
+  const pre = claudeJson.hooks.PreToolUse[0];
+  assert.equal(pre.matcher, "Edit|Write|NotebookEdit|MultiEdit");
+  assert.equal(pre.hooks.length, 2);
+  assert.match(pre.hooks[0].command, /notify\.js/);
+  assert.equal(pre.hooks[0].async, undefined);
+  assert.equal(pre.hooks[0].timeout, 10);
+  assert.match(pre.hooks[1].command, /pause\.js/);
+  assert.equal(pre.hooks[1].async, undefined);
+  assert.equal(pre.hooks[1].timeout, 600);
+  assert.equal(claudeJson.hooks.PostToolUse[0].hooks.length, 1);
+  assert.match(claudeJson.hooks.PostToolUse[0].hooks[0].command, /notify\.js/);
+  assert.equal(isOurHookCommand(pre.hooks[0].command), true);
+  assert.equal(isOurHookCommand(pre.hooks[1].command), true);
+  assert.equal(isOurHookCommand("echo hi"), false);
+
+  const codexJson = JSON.parse(codexWrite.contents);
+  const codexPre = codexJson.hooks.PreToolUse[0];
+  assert.equal(codexPre.matcher, "apply_patch|Edit|Write");
+  assert.equal(codexPre.hooks.length, 2);
+  assert.match(codexPre.hooks[0].command, /notify\.js/);
+  assert.match(codexPre.hooks[1].command, /pause\.js/);
+  assert.equal(codexPre.hooks[1].timeout, 600);
+  assert.equal(codexPre.hooks[1].async, undefined);
+  assert.equal(codexJson.hooks.PostToolUse[0].hooks.length, 1);
+
+  const cursorJson = JSON.parse(cursorWrite.contents);
+  assert.match(cursorJson.hooks.afterFileEdit[0].command, /notify\.js/);
+  assert.equal(cursorJson.hooks.preToolUse.length, 1);
+  assert.match(cursorJson.hooks.preToolUse[0].command, /pause\.js/);
+  assert.equal(cursorJson.hooks.preToolUse[0].command.includes("notify.js"), false);
+
+  const second = planHookInstall({
+    homeDir: home,
+    nodePath,
+    scriptSource: script,
+    pauseSource: pause,
+    claude: { kind: "ok", value: claudeJson },
+    codex: { kind: "ok", value: codexJson },
+    cursor: { kind: "ok", value: cursorJson },
+  });
+  assert.deepEqual(second.installed, []);
+  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.equal(second.writes.length, 2);
+  assert.deepEqual(
+    second.writes.map((write) => write.contents).sort(),
+    [pause, script].sort(),
+  );
 });
 
 test("stale inbox events and overlapping gates are ignored", () => {

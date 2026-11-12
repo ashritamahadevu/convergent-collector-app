@@ -126,6 +126,10 @@ If the editor was not running, the event waits in `~/.comprehension-guard/inbox`
 
 Without hooks, there is a narrower fallback for files you already have open. A large change that arrives from disk, and that is not a single insertion in the editor you are typing in, raises the same quiz. More than three files changing at once (a git checkout or pull) does not, so branch switches stay quiet. Hooks are what cover files that are not open.
 
+### Agent pause
+
+With `comprehensionGuard.agentPause` on (the default), tree-sitter splits each agent edit into functions and scores only the functions that edit wrote. A formula decides when that new logic is enough to pause. The next Write or Edit then waits. The check is a few multiple-choice questions about the control flow of those functions. Passing, or choosing bypass, lets the agent continue. A miss tells the agent to wait and retry. Presets are `quick` (pause after several functions), `standard` (the default, pause on a function with real branching), and `deep` (pause on the first logical unit). Set `comprehensionGuard.agentPause` to false to restore the previous per-edit quiz.
+
 ## Roadmap
 
 Still planned, not implemented yet:

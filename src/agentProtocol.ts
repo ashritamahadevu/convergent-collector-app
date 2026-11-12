@@ -207,14 +207,23 @@ export function shouldUseDiskFallback(input: {
 }
 
 export function isOurHookCommand(command: unknown): boolean {
+  return isNotifyCommand(command) || isPauseCommand(command);
+}
+
+function isGuardScript(command: unknown, scriptName: string): boolean {
   if (typeof command !== "string") {
     return false;
   }
   const normalized = command.replace(/\\/g, "/");
-  return (
-    normalized.includes(".comprehension-guard/") &&
-    normalized.includes("notify.js")
-  );
+  return normalized.includes(".comprehension-guard/") && normalized.includes(scriptName);
+}
+
+function isNotifyCommand(command: unknown): boolean {
+  return isGuardScript(command, "notify.js");
+}
+
+function isPauseCommand(command: unknown): boolean {
+  return isGuardScript(command, "pause.js");
 }
 
 export function hookCommand(nodePath: string, scriptPath: string): string {
@@ -404,6 +413,8 @@ export function planHookInstall(opts: {
   homeDir: string;
   nodePath: string;
   scriptSource: string;
+  /** When set, also install hook/pause.js beside the notifier. */
+  pauseSource?: string;
   claude: ConfigInput;
   codex: ConfigInput;
   cursor: ConfigInput;
@@ -416,12 +427,18 @@ export function planHookInstall(opts: {
   const installed: string[] = [];
   const unchanged: string[] = [];
   const errors: string[] = [];
+  let pauseCommand: string | undefined;
+  if (typeof opts.pauseSource === "string") {
+    const pausePath = path.join(guardDirectory(opts.homeDir), "pause.js");
+    pauseCommand = hookCommand(opts.nodePath, pausePath);
+    writes.push({ path: pausePath, contents: opts.pauseSource });
+  }
 
   mergeProduct(
     "Claude Code",
     path.join(opts.homeDir, ".claude", "settings.json"),
     opts.claude,
-    (value) => mergeClaudeSettings(value, command),
+    (value) => mergeClaudeSettings(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -431,7 +448,7 @@ export function planHookInstall(opts: {
     "Codex",
     path.join(opts.homeDir, ".codex", "hooks.json"),
     opts.codex,
-    (value) => mergeCodexHooks(value, command),
+    (value) => mergeCodexHooks(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -441,7 +458,7 @@ export function planHookInstall(opts: {
     "Cursor",
     path.join(opts.homeDir, ".cursor", "hooks.json"),
     opts.cursor,
-    (value) => mergeCursorHooks(value, command),
+    (value) => mergeCursorHooks(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -840,28 +857,37 @@ function mergeProduct(
 function mergeClaudeSettings(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Claude settings");
   let changed = createdHooks;
   changed = upsertClaudeEvent(hooks, "PreToolUse", command, false) || changed;
   changed = upsertClaudeEvent(hooks, "PostToolUse", command, true) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, CLAUDE_MATCHER) || changed;
+  }
   return { next: root, changed };
 }
 
 function mergeCodexHooks(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Codex hooks");
   let changed = createdHooks;
   changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, CODEX_MATCHER) || changed;
   changed = upsertClaudeEvent(hooks, "PostToolUse", command, true, CODEX_MATCHER) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, CODEX_MATCHER) || changed;
+  }
   return { next: root, changed };
 }
 
 function mergeCursorHooks(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Cursor hooks");
   let changed = createdHooks;
@@ -876,7 +902,7 @@ function mergeCursorHooks(
   }
   const nextList = list.map((entry) => {
     const rec = asRecord(entry);
-    if (!rec || !isOurHookCommand(rec.command)) {
+    if (!rec || !isNotifyCommand(rec.command)) {
       return entry;
     }
     found = true;
@@ -891,7 +917,34 @@ function mergeCursorHooks(
     changed = true;
   }
   hooks.afterFileEdit = nextList;
+  if (pauseCommand) {
+    changed = upsertCursorPause(hooks, pauseCommand) || changed;
+  }
   return { next: root, changed };
+}
+
+function upsertCursorPause(hooks: Record<string, unknown>, pauseCommand: string): boolean {
+  const list = Array.isArray(hooks.preToolUse) ? [...hooks.preToolUse] : [];
+  let found = false;
+  let changed = !Array.isArray(hooks.preToolUse);
+  const nextList = list.map((entry) => {
+    const rec = asRecord(entry);
+    if (!rec || !isPauseCommand(rec.command)) {
+      return entry;
+    }
+    found = true;
+    if (rec.command !== pauseCommand) {
+      changed = true;
+      return { ...rec, command: pauseCommand };
+    }
+    return entry;
+  });
+  if (!found) {
+    nextList.push({ command: pauseCommand });
+    changed = true;
+  }
+  hooks.preToolUse = nextList;
+  return changed;
 }
 
 function upsertClaudeEvent(
@@ -912,7 +965,7 @@ function upsertClaudeEvent(
     let groupChanged = false;
     const nextHooks = rec.hooks.map((hook) => {
       const item = asRecord(hook);
-      if (!item || !isOurHookCommand(item.command)) {
+      if (!item || !isNotifyCommand(item.command)) {
         return hook;
       }
       found = true;
@@ -943,14 +996,74 @@ function refreshHook(
   hook: Record<string, unknown>,
   command: string,
   asyncHook: boolean,
+  timeout = 10,
 ): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...hook, type: "command", command, timeout: 10 };
+  const next: Record<string, unknown> = { ...hook, type: "command", command, timeout };
   if (asyncHook) {
     next.async = true;
   } else if ("async" in next) {
     delete next.async;
   }
   return next;
+}
+
+function upsertPauseHook(
+  hooks: Record<string, unknown>,
+  eventName: string,
+  command: string,
+  matcher: string,
+): boolean {
+  const groups = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
+  let found = false;
+  let changed = !Array.isArray(hooks[eventName]);
+  const nextGroups = groups.map((group) => {
+    const rec = asRecord(group);
+    if (!rec || !Array.isArray(rec.hooks)) {
+      return group;
+    }
+    let groupChanged = false;
+    const nextHooks = rec.hooks.map((hook) => {
+      const item = asRecord(hook);
+      if (!item || !isPauseCommand(item.command)) {
+        return hook;
+      }
+      found = true;
+      const refreshed = refreshHook(item, command, false, 600);
+      if (JSON.stringify(refreshed) !== JSON.stringify(item)) {
+        groupChanged = true;
+      }
+      return refreshed;
+    });
+    if (!groupChanged) {
+      return group;
+    }
+    changed = true;
+    return { ...rec, hooks: nextHooks };
+  });
+  if (!found) {
+    const pauseHook = refreshHook({}, command, false, 600);
+    const target = nextGroups.findIndex((group) => {
+      const rec = asRecord(group);
+      if (!rec || !Array.isArray(rec.hooks)) {
+        return false;
+      }
+      return rec.hooks.some((hook) => {
+        const item = asRecord(hook);
+        return !!item && isNotifyCommand(item.command);
+      });
+    });
+    if (target >= 0) {
+      const rec = asRecord(nextGroups[target]);
+      if (rec && Array.isArray(rec.hooks)) {
+        nextGroups[target] = { ...rec, matcher: rec.matcher ?? matcher, hooks: [...rec.hooks, pauseHook] };
+      }
+    } else {
+      nextGroups.push({ matcher, hooks: [pauseHook] });
+    }
+    changed = true;
+  }
+  hooks[eventName] = nextGroups;
+  return changed;
 }
 
 function hooksObject(

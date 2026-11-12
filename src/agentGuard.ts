@@ -39,8 +39,21 @@ import {
   releasePath,
 } from "./gateLock";
 import { runComprehensionGate } from "./quiz";
+import { analyzeFile } from "./sizing/analyze";
+import { clearUnits, emptyCheckpoint, needsCheckpoint, noteUnits } from "./sizing/checkpoint";
+import { unitsTouchedByEdit, type TouchEdit } from "./sizing/touched";
+import { decide, isMutatingTool } from "./sizing/decide";
+import { gradeLocal, questionsFor } from "./sizing/questions";
+import type {
+  CheckPreset,
+  CheckpointState,
+  IncomingTool,
+  LocalQuestion,
+  PauseDecision,
+  UnitFact,
+} from "./sizing/types";
 import { offerWalkthrough } from "./walkthrough";
-import { getCharThreshold, isEnabled, setBypassArmed, state, wantsWalkthrough } from "./state";
+import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, wantsWalkthrough } from "./state";
 
 /**
  * Quizzes code written by Claude Code, Codex, or the Cursor agent.
@@ -52,6 +65,19 @@ import { getCharThreshold, isEnabled, setBypassArmed, state, wantsWalkthrough } 
  */
 
 const MAX_QUEUE = 12;
+
+type PauseWire = {
+  allow: boolean;
+  reason: string;
+  userMessage: string;
+  agentMessage: string;
+};
+
+/** One checkpoint per agent session, and one question picker at a time. */
+const checkpoints = new Map<string, CheckpointState>();
+let inflightAsk: Promise<boolean> | null = null;
+/** Analysis started by a post-edit hook. A pause waits for it so the next write sees those units. */
+let pendingNotes: Promise<void> = Promise.resolve();
 
 type PendingDiskEdit = {
   fsPath: string;
@@ -144,7 +170,15 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     }
   };
 
-  const transport = startTransport(home, onHook);
+  const acceptHook = (body: unknown): void => {
+    if (!readAgentPause()) {
+      onHook(body);
+      return;
+    }
+    trackNotes(noteEditedFiles(home, body));
+  };
+
+  const transport = startTransport(home, acceptHook, (body) => handlePause(body));
   context.subscriptions.push(transport);
 
   const flushPending = (): void => {
@@ -165,6 +199,13 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       }
       if (item.snippet.length < getCharThreshold()) {
         noteAccepted(item.fsPath, item.current);
+        continue;
+      }
+      if (readAgentPause()) {
+        trackNotes(noteAnalyzedSource("disk", item.fsPath, item.current, {
+          snippet: item.snippet,
+          hunks: [{ newText: item.snippet }],
+        }));
         continue;
       }
       enqueue({
@@ -523,11 +564,20 @@ async function installAgentHooks(
     );
     return;
   }
+  let pauseSource: string | undefined;
+  try {
+    pauseSource = await fs.promises.readFile(path.join(context.extensionPath, "hook", "pause.js"), "utf8");
+  } catch {
+    void vscode.window.showWarningMessage(
+      "Comprehension Guard: pause script is missing from the extension install. Agent pause was not installed.",
+    );
+  }
   const nodePath = resolveNodeBinary();
   const plan = planHookInstall({
     homeDir: home,
     nodePath,
     scriptSource,
+    pauseSource,
     claude: readConfig(path.join(home, ".claude", "settings.json")),
     codex: readConfig(path.join(home, ".codex", "hooks.json")),
     cursor: readConfig(path.join(home, ".cursor", "hooks.json")),
@@ -560,12 +610,14 @@ async function installAgentHooks(
 function startTransport(
   home: string,
   onEvent: (body: unknown) => void,
+  onPause: (body: unknown) => Promise<PauseWire>,
 ): vscode.Disposable {
   const dir = guardDirectory(home);
   const token = crypto.randomBytes(16).toString("hex");
   const endpointFile = path.join(dir, "endpoint.json");
   const server = http.createServer((req, res) => {
-    if (req.method !== "POST" || (req.url ?? "").split("?")[0] !== "/event") {
+    const pathname = (req.url ?? "").split("?")[0];
+    if (req.method !== "POST" || (pathname !== "/event" && pathname !== "/pause")) {
       res.writeHead(404);
       res.end();
       return;
@@ -593,10 +645,32 @@ function startTransport(
       if (rejected) {
         return;
       }
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (pathname === "/pause") {
+        let body: unknown;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          writePause(res, continueWire());
+          return;
+        }
+        void onPause(body)
+          .then((decision) => {
+            if (!res.writableEnded) {
+              writePause(res, decision);
+            }
+          })
+          .catch(() => {
+            if (!res.writableEnded) {
+              writePause(res, continueWire());
+            }
+          });
+        return;
+      }
       res.writeHead(204);
       res.end();
       try {
-        onEvent(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        onEvent(JSON.parse(raw));
       } catch {
         // Ignore malformed bodies.
       }
@@ -663,6 +737,380 @@ function startTransport(
       }
     },
   };
+}
+
+function writePause(res: http.ServerResponse, body: PauseWire): void {
+  const raw = JSON.stringify(body);
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(raw),
+  });
+  res.end(raw);
+}
+
+function continueWire(): PauseWire {
+  return { allow: true, reason: "continue", userMessage: "", agentMessage: "" };
+}
+
+function passedWire(): PauseWire {
+  return {
+    allow: true,
+    reason: "passed",
+    userMessage: "Comprehension Guard: check passed. The agent can continue.",
+    agentMessage: "The comprehension check passed. Continue.",
+  };
+}
+
+function wireDecision(decision: PauseDecision): PauseWire {
+  return {
+    allow: decision.allow,
+    reason: decision.reason,
+    userMessage: decision.userMessage,
+    agentMessage: decision.agentMessage,
+  };
+}
+
+function readAgentPause(): boolean {
+  return vscode.workspace.getConfiguration("comprehensionGuard").get<boolean>("agentPause", true);
+}
+
+function readPreset(): CheckPreset {
+  const value = vscode.workspace.getConfiguration("comprehensionGuard").get<string>("checkPreset", "standard");
+  if (value === "quick" || value === "standard" || value === "deep") {
+    return value;
+  }
+  return "standard";
+}
+
+function trackNotes(work: Promise<void>): void {
+  pendingNotes = pendingNotes.then(() => work, () => work);
+}
+
+async function noteEditedFiles(home: string, body: unknown): Promise<void> {
+  try {
+    if (!isEnabled() || !acceptIncoming(body)) {
+      return;
+    }
+    const edits = editsFromHookEnvelope(body, {
+      readFile: readOptional,
+      readSnapshot: (absPath) => readSnapshot(home, absPath),
+    });
+    if (edits.length === 0) {
+      return;
+    }
+    const sessionId = sessionIdFrom(body);
+    for (const edit of edits) {
+      const text = edit.next ?? (await readCurrentText(edit.filePath));
+      if (text === undefined) {
+        continue;
+      }
+      await noteAnalyzedSource(sessionId, edit.filePath, text, {
+        snippet: edit.snippet,
+        hunks: edit.hunks,
+        created: edit.created,
+      });
+    }
+  } catch {
+    // Leave the agent unblocked if analysis cannot run.
+  }
+}
+
+async function noteAnalyzedSource(
+  sessionId: string,
+  filePath: string,
+  text: string,
+  edit: TouchEdit,
+): Promise<void> {
+  try {
+    const analysis = await analyzeFile(filePath, text, { aiShare: 1, mastery: 0.5 });
+    const touched = unitsTouchedByEdit(analysis.units, edit);
+    const preset = readPreset();
+    let checkpoint = checkpoints.get(sessionId) ?? emptyCheckpoint(sessionId, preset);
+    if (checkpoint.preset !== preset) {
+      checkpoint = { ...checkpoint, preset };
+    }
+    checkpoints.set(sessionId, noteUnits(checkpoint, touched));
+    const current = checkpoints.get(sessionId);
+    if (current && needsCheckpoint(current)) {
+      openCheckpoint(sessionId, current);
+    }
+  } catch {
+    // A parser failure must not trap the agent.
+  }
+}
+
+function openCheckpoint(sessionId: string, checkpoint: CheckpointState): void {
+  if (inflightAsk || !needsCheckpoint(checkpoint)) {
+    return;
+  }
+  const filePath = checkpoint.uncleared.find((unit) => unit.logic > 0)?.file;
+  let decision: PauseDecision;
+  try {
+    decision = decide(checkpoint, { toolName: "Edit", mutating: true, filePath });
+  } catch {
+    return;
+  }
+  if (decision.reason !== "checkpoint" || !decision.plan) {
+    return;
+  }
+  const units = decision.units.length > 0 ? decision.units : checkpoint.uncleared;
+  void beginAsk(sessionId, questionsFor(decision.plan, units), units).catch(() => undefined);
+}
+
+function beginAsk(sessionId: string, questions: LocalQuestion[], units: UnitFact[]): Promise<boolean> {
+  if (inflightAsk) {
+    return inflightAsk;
+  }
+  const run = askCheckpoint(questions).then((passed) => {
+    if (passed) {
+      const current = checkpoints.get(sessionId);
+      if (current) {
+        checkpoints.set(sessionId, clearUnits(current, units));
+      }
+    }
+    return passed;
+  });
+  inflightAsk = run.finally(() => {
+    inflightAsk = null;
+  });
+  return inflightAsk;
+}
+
+async function handlePause(body: unknown): Promise<PauseWire> {
+  try {
+    if (!readAgentPause() || !isEnabled()) {
+      return continueWire();
+    }
+    await pendingNotes;
+    const sessionId = sessionIdFrom(body);
+    const preset = readPreset();
+    let checkpoint = checkpoints.get(sessionId) ?? emptyCheckpoint(sessionId, preset);
+    if (checkpoint.preset !== preset) {
+      checkpoint = { ...checkpoint, preset };
+      checkpoints.set(sessionId, checkpoint);
+    }
+    if (inflightAsk) {
+      const passed = await inflightAsk;
+      if (passed) {
+        return passedWire();
+      }
+      checkpoint = checkpoints.get(sessionId) ?? checkpoint;
+    }
+    if (inflightAsk) {
+      const passed = await inflightAsk;
+      if (passed) {
+        return passedWire();
+      }
+      checkpoint = checkpoints.get(sessionId) ?? checkpoint;
+    }
+    const decision = decide(checkpoint, incomingTool(hookPayload(body)));
+    if (decision.reason !== "checkpoint") {
+      return wireDecision(decision);
+    }
+    if (!decision.plan || !needsCheckpoint(checkpoint)) {
+      return continueWire();
+    }
+    const units = decision.units.length > 0 ? decision.units : checkpoint.uncleared;
+    const passed = await beginAsk(sessionId, questionsFor(decision.plan, units), units);
+    if (passed) {
+      return {
+        allow: true,
+        reason: "passed",
+        userMessage: decision.userMessage,
+        agentMessage: decision.agentMessage,
+      };
+    }
+    return {
+      allow: false,
+      reason: "failed",
+      userMessage: decision.userMessage,
+      agentMessage: decision.agentMessage,
+    };
+  } catch {
+    return continueWire();
+  }
+}
+
+type AskStep = "pass" | "fail" | "bypass";
+type PickResult = number | "bypass" | "dismiss";
+
+async function askCheckpoint(questions: LocalQuestion[]): Promise<boolean> {
+  if (questions.length === 0) {
+    return true;
+  }
+  setQuizActive(true);
+  try {
+    for (const question of questions) {
+      const result = question.type === "ordering" ? await askOrdering(question) : await askChoice(question);
+      if (result === "bypass") {
+        void vscode.window.setStatusBarMessage(
+          "Comprehension Guard: check bypassed. The agent can continue.",
+          4000,
+        );
+        return true;
+      }
+      if (result === "fail") {
+        return false;
+      }
+    }
+    void vscode.window.showInformationMessage("Comprehension Guard: check passed. The agent can continue.");
+    return true;
+  } finally {
+    setQuizActive(false);
+  }
+}
+
+async function askChoice(question: LocalQuestion): Promise<AskStep> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const picked = await pickOption(question);
+    if (picked === "dismiss") {
+      return "fail";
+    }
+    if (picked === "bypass") {
+      return "bypass";
+    }
+    if (gradeLocal(question, { selectedIndex: picked })) {
+      return "pass";
+    }
+    if (attempt === 0) {
+      await vscode.window.showWarningMessage(question.hint);
+    }
+  }
+  return "fail";
+}
+
+async function askOrdering(question: LocalQuestion): Promise<AskStep> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const order: number[] = [];
+    const used = new Set<number>();
+    while (order.length < question.options.length) {
+      const picked = await pickOption(question, used);
+      if (picked === "dismiss") {
+        return "fail";
+      }
+      if (picked === "bypass") {
+        return "bypass";
+      }
+      order.push(picked);
+      used.add(picked);
+    }
+    if (gradeLocal(question, { order })) {
+      return "pass";
+    }
+    if (attempt === 0) {
+      await vscode.window.showWarningMessage(question.hint);
+    }
+  }
+  return "fail";
+}
+
+async function pickOption(question: LocalQuestion, hidden?: ReadonlySet<number>): Promise<PickResult> {
+  const items: Array<vscode.QuickPickItem & { pick: PickResult }> = [];
+  question.options.forEach((label, index) => {
+    if (hidden?.has(index)) {
+      return;
+    }
+    items.push({ label, pick: index });
+  });
+  items.push({ label: "Bypass this check", pick: "bypass" });
+  const picked = await vscode.window.showQuickPick(items, {
+    title: question.prompt,
+    placeHolder: question.prompt,
+    ignoreFocusOut: true,
+  });
+  if (!picked) {
+    return "dismiss";
+  }
+  return picked.pick;
+}
+
+function incomingTool(payload: Record<string, unknown>): IncomingTool {
+  const toolName = toolNameOf(payload);
+  const filePath = filePathOf(payload);
+  const tool: IncomingTool = {
+    toolName,
+    mutating: isMutatingTool(toolName),
+  };
+  if (filePath) {
+    tool.filePath = filePath;
+  }
+  return tool;
+}
+
+function hookPayload(body: unknown): Record<string, unknown> {
+  const record = asRecord(body);
+  if (!record) {
+    return {};
+  }
+  return asRecord(parseMaybe(record.payload)) ?? record;
+}
+
+function sessionIdFrom(body: unknown): string {
+  const record = asRecord(body);
+  const payload = hookPayload(body);
+  const id =
+    stringField(payload, "session_id") ||
+    stringField(payload, "sessionId") ||
+    stringField(payload, "conversation_id") ||
+    stringField(record, "session_id") ||
+    stringField(record, "sessionId") ||
+    stringField(record, "conversation_id");
+  return id || "default";
+}
+
+function toolNameOf(payload: Record<string, unknown>): string {
+  const direct = stringField(payload, "tool_name") || stringField(payload, "toolName");
+  if (direct) {
+    return direct;
+  }
+  const input = asRecord(parseMaybe(payload.tool_input ?? payload.toolInput));
+  return stringField(input, "tool");
+}
+
+function filePathOf(payload: Record<string, unknown>): string {
+  const input = asRecord(parseMaybe(payload.tool_input ?? payload.toolInput));
+  return (
+    stringField(input, "file_path") ||
+    stringField(input, "filePath") ||
+    stringField(input, "path") ||
+    stringField(payload, "file_path") ||
+    stringField(payload, "filePath") ||
+    stringField(payload, "path")
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseMaybe(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function stringField(record: Record<string, unknown> | undefined, key: string): string {
+  if (!record) {
+    return "";
+  }
+  const value = record[key];
+  return typeof value === "string" ? value : "";
+}
+
+async function readCurrentText(fsPath: string): Promise<string | undefined> {
+  const open = findOpen(fsPath);
+  if (open) {
+    return open.getText();
+  }
+  return readText(fsPath);
 }
 
 function acceptIncoming(body: unknown): boolean {

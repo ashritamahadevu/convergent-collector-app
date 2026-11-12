@@ -117,7 +117,17 @@
         },
         "comprehensionGuard.provider": {
           "type": "string",
-          "enum": ["openai", "anthropic", "gemini", "ollama", "claude-cli", "cursor-cli", "codex-cli", "gemini-cli", "copilot-cli"],
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "ollama",
+            "claude-cli",
+            "cursor-cli",
+            "codex-cli",
+            "gemini-cli",
+            "copilot-cli"
+          ],
           "default": "openai",
           "description": "LLM provider for question generation and grading. ollama is local. The *-cli providers use an installed, signed-in coding CLI and do not need an API key."
         },
@@ -128,7 +138,10 @@
         },
         "comprehensionGuard.gradingMode": {
           "type": "string",
-          "enum": ["free-text", "multiple-choice"],
+          "enum": [
+            "free-text",
+            "multiple-choice"
+          ],
           "default": "free-text",
           "description": "Grading mode: free-text LLM-as-judge or deterministic multiple-choice."
         },
@@ -156,7 +169,11 @@
         },
         "comprehensionGuard.mode": {
           "type": "string",
-          "enum": ["auto", "learn", "walkthrough"],
+          "enum": [
+            "auto",
+            "learn",
+            "walkthrough"
+          ],
           "default": "auto",
           "description": "auto uses a walkthrough only for a large multi-file agent change. learn always uses one check. walkthrough always walks through multi-file agent changes."
         },
@@ -177,6 +194,21 @@
           "default": 3,
           "minimum": 1,
           "description": "Maximum number of follow-up questions before a final decision."
+        },
+        "comprehensionGuard.agentPause": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pause an AI agent at the next edit when tree-sitter finds enough new logic, until a short check is answered."
+        },
+        "comprehensionGuard.checkPreset": {
+          "type": "string",
+          "enum": [
+            "quick",
+            "standard",
+            "deep"
+          ],
+          "default": "standard",
+          "description": "How much unchecked code is required before the agent pauses, and how deep the check is."
         }
       }
     }
@@ -189,6 +221,7 @@
     "install:cursor": "npm run package && node scripts/install-cursor.mjs",
     "eval:judge": "npx -y tsx eval/run.ts",
     "test:agent": "npx -y tsx --test test/agentDetection.test.ts && node --test scripts/cursor-ide.test.mjs",
+    "test:sizing": "npx -y tsx --test \"test/sizing/*.test.ts\"",
     "test:unit": "npm run test:network && npm run test:claude-walkthrough",
     "test:network": "npx -y tsx --test \"test/network/*.test.ts\"",
     "test:network:slow": "npx -y tsx --test \"test/network/slow/*.slow.test.ts\"",
@@ -206,5 +239,9 @@
     "@vscode/vsce": "^2.24.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.10"
   }
 }

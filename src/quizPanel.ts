@@ -596,7 +596,7 @@ function getWebviewHtml(
   <!-- Loading overlay shown while grading -->
   <div class="loading-overlay" id="loading-overlay" role="status" aria-label="Checking your answer">
     <div class="loading-goblin">
-      <img src="${uris.goblinIdle}" alt="" aria-hidden="true">
+      <img src="${uris.goblinSleep}" alt="" aria-hidden="true">
     </div>
     <p class="loading-label">Checking your answer\u2026</p>
   </div>
@@ -897,9 +897,9 @@ function getWebviewHtml(
 
     /* ── Show feedback ──────────────────────────────────────────────────────
      *
-     *  passed === true  → goblin-correct, explanation card stays hidden
-     *  passed === false → goblin-wrong, feedback panel shows
-     *  explained === true → explanation card shown, goblin stays idle
+     *  passed === true  → goblin-correct (disabled)
+     *  passed === false → goblin-wrong   (disabled)
+     *  explained === true → goblin-sleep  (disabled), explanation card shown
      * ──────────────────────────────────────────────────────────────────── */
     function showFeedback(payload) {
       setLoading(false);
@@ -920,7 +920,7 @@ function getWebviewHtml(
           expAnswerBlkEl.classList.add("hidden");
         }
         submitBtn.classList.add("hidden");
-        explainBtn.disabled = true;
+        setGoblinState(URI_SLEEP, false);
         showExplanationCard();
         return;
       }
@@ -991,6 +991,7 @@ function getWebviewHtml(
         var order = Array.from(answerAreaEl.querySelectorAll("[data-index]")).map(function (r) {
           return parseInt(r.dataset.index, 10);
         });
+        setGoblinState(URI_SLEEP, false);
         setLoading(true);
         vscode.postMessage({ type: "submit", order: order });
         return;
@@ -1002,6 +1003,7 @@ function getWebviewHtml(
           return;
         }
         lastAnswer = sel.parentElement ? sel.parentElement.textContent.trim() : "";
+        setGoblinState(URI_SLEEP, false);
         setLoading(true);
         vscode.postMessage({ type: "submit", selectedIndex: parseInt(sel.value, 10) });
         return;
@@ -1009,6 +1011,7 @@ function getWebviewHtml(
       var ta = document.getElementById("answer-input");
       var answer = ta ? ta.value : "";
       lastAnswer = answer;
+      setGoblinState(URI_SLEEP, false);
       setLoading(true);
       vscode.postMessage({ type: "submit", answer: answer });
     }
@@ -1064,15 +1067,11 @@ export function createQuizPanel(
 ): QuizView {
   const nonce = getNonce();
 
-  const makeUri = (file: string): string =>
-    extensionUri
-      ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", file)).toString()
-      : "";
-
   const localResourceRoots = extensionUri
     ? [vscode.Uri.joinPath(extensionUri, "media")]
     : [];
 
+  // Panel must be created before makeUri so panel.webview is available
   const panel = vscode.window.createWebviewPanel(
     "comprehensionGuard.quiz",
     "Comprehension check",
@@ -1080,6 +1079,11 @@ export function createQuizPanel(
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots },
   );
   panel.reveal(vscode.ViewColumn.Active, false);
+
+  const makeUri = (file: string): string =>
+    extensionUri
+      ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", file)).toString()
+      : "";
 
   const uris: MediaUris = {
     logo:          makeUri("drawbridge-logo.png"),

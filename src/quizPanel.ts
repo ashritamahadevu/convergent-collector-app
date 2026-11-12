@@ -934,15 +934,10 @@ function getWebviewHtml(
         return;
       }
 
-      /* Correct answer: swap goblin, show positive feedback */
+      /* Correct answer: just show the check goblin — no text panel (matches Figma) */
       if (payload.passed === true) {
         setGoblinState(URI_CORRECT, false);
-        feedbackMsgEl.textContent = payload.message || "Correct!";
-        missedListEl.classList.add("hidden");
-        correctOptEl.classList.add("hidden");
-        disputeBtn.classList.add("hidden");
-        nextQBtn.classList.add("hidden");
-        feedbackEl.classList.remove("hidden");
+        feedbackEl.classList.add("hidden");
         submitBtn.classList.add("hidden");
         return;
       }
@@ -1047,20 +1042,14 @@ function getWebviewHtml(
       vscode.postMessage({ type: "dispute", answer: lastAnswer });
     });
     nextQBtn.addEventListener("click", function () {
-      /* Hide feedback and show checking state while the extension generates
-         the follow-up question.  renderQuestion() will reset the UI once the
-         host sends back a showQuestion message. */
       nextQBtn.classList.add("hidden");
       disputeBtn.classList.add("hidden");
       feedbackEl.classList.add("hidden");
       submitBtn.classList.add("hidden");
-      setGoblinState(URI_SLEEP, false);
-      setLoading(true);
       vscode.postMessage({ type: "next_question" });
     });
     expNextBtn.addEventListener("click", function () {
       expNextBtn.classList.add("hidden");
-      setLoading(true);
       vscode.postMessage({ type: "next_question" });
     });
 

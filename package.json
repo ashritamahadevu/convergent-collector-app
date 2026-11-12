@@ -64,7 +64,7 @@
       },
       {
         "command": "comprehensionGuard.setProfile",
-        "title": "Comprehension Guard: Set Exam and Interview Dates"
+        "title": "Comprehension Guard: Set Study Preferences"
       },
       {
         "command": "comprehensionGuard.indexCodebase",
@@ -198,7 +198,7 @@
         "comprehensionGuard.agentPause": {
           "type": "boolean",
           "default": true,
-          "description": "Pause an AI agent at the next edit when tree-sitter finds enough new logic, until a short check is answered."
+          "description": "Pause an AI agent after each chunk until that chunk's question is answered correctly."
         },
         "comprehensionGuard.checkPreset": {
           "type": "string",
@@ -208,7 +208,22 @@
             "deep"
           ],
           "default": "standard",
-          "description": "How much unchecked code is required before the agent pauses, and how deep the check is."
+          "description": "Which question types a chunk can use. Quick stays on multiple choice and ordering. Standard adds predict and explain. Deep can ask for a change."
+        },
+        "comprehensionGuard.preferredLanguage": {
+          "type": "string",
+          "default": "",
+          "description": "Language the student wants to answer chunk questions in. Leave blank to use the profile."
+        },
+        "comprehensionGuard.strictness": {
+          "type": "string",
+          "enum": [
+            "lenient",
+            "standard",
+            "strict"
+          ],
+          "default": "standard",
+          "description": "Lenient always asks multiple choice. Standard follows the preset and mastery. Strict asks the deepest question the preset allows. An exam or interview within 14 days steps the preset up."
         }
       }
     }

@@ -6,8 +6,8 @@
  * - Only Claude Code, Codex, and the Cursor agent are wired to pause.
  * - A pause holds the tool until the student answers. It does not rewrite
  *   the tool call the model already chose.
- * - An allow adds nothing to the model transcript. A deny adds one short
- *   reason and leaves the planned edit unexecuted.
+ * - An allow can add one sentence telling the model to write the next chunk.
+ *   A deny adds one short reason and leaves the planned edit unexecuted.
  * - The quiz text stays out of the hook output, so it never enters the model.
  */
 import assert from "node:assert/strict";
@@ -18,8 +18,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { planHookInstall } from "../../src/agentProtocol";
+import type { LearnerPreferences } from "../../src/sizing/chunkPolicy";
 import { PauseSession, type PauseWire } from "../../src/sizing/pauseSession";
 import type { CheckPreset, LocalQuestion } from "../../src/sizing/types";
+
+function prefs(preset: CheckPreset, extra: Partial<LearnerPreferences> = {}): LearnerPreferences {
+  return { preset, ...extra };
+}
 
 const PAUSE = path.join(__dirname, "..", "..", "hook", "pause.js");
 const MODEL_DENY =
@@ -90,7 +95,7 @@ async function startGate(preset: CheckPreset = "standard"): Promise<Gate> {
       }
       bodies.push(body);
       void session
-        .onPause(body, { enabled: true, preset })
+        .onPause(body, { enabled: true, preferences: prefs(preset) })
         .then((decision) => send(res, decision))
         .catch(() => send(res, { allow: true, reason: "continue", userMessage: "", agentMessage: "" }));
     });
@@ -169,12 +174,12 @@ test("installed hooks pause Claude, Codex, and Cursor only, and not their shell 
   assert.equal(codexTools.includes("Bash"), false);
 });
 
-test("a held Write keeps the planned edit and adds nothing for the model when the student passes", async () => {
+test("a held Write keeps the planned edit and tells the model to write one chunk next", async () => {
   const gate = await startGate();
   try {
     const reasoning = "Add coalesce before touching the caller. Do not rename it.";
     const planned = { file_path: "/tmp/mm.js", content: COALESCE, reasoning };
-    await gate.session.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
+    await gate.session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
       snippet: COALESCE,
       hunks: [{ newText: COALESCE }],
     });
@@ -193,9 +198,10 @@ test("a held Write keeps the planned edit and adds nothing for the model when th
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
     const decision = JSON.parse(result.stdout);
-    assert.deepEqual(decision, {
-      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
-    });
+    assert.equal(decision.hookSpecificOutput.permissionDecision, "allow");
+    assert.equal(decision.hookSpecificOutput.hookEventName, "PreToolUse");
+    assert.match(decision.hookSpecificOutput.additionalContext, /one function or method/);
+    assert.equal(decision.hookSpecificOutput.additionalContext.includes(COALESCE), false);
     assert.equal(result.stdout.includes(COALESCE), false);
     assert.equal(result.stdout.includes(gate.prompts[0][0]), false);
     assert.equal(result.stdout.includes(reasoning), false);
@@ -212,7 +218,7 @@ test("a held Write keeps the planned edit and adds nothing for the model when th
 test("a miss denies once, leaves the planned edit unchanged, and asks again on the next write", async () => {
   const gate = await startGate();
   try {
-    await gate.session.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
+    await gate.session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
       snippet: COALESCE,
       hunks: [{ newText: COALESCE }],
     });
@@ -249,11 +255,11 @@ test("a miss denies once, leaves the planned edit unchanged, and asks again on t
 test("two writes share one open check, and a different session still has to pass its own", async () => {
   const gate = await startGate();
   try {
-    await gate.session.noteFile("alpha", "standard", "/tmp/a.js", COALESCE, {
+    await gate.session.noteFile("alpha", prefs("standard"), "/tmp/a.js", COALESCE, {
       snippet: COALESCE,
       hunks: [{ newText: COALESCE }],
     });
-    await gate.session.noteFile("beta", "standard", "/tmp/b.js", OTHER, {
+    await gate.session.noteFile("beta", prefs("standard"), "/tmp/b.js", OTHER, {
       snippet: OTHER,
       hunks: [{ newText: OTHER }],
     });
@@ -290,7 +296,7 @@ test("two writes share one open check, and a different session still has to pass
 test("Cursor shell can pause, Cursor Read cannot, and Codex apply_patch uses the Claude decision shape", async () => {
   const gate = await startGate();
   try {
-    await gate.session.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
+    await gate.session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
       snippet: COALESCE,
       hunks: [{ newText: COALESCE }],
     });
@@ -325,7 +331,7 @@ test("Cursor shell can pause, Cursor Read cannot, and Codex apply_patch uses the
 
   const codex = await startGate();
   try {
-    await codex.session.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
+    await codex.session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
       snippet: COALESCE,
       hunks: [{ newText: COALESCE }],
     });
@@ -414,45 +420,89 @@ test("turning the gate off allows a due check without asking", async () => {
     asks += 1;
     return false;
   });
-  await session.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
+  await session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
     snippet: COALESCE,
     hunks: [{ newText: COALESCE }],
   });
-  const decision = await session.onPause(claudeWrite(COALESCE, "s"), { enabled: false, preset: "standard" });
+  const decision = await session.onPause(claudeWrite(COALESCE, "s"), {
+    enabled: false,
+    preferences: prefs("standard"),
+  });
   assert.equal(decision.allow, true);
   assert.equal(decision.reason, "continue");
   assert.equal(asks, 1, "the post-edit check can open, but a disabled pause does not wait on it");
 });
 
-test("quick does not pause a single branched function that standard does", async () => {
-  const quick = new PauseSession(async () => true);
-  await quick.noteFile("s", "quick", "/tmp/mm.js", COALESCE, {
+test("quick pauses one chunk and picks ordering when the function has two branches", async () => {
+  let asked: LocalQuestion[] = [];
+  let release: (ok: boolean) => void = () => undefined;
+  const quick = new PauseSession((questions) => {
+    asked = questions;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  });
+  await quick.noteFile("s", prefs("quick"), "/tmp/mm.js", COALESCE, {
     snippet: COALESCE,
     hunks: [{ newText: COALESCE }],
   });
-  const allowed = await quick.onPause(claudeWrite(COALESCE, "s"), { enabled: true, preset: "quick" });
-  assert.equal(allowed.reason, "below-threshold");
-
-  let asked = false;
-  const standard = new PauseSession(
-    () =>
-      new Promise((resolve) => {
-        asked = true;
-        setTimeout(() => resolve(true), 30);
-      }),
-  );
-  await standard.noteFile("s", "standard", "/tmp/mm.js", COALESCE, {
-    snippet: COALESCE,
-    hunks: [{ newText: COALESCE }],
-  });
-  const decision = await standard.onPause(claudeWrite(COALESCE, "s"), {
+  const pending = quick.onPause(claudeWrite("function next(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n", "s"), {
     enabled: true,
-    preset: "standard",
+    preferences: prefs("quick"),
   });
-  assert.equal(asked, true);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0]?.type, "ordering");
+  release(true);
+  const decision = await pending;
   assert.equal(decision.allow, true);
-  // The check finished while this write was waiting, so the units are already
-  // cleared and the tool is released. Nothing is added for the model.
-  assert.equal(decision.reason, "below-threshold");
-  assert.equal(decision.agentMessage.includes("retry"), false);
+  assert.equal(decision.reason, "passed");
+  assert.match(decision.agentMessage, /Preset quick/);
+  assert.equal(decision.agentMessage.includes(COALESCE), false);
+});
+
+test("two new functions in one write are refused until the student has passed the previous chunk", async () => {
+  const prompts: string[][] = [];
+  const session = new PauseSession((questions) => {
+    prompts.push(questions.map((question) => question.prompt));
+    return Promise.resolve(true);
+  });
+  const two = `function first(bp) {
+  if (!bp) return 0;
+  return bp;
+}
+function second(bp) {
+  if (!bp) return 1;
+  return bp + 1;
+}
+`;
+  const blocked = await session.onPause(claudeWrite(two, "s"), {
+    enabled: true,
+    preferences: prefs("standard"),
+  });
+  assert.equal(blocked.allow, false);
+  assert.equal(blocked.reason, "one-chunk");
+  assert.match(blocked.agentMessage, /one chunk only/);
+  assert.equal(blocked.agentMessage.includes("function first"), false);
+  assert.equal(prompts.length, 0);
+
+  await session.noteFile("s", prefs("standard"), "/tmp/mm.js", COALESCE, {
+    snippet: COALESCE,
+    hunks: [{ newText: COALESCE }],
+  });
+  const held = session.onPause(claudeWrite(two, "s"), {
+    enabled: true,
+    preferences: prefs("standard"),
+  });
+  const afterPass = await held;
+  assert.equal(prompts.length, 1);
+  assert.equal(afterPass.allow, false);
+  assert.equal(afterPass.reason, "one-chunk");
+
+  const one = await session.onPause(
+    claudeWrite("function next(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n", "s"),
+    { enabled: true, preferences: prefs("standard") },
+  );
+  assert.equal(one.allow, true);
+  assert.equal(prompts.length, 1);
 });

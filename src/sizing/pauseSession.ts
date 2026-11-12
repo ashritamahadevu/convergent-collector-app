@@ -1,9 +1,10 @@
 import { analyzeFile } from "./analyze";
-import { clearUnits, emptyCheckpoint, needsCheckpoint, noteUnits } from "./checkpoint";
-import { decide, isMutatingTool } from "./decide";
-import { questionsFor } from "./questions";
+import { chooseChunk, nextChunkMessage, oneChunkMessage, type LearnerPreferences } from "./chunkPolicy";
+import { clearUnits, emptyCheckpoint, noteUnits, unitFingerprint } from "./checkpoint";
+import { isMutatingTool } from "./decide";
+import { questionForChunk } from "./questions";
 import { unitsTouchedByEdit, type TouchEdit } from "./touched";
-import type { CheckPreset, CheckpointState, IncomingTool, LocalQuestion, UnitFact } from "./types";
+import type { CheckpointState, IncomingTool, LocalQuestion, UnitFact } from "./types";
 
 /**
  * One student's pause gate.
@@ -23,10 +24,9 @@ export type PauseAsk = (questions: LocalQuestion[]) => Promise<boolean>;
 
 export type PauseControl = {
   enabled: boolean;
-  preset: CheckPreset;
+  preferences: LearnerPreferences;
 };
 
-const PASS_MESSAGE = "The comprehension check passed. Continue.";
 const FAIL_MESSAGE =
   "Comprehension Guard paused this write. The student is answering a check on the previous code. Wait, then retry the same edit.";
 
@@ -44,25 +44,23 @@ export class PauseSession {
 
   async noteFile(
     sessionId: string,
-    preset: CheckPreset,
+    preferences: LearnerPreferences,
     filePath: string,
     source: string,
     edit: TouchEdit,
   ): Promise<void> {
     try {
       const analysis = await analyzeFile(filePath, source, { aiShare: 1, mastery: 0.5 });
-      this.observe(sessionId, preset, unitsTouchedByEdit(analysis.units, edit));
+      this.observe(sessionId, preferences, unitsTouchedByEdit(analysis.units, edit));
     } catch {
       // A parser failure must not trap the agent.
     }
   }
 
-  observe(sessionId: string, preset: CheckPreset, units: UnitFact[]): void {
-    const checkpoint = noteUnits(this.checkpointFor(sessionId, preset), units);
+  observe(sessionId: string, preferences: LearnerPreferences, units: UnitFact[]): void {
+    const checkpoint = noteUnits(this.checkpointFor(sessionId, preferences.preset), units);
     this.checkpoints.set(sessionId, checkpoint);
-    if (needsCheckpoint(checkpoint)) {
-      this.open(sessionId, checkpoint);
-    }
+    this.open(sessionId, preferences);
   }
 
   async onPause(body: unknown, control: PauseControl): Promise<PauseWire> {
@@ -73,31 +71,52 @@ export class PauseSession {
       await this.pending;
       const sessionId = pauseSessionId(body);
       const tool = incomingTool(hookPayload(body));
+      if (!tool.mutating) {
+        return allow("not-mutating", "No check on this step.", "This tool does not change files. Continue.");
+      }
+      let justPassed = false;
       if (this.inflight) {
         const passed = await this.inflight;
         if (!passed) {
           return deny();
         }
+        justPassed = true;
       }
-      const checkpoint = this.checkpointFor(sessionId, control.preset);
-      const decision = decide(checkpoint, tool);
-      if (decision.reason !== "checkpoint" || !decision.plan || !needsCheckpoint(checkpoint)) {
+      let checkpoint = this.checkpointFor(sessionId, control.preferences.preset);
+      let choice = chooseChunk(checkpoint.uncleared, control.preferences);
+      while (choice) {
+        const passed = await this.startAsk(
+          sessionId,
+          [questionForChunk(choice, control.preferences)],
+          [choice.unit],
+        );
+        if (!passed) {
+          return deny();
+        }
+        justPassed = true;
+        checkpoint = this.checkpointFor(sessionId, control.preferences.preset);
+        choice = chooseChunk(checkpoint.uncleared, control.preferences);
+      }
+      const extras = await this.incomingNewUnits(sessionId, body);
+      if (extras.length >= 2) {
         return {
-          allow: decision.allow,
-          reason: decision.reason,
-          userMessage: decision.userMessage,
-          agentMessage: decision.agentMessage,
+          allow: false,
+          reason: "one-chunk",
+          userMessage: "Write one function at a time.",
+          agentMessage: oneChunkMessage(control.preferences, extras.length),
         };
       }
-      const units = decision.units.length > 0 ? decision.units : checkpoint.uncleared;
-      const passed = await this.startAsk(sessionId, questionsFor(decision.plan, units), units);
-      return passed ? allow("passed", decision.userMessage, PASS_MESSAGE) : deny();
+      return allow(
+        justPassed ? "passed" : "continue",
+        justPassed ? "Comprehension Guard: check passed. The agent can continue." : "",
+        justPassed ? nextChunkMessage(control.preferences) : "",
+      );
     } catch {
       return allow("continue", "", "");
     }
   }
 
-  private checkpointFor(sessionId: string, preset: CheckPreset): CheckpointState {
+  private checkpointFor(sessionId: string, preset: LearnerPreferences["preset"]): CheckpointState {
     let checkpoint = this.checkpoints.get(sessionId) ?? emptyCheckpoint(sessionId, preset);
     if (checkpoint.preset !== preset) {
       checkpoint = { ...checkpoint, preset };
@@ -106,22 +125,19 @@ export class PauseSession {
     return checkpoint;
   }
 
-  private open(sessionId: string, checkpoint: CheckpointState): void {
-    if (this.inflight || !needsCheckpoint(checkpoint)) {
+  private open(sessionId: string, preferences: LearnerPreferences): void {
+    if (this.inflight) {
       return;
     }
-    const filePath = checkpoint.uncleared.find((unit) => unit.logic > 0)?.file;
-    let decision;
-    try {
-      decision = decide(checkpoint, { toolName: "Edit", mutating: true, filePath });
-    } catch {
+    const checkpoint = this.checkpoints.get(sessionId);
+    if (!checkpoint) {
       return;
     }
-    if (decision.reason !== "checkpoint" || !decision.plan) {
+    const choice = chooseChunk(checkpoint.uncleared, preferences);
+    if (!choice) {
       return;
     }
-    const units = decision.units.length > 0 ? decision.units : checkpoint.uncleared;
-    void this.startAsk(sessionId, questionsFor(decision.plan, units), units).catch(() => undefined);
+    void this.startAsk(sessionId, [questionForChunk(choice, preferences)], [choice.unit]).catch(() => undefined);
   }
 
   private startAsk(sessionId: string, questions: LocalQuestion[], units: UnitFact[]): Promise<boolean> {
@@ -141,6 +157,42 @@ export class PauseSession {
       this.inflight = null;
     });
     return this.inflight;
+  }
+
+  /** Units in this tool call that are not already waiting or already cleared. */
+  private async incomingNewUnits(sessionId: string, body: unknown): Promise<UnitFact[]> {
+    const payload = hookPayload(body);
+    const input = asRecord(parseMaybe(payload.tool_input ?? payload.toolInput)) ?? {};
+    const snippet =
+      stringField(input, "new_string") || stringField(input, "newString") || stringField(input, "patch");
+    const content = stringField(input, "content");
+    const text = snippet || content;
+    if (!text || text.trim().length < 8) {
+      return [];
+    }
+    const file = filePathOf(payload) || "chunk";
+    const analysis = await analyzeFile(file, text, { aiShare: 1, mastery: 0.5 });
+    let units = analysis.units.filter((unit) => unit.logic > 0 && unit.formulaValue > 0);
+    if (!snippet && content) {
+      const known = this.knownFingerprints(sessionId);
+      units = units.filter((unit) => !known.has(unitFingerprint(unit)));
+    }
+    return units;
+  }
+
+  private knownFingerprints(sessionId: string): Set<string> {
+    const checkpoint = this.checkpoints.get(sessionId);
+    const known = new Set<string>();
+    if (!checkpoint) {
+      return known;
+    }
+    for (const fingerprint of checkpoint.cleared) {
+      known.add(fingerprint);
+    }
+    for (const unit of checkpoint.uncleared) {
+      known.add(unitFingerprint(unit));
+    }
+    return known;
   }
 }
 

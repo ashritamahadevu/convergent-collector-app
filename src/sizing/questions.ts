@@ -1,4 +1,5 @@
-import type { DraftPlan, LocalQuestion, PlanSlot, UnitFact } from "./types";
+import type { ChunkChoice, LearnerPreferences } from "./chunkPolicy";
+import type { DraftPlan, LocalQuestion, PlanSlot, QuestionType, UnitFact } from "./types";
 
 /**
  * Offline questions for a pause. Multiple choice and ordering only,
@@ -70,7 +71,7 @@ function findUnit(units: UnitFact[], slot: PlanSlot): UnitFact | undefined {
   return units.find((unit) => unit.file === slot.file && unit.unit === slot.unit);
 }
 
-function choiceQuestion(slot: PlanSlot, unit: UnitFact): LocalQuestion {
+function choiceQuestion(slot: PlanSlot, unit: UnitFact, prompt?: string): LocalQuestion {
   const truth = shapePhrase(unit);
   const shuffled = shuffleStable(
     [truth, wrongBranchPhrase(unit), wrongRecursionPhrase(unit), MARKUP_OPTION],
@@ -78,7 +79,7 @@ function choiceQuestion(slot: PlanSlot, unit: UnitFact): LocalQuestion {
   );
   return {
     type: "multiple_choice",
-    prompt: `What is the control-flow shape of ${unit.unit} in ${unit.file}?`,
+    prompt: prompt ?? `What is the control-flow shape of ${unit.unit} in ${unit.file}?`,
     unit: unit.unit,
     file: unit.file,
     concept: slot.concept,
@@ -106,6 +107,39 @@ function orderingQuestion(slot: PlanSlot, unit: UnitFact): LocalQuestion {
     hint: "Read the function from top to bottom.",
     explanation: source.join(" then "),
   };
+}
+
+/** One question for the chunk the preference policy selected. */
+export function questionForChunk(choice: ChunkChoice, prefs: LearnerPreferences): LocalQuestion {
+  const slot: PlanSlot = {
+    type: choice.questionType,
+    unit: choice.unit.unit,
+    file: choice.unit.file,
+    concept: choice.concept,
+    keyIdea: choice.unit.signature,
+    points: 3,
+    estimatedSeconds: 20,
+  };
+  const language = prefs.preferredLanguage?.trim();
+  const suffix = language ? ` Answer in ${language}.` : "";
+  if (choice.questionType === "ordering") {
+    const question = orderingQuestion(slot, choice.unit);
+    return { ...question, prompt: question.prompt + suffix };
+  }
+  return choiceQuestion(slot, choice.unit, promptForKind(choice.questionType, choice.unit) + suffix);
+}
+
+function promptForKind(type: QuestionType, unit: UnitFact): string {
+  if (type === "predict") {
+    return `Predict the control flow of ${unit.unit} in ${unit.file}. Which shape runs?`;
+  }
+  if (type === "explain") {
+    return `Explain ${unit.unit} in ${unit.file}. Which description is true?`;
+  }
+  if (type === "change") {
+    return `What describes ${unit.unit} in ${unit.file} before any change?`;
+  }
+  return `What is the control-flow shape of ${unit.unit} in ${unit.file}?`;
 }
 
 export function questionsFor(plan: DraftPlan, units: UnitFact[]): LocalQuestion[] {

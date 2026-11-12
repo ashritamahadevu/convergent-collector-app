@@ -103,16 +103,22 @@ function isCursorPause(event) {
   return event.toLowerCase() === "pretooluse" && event !== "PreToolUse";
 }
 
-function allowDecision(cursor) {
+function allowDecision(cursor, context) {
   if (cursor) {
-    return { permission: "allow" };
+    const decision = { permission: "allow" };
+    if (context) {
+      decision.agent_message = context;
+    }
+    return decision;
   }
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-    },
+  const output = {
+    hookEventName: "PreToolUse",
+    permissionDecision: "allow",
   };
+  if (context) {
+    output.additionalContext = context;
+  }
+  return { hookSpecificOutput: output };
 }
 
 function denyDecision(cursor, userMessage, agentMessage) {
@@ -244,7 +250,7 @@ async function main() {
   }
   const cursor = isCursorPause(event);
   if (!isMutating(toolName(payload))) {
-    return allowDecision(cursor);
+    return allowDecision(cursor, "");
   }
   const body = JSON.stringify({
     receivedAt: Date.now(),
@@ -254,7 +260,7 @@ async function main() {
   const responseText = await postPause(body);
   const decision = parseDecision(responseText);
   if (!decision || decision.allow) {
-    return allowDecision(cursor);
+    return allowDecision(cursor, decision && decision.allow ? decision.agentMessage : "");
   }
   return denyDecision(cursor, decision.userMessage, decision.agentMessage);
 }

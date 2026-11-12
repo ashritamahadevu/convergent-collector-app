@@ -39,6 +39,8 @@ import {
   releasePath,
 } from "./gateLock";
 import { runComprehensionGate } from "./quiz";
+import { getMastery, getProfile } from "./memory/remember";
+import type { LearnerPreferences } from "./sizing/chunkPolicy";
 import { gradeLocal } from "./sizing/questions";
 import { PauseSession, pauseSessionId, type PauseWire } from "./sizing/pauseSession";
 import type { CheckPreset, LocalQuestion } from "./sizing/types";
@@ -68,7 +70,10 @@ type PendingDiskEdit = {
 
 type QueuedEdit = AgentEdit & { key: string };
 
+let activeContext: vscode.ExtensionContext | undefined;
+
 export function registerAgentGuard(context: vscode.ExtensionContext): void {
+  activeContext = context;
   const home = resolveGuardHome(process.env.COMPREHENSION_GUARD_HOME, os.homedir());
   const queue: QueuedEdit[] = [];
   const pending = new Map<string, PendingDiskEdit>();
@@ -161,7 +166,7 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
   const transport = startTransport(home, acceptHook, (body) =>
     pauseSessions.onPause(body, {
       enabled: readAgentPause() && isEnabled(),
-      preset: readPreset(),
+      preferences: readPreferences(),
     }),
   );
   context.subscriptions.push(transport);
@@ -188,7 +193,7 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       }
       if (readAgentPause()) {
         pauseSessions.track(
-          pauseSessions.noteFile("disk", readPreset(), item.fsPath, item.current, {
+          pauseSessions.noteFile("disk", readPreferences(), item.fsPath, item.current, {
             snippet: item.snippet,
             hunks: [{ newText: item.snippet }],
           }),
@@ -751,6 +756,29 @@ function readPreset(): CheckPreset {
   return "standard";
 }
 
+function readPreferences(): LearnerPreferences {
+  const config = vscode.workspace.getConfiguration("comprehensionGuard");
+  const profile = activeContext ? getProfile(activeContext) : {};
+  const settingLanguage = (config.get<string>("preferredLanguage", "") ?? "").trim();
+  const settingStrict = (config.get<string>("strictness", "") ?? "").trim();
+  const masteryByConcept: Record<string, number> = {};
+  if (activeContext) {
+    for (const row of getMastery(activeContext)) {
+      if (row.concept) {
+        masteryByConcept[row.concept] = row.mastery;
+      }
+    }
+  }
+  return {
+    preset: readPreset(),
+    preferredLanguage: settingLanguage || profile.preferredLanguage,
+    strictness: profile.strictness || settingStrict || "standard",
+    examDate: profile.examDate,
+    interviewDate: profile.interviewDate,
+    masteryByConcept,
+  };
+}
+
 async function noteEditedFiles(home: string, body: unknown): Promise<void> {
   try {
     if (!isEnabled() || !acceptIncoming(body)) {
@@ -761,13 +789,13 @@ async function noteEditedFiles(home: string, body: unknown): Promise<void> {
       readSnapshot: (absPath) => readSnapshot(home, absPath),
     });
     const sessionId = pauseSessionId(body);
-    const preset = readPreset();
+    const preferences = readPreferences();
     for (const edit of edits) {
       const text = edit.next ?? (await readCurrentText(edit.filePath));
       if (text === undefined) {
         continue;
       }
-      await pauseSessions.noteFile(sessionId, preset, edit.filePath, text, {
+      await pauseSessions.noteFile(sessionId, preferences, edit.filePath, text, {
         snippet: edit.snippet,
         hunks: edit.hunks,
         created: edit.created,

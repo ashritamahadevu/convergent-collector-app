@@ -14,3 +14,8 @@ tsconfig.json
 test/**
 test-reports/**
 ISSUES.md
+desktop/**
+scripts/build-dashboard.cjs
+scripts/test-dashboard.cjs
+dist/dashboard*
+tsconfig.dashboard.json

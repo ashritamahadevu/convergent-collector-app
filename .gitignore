@@ -28,3 +28,10 @@ test/integration/out/
 test-reports/*.json
 test-reports/interference-results/
 .claude/worktrees/
+
+# Local dashboard data and pairing credentials
+.drawbridge/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+pairing-token

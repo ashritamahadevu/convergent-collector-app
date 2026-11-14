@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "include": ["desktop/backend", "src/dashboard/protocol.ts"],
+  "exclude": ["node_modules", "dist"]
+}

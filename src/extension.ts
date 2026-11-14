@@ -11,6 +11,7 @@ import { deleteCodeIndex, indexFile, indexWorkspace, searchCode } from "./memory
 import { retrievability } from "./memory/scheduler";
 import { signIn, signOut } from "./memory/sync";
 import { getStats } from "./store";
+import { registerDashboardSync } from "./dashboard/service";
 import {
   getProvider,
   isEnabled,
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Comprehension Guard");
   context.subscriptions.push(output);
   setLogSink((line) => output.appendLine(line));
+  registerDashboardSync(context);
 
   // Status bar indicator (click to toggle).
   statusBarItem = vscode.window.createStatusBarItem(

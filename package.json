@@ -85,6 +85,14 @@
       {
         "command": "comprehensionGuard.buildPrepSet",
         "title": "Comprehension Guard: Build Prep Set"
+      },
+      {
+        "command": "comprehensionGuard.connectDesktop",
+        "title": "Comprehension Guard: Connect Desktop Dashboard"
+      },
+      {
+        "command": "comprehensionGuard.desktopStatus",
+        "title": "Comprehension Guard: Desktop Sync Status"
       }
     ],
     "keybindings": [
@@ -177,6 +185,12 @@
           "default": 3,
           "minimum": 1,
           "description": "Maximum number of follow-up questions before a final decision."
+        },
+        "comprehensionGuard.desktopSyncEnabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Opt in to sending new quiz questions, answers, feedback, and assessment results to the paired desktop app on this computer. Turning off pauses delivery and retains pending records. Does not change Supabase sync."
         }
       }
     }
@@ -197,7 +211,11 @@
     "test:interference": "node esbuild.js && node test/interference/runInterference.js",
     "test:e2e:walkthrough": "node esbuild.js && node test/e2e/run.js",
     "test:e2e:network": "node test/network/e2e/run.mjs",
-    "capture:claude": "npx -y tsx test/claude-live/run-scenario.ts"
+    "capture:claude": "npx -y tsx test/claude-live/run-scenario.ts",
+    "build:dashboard": "node scripts/build-dashboard.cjs",
+    "start:dashboard": "npm run build:dashboard && node dist/dashboard-backend.cjs",
+    "test:dashboard": "node scripts/test-dashboard.cjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.dashboard.json"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

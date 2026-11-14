@@ -18,12 +18,26 @@ export const QUIZ_SNIPPET_MAX = 24_000;
 
 const CLAUDE_MATCHER = "Edit|Write|NotebookEdit|MultiEdit";
 const CODEX_MATCHER = "apply_patch|Edit|Write";
+/** Gemini CLI matchers are regular expressions. Shell writes stay out. */
+const GEMINI_MATCHER = "write_file|replace";
+/** Gemini counts hook timeouts in milliseconds. Claude and Codex count seconds. */
+const GEMINI_NOTIFY_TIMEOUT_MS = 30_000;
+const GEMINI_PAUSE_TIMEOUT_MS = 600_000;
 const EDIT_TOOLS = new Set([
   "Edit",
   "Write",
   "NotebookEdit",
   "MultiEdit",
   "apply_patch",
+  "write_file",
+  "replace",
+  "Create",
+  "ApplyPatch",
+  "write",
+  "edit",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
 ]);
 
 export type AgentHunk = {
@@ -33,7 +47,7 @@ export type AgentHunk = {
 };
 
 export type AgentEdit = {
-  /** claude-code, codex, cursor, disk, or unknown. */
+  /** claude-code, codex, cursor, gemini, disk, or unknown. */
   agent: string;
   filePath: string;
   /** Generated code the student has to explain. Not the user's prompt. */
@@ -207,18 +221,27 @@ export function shouldUseDiskFallback(input: {
 }
 
 export function isOurHookCommand(command: unknown): boolean {
+  return isNotifyCommand(command) || isPauseCommand(command);
+}
+
+function isGuardScript(command: unknown, scriptName: string): boolean {
   if (typeof command !== "string") {
     return false;
   }
   const normalized = command.replace(/\\/g, "/");
-  return (
-    normalized.includes(".comprehension-guard/") &&
-    normalized.includes("notify.js")
-  );
+  return normalized.includes(".comprehension-guard/") && normalized.includes(scriptName);
 }
 
-export function hookCommand(nodePath: string, scriptPath: string): string {
-  return `${quoteArg(nodePath)} ${quoteArg(scriptPath)}`;
+function isNotifyCommand(command: unknown): boolean {
+  return isGuardScript(command, "notify.js");
+}
+
+function isPauseCommand(command: unknown): boolean {
+  return isGuardScript(command, "pause.js");
+}
+
+export function hookCommand(nodePath: string, scriptPath: string, args: string[] = []): string {
+  return [quoteArg(nodePath), quoteArg(scriptPath), ...args.map((arg) => quoteArg(arg))].join(" ");
 }
 
 /** Puts generated hunks back into a file that does not yet contain them. */
@@ -299,6 +322,40 @@ export function withBaseline(edit: AgentEdit, previous: string | undefined): Age
   };
 }
 
+function flattenToolCall(payload: Record<string, unknown>): Record<string, unknown> {
+  const call = asRecord(payload.toolCall);
+  if (!call) {
+    return payload;
+  }
+  const args = asRecord(call.args) ?? {};
+  const name = stringField(call, "name");
+  const toolInput: Record<string, unknown> = { ...args };
+  let toolName = name;
+  if (name === "write_to_file") {
+    toolName = "Write";
+    toolInput.file_path = args.TargetFile;
+    toolInput.content = args.CodeContent;
+  } else if (name === "replace_file_content") {
+    toolName = "Edit";
+    toolInput.file_path = args.TargetFile;
+    toolInput.old_string = args.TargetContent;
+    toolInput.new_string = args.ReplacementContent;
+    toolInput.allow_multiple = args.AllowMultiple === true;
+  } else if (name === "multi_replace_file_content" && Array.isArray(args.ReplacementChunks)) {
+    toolName = "MultiEdit";
+    toolInput.file_path = args.TargetFile;
+    toolInput.edits = args.ReplacementChunks.map((chunk) => {
+      const item = asRecord(chunk) ?? {};
+      return {
+        old_string: item.TargetContent,
+        new_string: item.ReplacementContent,
+        allow_multiple: item.AllowMultiple === true,
+      };
+    });
+  }
+  return { ...payload, tool_name: toolName, tool_input: toolInput };
+}
+
 export function editsFromHookEnvelope(
   body: unknown,
   opts?: {
@@ -310,9 +367,10 @@ export function editsFromHookEnvelope(
   if (!record) {
     return [];
   }
-  const payload = asRecord(record.payload) ?? record;
-  const eventName = stringField(payload, "hook_event_name") || stringField(payload, "hookEventName");
-  if (eventName === "PreToolUse") {
+  const payload = flattenToolCall(asRecord(record.payload) ?? record);
+  const eventName =
+    stringField(payload, "hook_event_name") || stringField(payload, "hookEventName") || stringField(payload, "event");
+  if (eventName === "PreToolUse" || eventName === "BeforeTool") {
     return [];
   }
   const snapshots = stringMap(record.snapshots);
@@ -404,9 +462,17 @@ export function planHookInstall(opts: {
   homeDir: string;
   nodePath: string;
   scriptSource: string;
+  /** When set, also install hook/pause.js beside the notifier. */
+  pauseSource?: string;
   claude: ConfigInput;
   codex: ConfigInput;
   cursor: ConfigInput;
+  /** Omitted configs are treated as a missing file, so the install still adds every supported agent. */
+  gemini?: ConfigInput;
+  copilot?: ConfigInput;
+  droid?: ConfigInput;
+  goose?: ConfigInput;
+  antigravity?: ConfigInput;
 }): HookInstallPlan {
   const scriptPath = path.join(guardDirectory(opts.homeDir), "notify.js");
   const command = hookCommand(opts.nodePath, scriptPath);
@@ -416,12 +482,25 @@ export function planHookInstall(opts: {
   const installed: string[] = [];
   const unchanged: string[] = [];
   const errors: string[] = [];
+  let pauseCommand: string | undefined;
+  const pauseFor = (agent: string): string | undefined => {
+    if (typeof opts.pauseSource !== "string") {
+      return undefined;
+    }
+    return hookCommand(opts.nodePath, path.join(guardDirectory(opts.homeDir), "pause.js"), [`--agent=${agent}`]);
+  };
+  const snapshotCommand = hookCommand(opts.nodePath, scriptPath, ["--snapshot"]);
+  if (typeof opts.pauseSource === "string") {
+    const pausePath = path.join(guardDirectory(opts.homeDir), "pause.js");
+    pauseCommand = hookCommand(opts.nodePath, pausePath);
+    writes.push({ path: pausePath, contents: opts.pauseSource });
+  }
 
   mergeProduct(
     "Claude Code",
     path.join(opts.homeDir, ".claude", "settings.json"),
     opts.claude,
-    (value) => mergeClaudeSettings(value, command),
+    (value) => mergeClaudeSettings(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -431,7 +510,7 @@ export function planHookInstall(opts: {
     "Codex",
     path.join(opts.homeDir, ".codex", "hooks.json"),
     opts.codex,
-    (value) => mergeCodexHooks(value, command),
+    (value) => mergeCodexHooks(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
@@ -441,12 +520,74 @@ export function planHookInstall(opts: {
     "Cursor",
     path.join(opts.homeDir, ".cursor", "hooks.json"),
     opts.cursor,
-    (value) => mergeCursorHooks(value, command),
+    (value) => mergeCursorHooks(value, command, pauseCommand),
     writes,
     installed,
     unchanged,
     errors,
   );
+  mergeProduct(
+    "Gemini CLI",
+    path.join(opts.homeDir, ".gemini", "settings.json"),
+    opts.gemini ?? { kind: "missing" },
+    (value) => mergeGeminiSettings(value, command, pauseCommand),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Copilot CLI",
+    path.join(opts.homeDir, ".copilot", "hooks", "comprehension-guard.json"),
+    opts.copilot ?? { kind: "missing" },
+    (value) => mergeCopilotHooks(value, command, pauseFor("copilot")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Droid",
+    path.join(opts.homeDir, ".factory", "hooks.json"),
+    opts.droid ?? { kind: "missing" },
+    (value) => mergeDroidHooks(value, command, pauseCommand),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Goose",
+    path.join(opts.homeDir, ".agents", "plugins", "comprehension-guard", "hooks", "hooks.json"),
+    opts.goose ?? { kind: "missing" },
+    (value) => mergeGooseHooks(value, command, pauseFor("goose")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  mergeProduct(
+    "Antigravity",
+    path.join(opts.homeDir, ".gemini", "config", "hooks.json"),
+    opts.antigravity ?? { kind: "missing" },
+    (value) => mergeAntigravityHooks(value, snapshotCommand, command, pauseFor("antigravity")),
+    writes,
+    installed,
+    unchanged,
+    errors,
+  );
+  const pluginPath = path.join(opts.homeDir, ".agents", "plugins", "comprehension-guard", "plugin.json");
+  const pluginContents =
+    JSON.stringify(
+      {
+        name: "comprehension-guard",
+        version: "1.0.0",
+        description: "Pause Goose after each code chunk until the student answers one question.",
+      },
+      null,
+      2,
+    ) + "\n";
+  writes.push({ path: pluginPath, contents: pluginContents });
 
   return { scriptPath, writes, installed, unchanged, errors };
 }
@@ -566,7 +707,15 @@ function normalizePayload(
     return editsFromHunks(agent, filePath, input.edits);
   }
 
-  if (toolName === "Write" || typeof input.content === "string" || input.contentOmitted === true) {
+  if (
+    toolName === "Write" ||
+    toolName === "Create" ||
+    toolName === "write" ||
+    toolName === "write_file" ||
+    toolName === "write_to_file" ||
+    typeof input.content === "string" ||
+    input.contentOmitted === true
+  ) {
     const filePath = resolveFilePath(filePathFrom(input, payload), cwd);
     if (!filePath) {
       return [];
@@ -584,8 +733,8 @@ function normalizePayload(
     if (!filePath) {
       return [];
     }
-    const newText = stringField(input, "new_string") || stringField(input, "new_source");
-    const oldText = stringField(input, "old_string") || stringField(input, "old_source");
+    const newText = stringField(input, "new_string") || stringField(input, "new_source") || stringField(input, "after");
+    const oldText = stringField(input, "old_string") || stringField(input, "old_source") || stringField(input, "before");
     if (!newText) {
       return [];
     }
@@ -598,7 +747,7 @@ function normalizePayload(
           {
             oldText,
             newText,
-            replaceAll: input.replace_all === true,
+            replaceAll: input.replace_all === true || input.allow_multiple === true,
           },
         ],
       },
@@ -746,6 +895,18 @@ function detectAgent(payload: Record<string, unknown>, toolName: string): string
   if (eventName === "afterFileEdit") {
     return "cursor";
   }
+  if (eventName === "BeforeTool" || eventName === "AfterTool") {
+    return "gemini";
+  }
+  if (asRecord(payload.toolCall)) {
+    return "antigravity";
+  }
+  if (stringField(payload, "event") === "PreToolUse" || stringField(payload, "event") === "PostToolUse") {
+    return "goose";
+  }
+  if (typeof payload.permission_mode === "string") {
+    return "droid";
+  }
   if (!eventName && (payload.model_id || payload.conversation_id || payload.generation_id)) {
     return "cursor";
   }
@@ -840,28 +1001,178 @@ function mergeProduct(
 function mergeClaudeSettings(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Claude settings");
   let changed = createdHooks;
   changed = upsertClaudeEvent(hooks, "PreToolUse", command, false) || changed;
   changed = upsertClaudeEvent(hooks, "PostToolUse", command, true) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, CLAUDE_MATCHER) || changed;
+  }
+  return { next: root, changed };
+}
+
+function mergeGeminiSettings(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const { root, hooks, changed: createdHooks } = hooksObject(value, "Gemini settings");
+  let changed = createdHooks;
+  changed =
+    upsertClaudeEvent(hooks, "BeforeTool", command, false, GEMINI_MATCHER, GEMINI_NOTIFY_TIMEOUT_MS) || changed;
+  changed =
+    upsertClaudeEvent(hooks, "AfterTool", command, false, GEMINI_MATCHER, GEMINI_NOTIFY_TIMEOUT_MS) || changed;
+  if (pauseCommand) {
+    changed =
+      upsertPauseHook(hooks, "BeforeTool", pauseCommand, GEMINI_MATCHER, GEMINI_PAUSE_TIMEOUT_MS) || changed;
+  }
+  changed = markSequential(hooks, "BeforeTool") || changed;
+  return { next: root, changed };
+}
+
+const COPILOT_MATCHER = "Edit|Write";
+const DROID_MATCHER = "Create|Edit|ApplyPatch";
+const GOOSE_MATCHER = "^(write|edit)$";
+const ANTIGRAVITY_MATCHER = "write_to_file|replace_file_content|multi_replace_file_content";
+
+function mergeCopilotHooks(
+  value: unknown,
+  notifyCommand: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Copilot hooks");
+  let changed = root.version !== 1;
+  root.version = 1;
+  if (!asRecord(root.hooks)) {
+    root.hooks = {};
+    changed = true;
+  }
+  const hooks = asRecord(root.hooks);
+  if (!hooks) {
+    throw new Error("Copilot hooks must be a JSON object");
+  }
+  changed = upsertFlatHook(hooks, "PreToolUse", notifyCommand, COPILOT_MATCHER, 30) || changed;
+  changed = upsertFlatHook(hooks, "PostToolUse", notifyCommand, COPILOT_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertFlatHook(hooks, "PreToolUse", pauseCommand, COPILOT_MATCHER, 600) || changed;
+  }
+  return { next: root, changed };
+}
+
+function upsertFlatHook(
+  hooks: Record<string, unknown>,
+  eventName: string,
+  command: string,
+  matcher: string,
+  timeoutSec: number,
+): boolean {
+  const list = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
+  let changed = !Array.isArray(hooks[eventName]);
+  let found = false;
+  const wantPause = isPauseCommand(command);
+  const next = list.map((entry) => {
+    const rec = asRecord(entry);
+    if (!rec) {
+      return entry;
+    }
+    const sameScript = wantPause ? isPauseCommand(rec.command) : isNotifyCommand(rec.command);
+    if (!sameScript) {
+      return entry;
+    }
+    found = true;
+    if (rec.type !== "command" || rec.command !== command || rec.matcher !== matcher || rec.timeoutSec !== timeoutSec) {
+      changed = true;
+      return { type: "command", command, matcher, timeoutSec };
+    }
+    return entry;
+  });
+  if (!found) {
+    next.push({ type: "command", command, matcher, timeoutSec });
+    changed = true;
+  }
+  hooks[eventName] = next;
+  return changed;
+}
+
+function mergeDroidHooks(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Droid hooks");
+  const wrapped = asRecord(root.hooks);
+  const hooks = wrapped ?? root;
+  let changed = !wrapped && !Array.isArray(root.PreToolUse);
+  changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, DROID_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(hooks, "PostToolUse", command, true, DROID_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, DROID_MATCHER, 600) || changed;
+  }
+  if (wrapped) {
+    root.hooks = hooks;
+    return { next: root, changed };
+  }
+  return { next: hooks, changed };
+}
+
+function mergeGooseHooks(
+  value: unknown,
+  command: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const { root, hooks, changed: createdHooks } = hooksObject(value, "Goose hooks");
+  let changed = createdHooks;
+  changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, GOOSE_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(hooks, "PostToolUse", command, false, GOOSE_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, GOOSE_MATCHER, 600) || changed;
+  }
+  return { next: root, changed };
+}
+
+function mergeAntigravityHooks(
+  value: unknown,
+  snapshotCommand: string,
+  notifyCommand: string,
+  pauseCommand?: string,
+): { next: unknown; changed: boolean } {
+  const root = cloneRecord(value, "Antigravity hooks");
+  const existing = asRecord(root["comprehension-guard"]);
+  const block: Record<string, unknown> = { ...(existing ?? {}), enabled: true };
+  let changed = !existing || existing.enabled !== true;
+  changed = upsertClaudeEvent(block, "PreToolUse", snapshotCommand, false, ANTIGRAVITY_MATCHER, 30) || changed;
+  changed = upsertClaudeEvent(block, "PostToolUse", notifyCommand, false, ANTIGRAVITY_MATCHER, 30) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(block, "PreToolUse", pauseCommand, ANTIGRAVITY_MATCHER, 600) || changed;
+  }
+  if (JSON.stringify(existing) !== JSON.stringify(block)) {
+    root["comprehension-guard"] = block;
+    changed = true;
+  }
   return { next: root, changed };
 }
 
 function mergeCodexHooks(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Codex hooks");
   let changed = createdHooks;
   changed = upsertClaudeEvent(hooks, "PreToolUse", command, false, CODEX_MATCHER) || changed;
   changed = upsertClaudeEvent(hooks, "PostToolUse", command, true, CODEX_MATCHER) || changed;
+  if (pauseCommand) {
+    changed = upsertPauseHook(hooks, "PreToolUse", pauseCommand, CODEX_MATCHER) || changed;
+  }
   return { next: root, changed };
 }
 
 function mergeCursorHooks(
   value: unknown,
   command: string,
+  pauseCommand?: string,
 ): { next: unknown; changed: boolean } {
   const { root, hooks, changed: createdHooks } = hooksObject(value, "Cursor hooks");
   let changed = createdHooks;
@@ -876,7 +1187,7 @@ function mergeCursorHooks(
   }
   const nextList = list.map((entry) => {
     const rec = asRecord(entry);
-    if (!rec || !isOurHookCommand(rec.command)) {
+    if (!rec || !isNotifyCommand(rec.command)) {
       return entry;
     }
     found = true;
@@ -891,7 +1202,34 @@ function mergeCursorHooks(
     changed = true;
   }
   hooks.afterFileEdit = nextList;
+  if (pauseCommand) {
+    changed = upsertCursorPause(hooks, pauseCommand) || changed;
+  }
   return { next: root, changed };
+}
+
+function upsertCursorPause(hooks: Record<string, unknown>, pauseCommand: string): boolean {
+  const list = Array.isArray(hooks.preToolUse) ? [...hooks.preToolUse] : [];
+  let found = false;
+  let changed = !Array.isArray(hooks.preToolUse);
+  const nextList = list.map((entry) => {
+    const rec = asRecord(entry);
+    if (!rec || !isPauseCommand(rec.command)) {
+      return entry;
+    }
+    found = true;
+    if (rec.command !== pauseCommand || rec.timeout !== 600) {
+      changed = true;
+      return { ...rec, command: pauseCommand, timeout: 600 };
+    }
+    return entry;
+  });
+  if (!found) {
+    nextList.push({ command: pauseCommand, timeout: 600 });
+    changed = true;
+  }
+  hooks.preToolUse = nextList;
+  return changed;
 }
 
 function upsertClaudeEvent(
@@ -900,6 +1238,7 @@ function upsertClaudeEvent(
   command: string,
   asyncHook: boolean,
   matcher = CLAUDE_MATCHER,
+  timeout = 10,
 ): boolean {
   const groups = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
   let found = false;
@@ -912,11 +1251,11 @@ function upsertClaudeEvent(
     let groupChanged = false;
     const nextHooks = rec.hooks.map((hook) => {
       const item = asRecord(hook);
-      if (!item || !isOurHookCommand(item.command)) {
+      if (!item || !isNotifyCommand(item.command)) {
         return hook;
       }
       found = true;
-      const refreshed = refreshHook(item, command, asyncHook);
+      const refreshed = refreshHook(item, command, asyncHook, timeout);
       if (JSON.stringify(refreshed) !== JSON.stringify(item)) {
         groupChanged = true;
       }
@@ -931,7 +1270,7 @@ function upsertClaudeEvent(
   if (!found) {
     nextGroups.push({
       matcher,
-      hooks: [refreshHook({}, command, asyncHook)],
+      hooks: [refreshHook({}, command, asyncHook, timeout)],
     });
     changed = true;
   }
@@ -943,14 +1282,99 @@ function refreshHook(
   hook: Record<string, unknown>,
   command: string,
   asyncHook: boolean,
+  timeout = 10,
 ): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...hook, type: "command", command, timeout: 10 };
+  const next: Record<string, unknown> = { ...hook, type: "command", command, timeout };
   if (asyncHook) {
     next.async = true;
   } else if ("async" in next) {
     delete next.async;
   }
   return next;
+}
+
+function upsertPauseHook(
+  hooks: Record<string, unknown>,
+  eventName: string,
+  command: string,
+  matcher: string,
+  timeout = 600,
+): boolean {
+  const groups = Array.isArray(hooks[eventName]) ? [...(hooks[eventName] as unknown[])] : [];
+  let found = false;
+  let changed = !Array.isArray(hooks[eventName]);
+  const nextGroups = groups.map((group) => {
+    const rec = asRecord(group);
+    if (!rec || !Array.isArray(rec.hooks)) {
+      return group;
+    }
+    let groupChanged = false;
+    const nextHooks = rec.hooks.map((hook) => {
+      const item = asRecord(hook);
+      if (!item || !isPauseCommand(item.command)) {
+        return hook;
+      }
+      found = true;
+      const refreshed = refreshHook(item, command, false, timeout);
+      if (JSON.stringify(refreshed) !== JSON.stringify(item)) {
+        groupChanged = true;
+      }
+      return refreshed;
+    });
+    if (!groupChanged) {
+      return group;
+    }
+    changed = true;
+    return { ...rec, hooks: nextHooks };
+  });
+  if (!found) {
+    const pauseHook = refreshHook({}, command, false, timeout);
+    const target = nextGroups.findIndex((group) => {
+      const rec = asRecord(group);
+      if (!rec || !Array.isArray(rec.hooks)) {
+        return false;
+      }
+      return rec.hooks.some((hook) => {
+        const item = asRecord(hook);
+        return !!item && isNotifyCommand(item.command);
+      });
+    });
+    if (target >= 0) {
+      const rec = asRecord(nextGroups[target]);
+      if (rec && Array.isArray(rec.hooks)) {
+        nextGroups[target] = { ...rec, matcher: rec.matcher ?? matcher, hooks: [...rec.hooks, pauseHook] };
+      }
+    } else {
+      nextGroups.push({ matcher, hooks: [pauseHook] });
+    }
+    changed = true;
+  }
+  hooks[eventName] = nextGroups;
+  return changed;
+}
+
+function markSequential(hooks: Record<string, unknown>, eventName: string): boolean {
+  const groups = hooks[eventName];
+  if (!Array.isArray(groups)) {
+    return false;
+  }
+  let changed = false;
+  hooks[eventName] = groups.map((group) => {
+    const rec = asRecord(group);
+    if (!rec || !Array.isArray(rec.hooks) || rec.sequential === true) {
+      return group;
+    }
+    const ours = rec.hooks.some((hook) => {
+      const item = asRecord(hook);
+      return !!item && (isNotifyCommand(item.command) || isPauseCommand(item.command));
+    });
+    if (!ours) {
+      return group;
+    }
+    changed = true;
+    return { ...rec, sequential: true };
+  });
+  return changed;
 }
 
 function hooksObject(
@@ -1041,7 +1465,7 @@ export function looksLikeAgentInvocation(text: string): boolean {
   if (lines.length === 0 || lines.length > 3) {
     return false;
   }
-  const invocation = /^(?:\$\s*)?(?:agent|cursor-agent|cursor|claude|codex)\b/;
+  const invocation = /^(?:\$\s*)?(?:agent|cursor-agent|cursor|claude|codex|gemini)\b/;
   return lines.every((line) => invocation.test(line));
 }
 

@@ -41,7 +41,7 @@ async function main() {
     platform: "node",
     outfile: "dist/extension.js",
     // The 'vscode' module is provided by the extension host at runtime.
-    external: ["vscode"],
+    external: ["vscode", "web-tree-sitter"],
     logLevel: "silent",
     plugins: [problemMatcherPlugin],
   });

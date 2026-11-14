@@ -219,10 +219,31 @@ export function activate(context: vscode.ExtensionContext): void {
       if (interviewDate === undefined) {
         return;
       }
+      const preferredLanguage = await vscode.window.showInputBox({
+        prompt: "Language you want to answer in, or leave blank",
+        value: current.preferredLanguage ?? "",
+        ignoreFocusOut: true,
+      });
+      if (preferredLanguage === undefined) {
+        return;
+      }
+      const strictness = await vscode.window.showQuickPick(
+        [
+          { label: "lenient", description: "Multiple choice on every chunk" },
+          { label: "standard", description: "Question type follows the preset and what you already know" },
+          { label: "strict", description: "The deepest question the preset allows" },
+        ],
+        { title: "How strict should chunk checks be?", ignoreFocusOut: true },
+      );
+      if (!strictness) {
+        return;
+      }
       await saveProfile(context, {
         ...current,
         examDate: examDate.trim(),
         interviewDate: interviewDate.trim(),
+        preferredLanguage: preferredLanguage.trim(),
+        strictness: strictness.label,
       });
       vscode.window.showInformationMessage("Comprehension Guard: profile saved.");
     }),

@@ -59,6 +59,8 @@ interface MediaUris {
   dotHalf:       string;
   dotFull2:      string;
   dotFull3:      string;
+  logo:          string;
+  goblinWalk:    string;
 }
 
 function getWebviewHtml(
@@ -357,6 +359,12 @@ function getWebviewHtml(
       image-rendering: pixelated;
       animation: answer-check 1.2s ease-in-out infinite;
     }
+    .loading-logo {
+      width: 160px;
+      image-rendering: pixelated;
+      opacity: 0.7;
+      margin-bottom: 20px;
+    }
 
     /* ── Screens: Result (shared) ─────────────────────────────────────────── */
     #screen-result-correct,
@@ -650,13 +658,188 @@ function getWebviewHtml(
         animation-iteration-count: 1 !important;
       }
     }
+
+    /* ── Difficulty screen ───────────────────────────────────────────────────── */
+    #screen-difficulty {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100%; background: #0a0c0b;
+    }
+    .difficulty-frame {
+      position: relative; width: 360px; height: 394px;
+      border: 1px solid #2a302c; border-radius: 24px; background: #0a0c0b;
+    }
+    .difficulty-slab {
+      --slab-top: 56px;
+      position: absolute; top: var(--slab-top); left: 34px;
+      width: 292px; height: 78px;
+      color: #0a0c0b; cursor: pointer; opacity: 1; transform: translateY(0);
+      animation: difficulty-slab-enter 350ms ease-out backwards;
+      animation-delay: calc(var(--slab-index) * 60ms);
+      transition: opacity 250ms ease, transform 150ms ease-out;
+      background: none; border: none; padding: 0;
+    }
+    .difficulty-slab-standard { --slab-top: 158px; }
+    .difficulty-slab-deep     { --slab-top: 260px; }
+    .difficulty-slab:not(:disabled):hover,
+    .difficulty-slab:not(:disabled):focus-visible { transform: translateY(-2px); }
+    .difficulty-slab:disabled { cursor: default; }
+    .difficulty-slab-selected { transform: translateY(-4px) !important; }
+    .difficulty-frame:has(.difficulty-slab-selected) .difficulty-slab:not(.difficulty-slab-selected) { opacity: 0.32; }
+    .difficulty-card { display: block; width: 100%; height: 100%; overflow: visible; }
+    .difficulty-slab-selected .difficulty-level-bars { animation: difficulty-pips-fill 200ms ease-out both; }
+    @keyframes difficulty-slab-enter {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes difficulty-pips-fill {
+      from { clip-path: inset(0 100% 0 0); }
+      to   { clip-path: inset(0); }
+    }
+
+    /* ── Flow loading ────────────────────────────────────────────────────────── */
+    .flow-loading {
+      display: grid; min-height: 100%; place-items: center; background: #0a0c0b;
+      animation: flow-loading-cycle-2500 var(--loading-duration) linear both;
+    }
+    @keyframes flow-loading-cycle-2500 {
+      0%  { opacity: 0; } 8%  { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; }
+    }
+
+    /* ── Intro logo ──────────────────────────────────────────────────────────── */
+    .intro-logo-img {
+      width: clamp(300px, 45cqw, 420px); height: auto;
+      image-rendering: pixelated;
+      animation: screen-enter 450ms ease both;
+    }
+
+    /* ── Goblin arrival ──────────────────────────────────────────────────────── */
+    .goblin-arrival-img {
+      width: 100px; height: 100px;
+      object-fit: contain; image-rendering: pixelated;
+      animation: troll-arrive 700ms cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    /* ── Chat ────────────────────────────────────────────────────────────────── */
+    .chat-stack {
+      display: flex; flex-direction: column; align-items: center;
+      transform: translateY(60px); transition: transform 280ms ease-out;
+    }
+    .chat-troll-img {
+      width: 100px; height: 100px; object-fit: contain; image-rendering: pixelated;
+      transition: transform 420ms cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .chat-bubble {
+      width: 200px; min-height: 75px; margin-top: -1px;
+      display: grid; place-items: center;
+      border-radius: 30px; background: #74ab7b; padding: 10px 20px;
+      color: #2b2b2b; font-size: 13px; font-weight: 400;
+      line-height: 1.5; letter-spacing: 0.02em; text-align: center;
+      transform-origin: 50% 0;
+      animation: chat-bubble-pop 420ms cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .continue-button {
+      display: grid; width: 72px; height: 58px;
+      place-items: start center; padding-top: 16px;
+      cursor: pointer; background: none; border: none;
+      transition: transform 180ms ease;
+    }
+    .continue-button:hover { transform: translateY(4px); }
+    @keyframes screen-enter {
+      from { opacity: 0; transform: scale(0.985); filter: blur(4px); }
+      to   { opacity: 1; transform: scale(1); filter: blur(0); }
+    }
+    @keyframes troll-arrive {
+      0%   { opacity: 0; transform: translateY(8px) scale(0.15); }
+      68%  { opacity: 1; transform: translateY(-5px) scale(1.08); }
+      84%  { transform: translateY(2px) scale(0.97); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes chat-bubble-pop {
+      from { opacity: 0; transform: translateY(-10px) scale(0.35, 0.15); }
+      65%  { opacity: 1; transform: translateY(2px) scale(1.06, 1.08); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
   </style>
 </head>
 <body>
 <div class="app-shell">
 
+  <!-- Screen 0a: Difficulty selector -->
+  <div id="screen-difficulty">
+    <div class="difficulty-frame">
+      <button type="button" class="difficulty-slab difficulty-slab-quick" style="--slab-index:0">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-quick" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BDDBC1"/><stop offset="1" stop-color="#74AB7B"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-quick)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="131" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/><rect x="169" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#BDDBC1"/>
+          <text x="75.9" y="19" fill="#0A0C0B" font-family="Inter,sans-serif" font-size="16" font-weight="700">Quick</text>
+          <text x="127.4" y="19" fill="#1B3A2A" font-family="Inter,sans-serif" font-size="16" font-weight="400">30 seconds</text>
+        </svg>
+      </button>
+      <button type="button" class="difficulty-slab difficulty-slab-standard" style="--slab-index:1">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-standard" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74AB7B"/><stop offset="1" stop-color="#3A914D"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-standard)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="131" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="169" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#74AB7B"/>
+          <text x="70.4" y="19" fill="#0A0C0B" font-family="Inter,sans-serif" font-size="16" font-weight="700">Standard</text>
+          <text x="147.7" y="19" fill="#0F2A19" font-family="Inter,sans-serif" font-size="16" font-weight="400">2 minutes</text>
+        </svg>
+      </button>
+      <button type="button" class="difficulty-slab difficulty-slab-deep" style="--slab-index:2">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-deep" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#175E2D"/><stop offset="1" stop-color="#014720"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-deep)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#BDDBC1"/><rect x="131" y="45" width="30" height="6" fill="#BDDBC1"/><rect x="169" y="45" width="30" height="6" fill="#BDDBC1"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#175E2D"/>
+          <text x="82.2" y="19" fill="#F2F8F3" font-family="Inter,sans-serif" font-size="16" font-weight="700">Deep</text>
+          <text x="129" y="19" fill="#D6E6DA" font-family="Inter,sans-serif" font-size="16" font-weight="400">10 minutes</text>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Screen 0b: Flow loading (GIF) -->
+  <div class="screen hidden flow-loading flow-loading-2500" id="screen-flow-loading" style="--loading-duration:2500ms" role="status" aria-label="Loading">
+    <img src="${uris.goblinWalk}" width="612" height="384" alt="" aria-hidden="true" style="width:340px;height:auto;image-rendering:pixelated;">
+  </div>
+
+  <!-- Screen 0c: Intro (logo only) -->
+  <div class="screen hidden" id="screen-intro" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <img src="${uris.logo}" class="intro-logo-img" alt="DrawBridge">
+  </div>
+
+  <!-- Screen 0d: Goblin arrival -->
+  <div class="screen hidden" id="screen-goblin" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <img src="${uris.goblinIdle}" class="goblin-arrival-img" alt="" aria-hidden="true">
+  </div>
+
+  <!-- Screen 0e: Chat -->
+  <div class="screen hidden" id="screen-chat" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <div class="chat-stack">
+      <img src="${uris.goblinIdle}" class="chat-troll-img" alt="" aria-hidden="true">
+      <div class="chat-bubble chat-bubble-pop" id="chat-bubble-text" aria-live="polite"></div>
+      <button type="button" class="continue-button" id="chat-continue-btn" aria-label="Continue">
+        <img src="${uris.arrowDown}" width="55" height="27" alt="" aria-hidden="true">
+      </button>
+    </div>
+  </div>
+
   <!-- ── Screen 1: Question ────────────────────────────────────────────── -->
-  <div class="screen" id="screen-question">
+  <div class="screen hidden" id="screen-question">
 
     <header class="q-meta">
       <span class="q-label" id="q-label">Question 1</span>
@@ -684,6 +867,7 @@ function getWebviewHtml(
 
   <!-- ── Screen 2: Loading ──────────────────────────────────────────────── -->
   <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
+    <img src="${uris.logo}" class="loading-logo" alt="DrawBridge" aria-hidden="true">
     <img src="${uris.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
   </div>
 
@@ -1048,9 +1232,70 @@ function getWebviewHtml(
     vscode.postMessage({ type: "next_question" });
   });
 
-  /* ── Startup ──────────────────────────────────────────────────────────── */
+  /* ── Startup: show intro screens then signal ready ───────────────────── */
   renderDots(1);
-  vscode.postMessage({ type: "ready" });
+
+  var CHAT_MESSAGES = [
+    "Hey! I'm Drawgoblin",
+    "I'll guide you through your first test in DrawBridge",
+    "When you copy and paste code, I'll quiz you to let you pass!",
+    "Get it..drawbridge..",
+    "Well anyways, please answer these 5 questions, and i'll let you pass!"
+  ];
+
+  // Show difficulty screen first; delay "ready" until chat is done
+  var introScreenIds = ["screen-difficulty", "screen-flow-loading", "screen-intro", "screen-goblin", "screen-chat"];
+  var SCREEN_IDS_ALL = introScreenIds.concat(SCREEN_IDS); // SCREEN_IDS is existing array
+
+  function showScreenById(id) {
+    var allIds = SCREEN_IDS_ALL;
+    for (var i = 0; i < allIds.length; i++) {
+      var el = document.getElementById(allIds[i]);
+      if (!el) continue;
+      if (allIds[i] === id) el.classList.remove("hidden");
+      else el.classList.add("hidden");
+    }
+  }
+
+  // Difficulty selection
+  var diffBtns = document.querySelectorAll(".difficulty-slab");
+  for (var i = 0; i < diffBtns.length; i++) {
+    diffBtns[i].addEventListener("click", function(e) {
+      var btn = e.currentTarget;
+      btn.closest(".difficulty-frame").querySelectorAll(".difficulty-slab").forEach(function(b) {
+        b.classList.remove("difficulty-slab-selected");
+      });
+      btn.classList.add("difficulty-slab-selected");
+      for (var j = 0; j < diffBtns.length; j++) diffBtns[j].disabled = true;
+      setTimeout(function() { showScreenById("screen-flow-loading"); }, 700);
+      setTimeout(function() { showScreenById("screen-intro"); }, 700 + 2500);
+      setTimeout(function() { showScreenById("screen-goblin"); }, 700 + 2500 + 1500);
+      setTimeout(function() { showScreenById("screen-chat"); }, 700 + 2500 + 1500 + 900);
+    });
+  }
+
+  // Chat cycling
+  var chatMsgIndex = 0;
+  var chatBubbleEl = document.getElementById("chat-bubble-text");
+  var continueBtnEl = document.getElementById("chat-continue-btn");
+  function updateChatBubble() {
+    if (chatBubbleEl) chatBubbleEl.textContent = CHAT_MESSAGES[chatMsgIndex];
+  }
+  if (continueBtnEl) {
+    continueBtnEl.addEventListener("click", function() {
+      chatMsgIndex++;
+      if (chatMsgIndex >= CHAT_MESSAGES.length) {
+        showScreenById("screen-question");
+        vscode.postMessage({ type: "ready" });
+      } else {
+        updateChatBubble();
+      }
+    });
+  }
+  updateChatBubble();
+
+  // Start on difficulty screen
+  showScreenById("screen-difficulty");
 
   /* ── Host message handler ─────────────────────────────────────────────── */
   window.addEventListener("message", function (event) {
@@ -1103,6 +1348,8 @@ export function createQuizPanel(
     dotHalf:       makeUri("a822a.svg"),
     dotFull2:      makeUri("9e436.svg"),
     dotFull3:      makeUri("a365e.svg"),
+    logo:          makeUri("drawbridge-logo.png"),
+    goblinWalk:    makeUri("goblin_walk_circle.gif"),
   };
 
   let disposed = false;

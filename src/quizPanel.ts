@@ -8,7 +8,8 @@ export type QuizAction =
   | { type: "bypass" }
   | { type: "explain" }
   | { type: "dispute"; answer?: string }
-  | { type: "cancel" };
+  | { type: "cancel" }
+  | { type: "next_question" };
 
 export type QuizView = {
   showQuestion(question: GeneratedQuestion): void;
@@ -18,6 +19,10 @@ export type QuizView = {
     correctOption?: string;
     allowDispute?: boolean;
     explained?: boolean;
+    /** true = correct answer, false = wrong answer. Drives goblin state image. */
+    passed?: boolean;
+    /** Whether to show the "Next Question" button. Defaults to true. */
+    allowNextQuestion?: boolean;
   }): void;
   waitForSubmit(): Promise<QuizAction>;
   close(): void;
@@ -42,21 +47,35 @@ function getNonce(): string {
   return nonce;
 }
 
+interface MediaUris {
+  goblinSleep:   string;
+  goblinIdle:    string;
+  goblinCorrect: string;
+  goblinWrong:   string;
+  arrowDown:     string;
+  arrowDownRed:  string;
+  arrowUp:       string;
+  dotFull:       string;
+  dotHalf:       string;
+  dotFull2:      string;
+  dotFull3:      string;
+  logo:          string;
+  goblinWalk:    string;
+}
+
 function getWebviewHtml(
   webview: vscode.Webview,
-  snippet: string,
-  language: string,
+  _snippet: string,
+  _language: string,
   nonce: string,
+  uris: MediaUris,
 ): string {
   const csp = [
     "default-src 'none'",
+    `img-src ${webview.cspSource}`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `script-src 'nonce-${nonce}'`,
   ].join("; ");
-
-  const langLabel = language.trim()
-    ? `<span class="lang">${escapeHtml(language)}</span>`
-    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -66,466 +85,1272 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Comprehension check</title>
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-    }
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      padding: 16px 20px 12px;
-      line-height: 1.5;
-      box-sizing: border-box;
+      color: #74ab7b;
+      background: #0a0a0a;
+    }
+
+    /* ── App shell ────────────────────────────────────────────────────────── */
+    .app-shell {
+      height: 100%;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(116,171,123,0.3) transparent;
+      background: radial-gradient(
+        ellipse 110% 115% at 50% 215%,
+        #74ab7b 0%, #90a793 25%, #7a8d7c 37.5%,
+        #647366 50%, #4d584f 62.5%, #373e38 75%,
+        #202421 87.5%, #151715 93.75%, #0a0a0a 100%
+      );
+      background-color: #0a0a0a;
+    }
+
+    /* ── Screens ──────────────────────────────────────────────────────────── */
+    .screen {
       display: flex;
       flex-direction: column;
-      overflow: hidden;
+      align-items: center;
+      min-height: 100%;
+      padding: 20px 24px 28px;
     }
-    .scroll {
-      flex: 1;
-      min-height: 0;
-      overflow: auto;
-    }
-    h1 {
-      font-size: 1.15em;
-      font-weight: 600;
-      margin: 0 0 8px;
-    }
-    .lock-note {
-      margin: 0 0 12px;
-      color: var(--vscode-descriptionForeground);
-      font-size: 0.9em;
-    }
-    .snippet-wrap {
-      border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-      border-radius: 4px;
-      margin-bottom: 16px;
-      overflow: auto;
-      max-height: 280px;
-    }
-    .snippet-head {
+    .screen.hidden { display: none !important; }
+
+    /* ── Screen: Question ─────────────────────────────────────────────────── */
+    #screen-question { align-items: stretch; }
+
+    .q-meta {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      padding: 6px 10px;
-      font-size: 0.85em;
-      color: var(--vscode-descriptionForeground);
-      background: var(--vscode-editor-inactiveSelectionBackground);
-      border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-    }
-    pre {
-      margin: 0;
-      padding: 12px;
-      overflow-x: auto;
-      font-family: var(--vscode-editor-font-family);
-      font-size: var(--vscode-editor-font-size);
-    }
-    pre, code { white-space: pre; word-break: normal; }
-    .question {
-      margin: 0 0 12px;
-      font-weight: 500;
-    }
-    .bubble {
-      background: var(--vscode-editor-inactiveSelectionBackground);
-      border-radius: 14px 14px 14px 4px;
-      padding: 10px 12px;
-    }
-    .answer-area { margin-bottom: 12px; }
-    .choice {
-      display: block;
-      width: 100%;
-      text-align: left;
-      margin: 8px 0;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      font: inherit;
-      cursor: pointer;
-    }
-    .choice.selected {
-      border-color: var(--vscode-focusBorder);
-      background: var(--vscode-list-activeSelectionBackground);
-      color: var(--vscode-list-activeSelectionForeground);
-    }
-    .choice.pressed, button.pressed {
-      transform: scale(0.97);
-      opacity: 0.72;
-    }
-    .loading-bubble {
-      display: none;
       align-items: center;
-      gap: 5px;
-      width: fit-content;
-      margin-top: 8px;
+      margin-bottom: 12px;
+      animation: q2-meta-enter 320ms ease-out both;
     }
-    .loading-bubble.visible { display: flex; }
-    .loading-bubble span {
-      width: 7px;
-      height: 7px;
+    .q-label {
+      font-weight: 600;
+      font-size: 1em;
+      letter-spacing: 0.02em;
+      color: #74ab7b;
+    }
+    .progress-dots { display: flex; gap: 7px; align-items: center; }
+    .dot {
+      width: 11px; height: 11px;
+      border-radius: 50%; flex-shrink: 0;
+      transition: background-color 300ms ease, opacity 300ms ease;
+    }
+    .dot-done     { background: #74ab7b; opacity: 0.72; }
+    .dot-active   { background: #74ab7b; opacity: 1; animation: q2-dot-pop 320ms cubic-bezier(0.34,1.56,0.64,1) both; }
+    .dot-inactive { background: rgba(116,171,123,0.22); opacity: 1; }
+
+    /* Goblin / explain button */
+    .goblin-area {
+      display: flex;
+      justify-content: center;
+      margin: 8px 0 4px;
+      padding-bottom: 44px;
+    }
+    .goblin-btn {
+      position: relative;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      border: none;
       border-radius: 50%;
-      background: var(--vscode-descriptionForeground);
-      animation: chat-dot 1s infinite ease-in-out;
+      padding: 4px;
+      cursor: pointer;
+      transition: transform 220ms cubic-bezier(0.34,1.56,0.64,1), filter 220ms ease;
+      -webkit-tap-highlight-color: transparent;
     }
-    .loading-bubble span:nth-child(2) { animation-delay: 0.15s; }
-    .loading-bubble span:nth-child(3) { animation-delay: 0.3s; }
-    @keyframes chat-dot {
-      0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
-      40% { transform: translateY(-4px); opacity: 1; }
+    .goblin-btn-img {
+      display: block;
+      width: 90px; height: 90px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      transition: opacity 160ms ease;
+      animation: troll-arrive 560ms cubic-bezier(0.22,1,0.36,1) both;
     }
+    .goblin-btn:not([disabled]):hover {
+      transform: translateY(-3px) scale(1.08);
+      filter: drop-shadow(0 0 14px rgba(116,171,123,0.38));
+    }
+    .goblin-btn:not([disabled]):active { transform: translateY(1px) scale(0.96); }
+    .goblin-btn:focus-visible { outline: 3px solid #74ab7b; outline-offset: 8px; }
+    .goblin-btn[disabled] { cursor: default; }
+    .goblin-tooltip {
+      position: absolute;
+      top: calc(100% + 14px);
+      left: 50%;
+      width: max-content;
+      max-width: 190px;
+      border-radius: 30px;
+      background: #74ab7b;
+      padding: 7px 14px;
+      color: #2b2b2b;
+      font-size: 0.82em;
+      letter-spacing: 0.03em;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -6px) scale(0.92);
+      transition: opacity 180ms ease, transform 220ms cubic-bezier(0.34,1.56,0.64,1);
+      white-space: nowrap;
+    }
+    .goblin-btn:not([disabled]):hover .goblin-tooltip,
+    .goblin-btn:not([disabled]):focus-visible .goblin-tooltip {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+    .goblin-btn.goblin-clicked {
+      animation: goblin-click-wobble 520ms cubic-bezier(0.34,1.56,0.64,1) both;
+      pointer-events: none;
+    }
+
+    /* Question card */
+    .question-card {
+      background: #0a0a0a;
+      border-radius: 24px;
+      padding: 16px 0 4px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      animation: q2-card-enter 380ms ease-out both;
+    }
+    .question-text {
+      margin: 0 0 16px;
+      font-weight: 600;
+      font-size: 1em;
+      letter-spacing: 0.02em;
+      color: #74ab7b;
+      line-height: 1.5;
+    }
+    .answer-area { margin-bottom: 14px; }
+
+    /* Textarea */
     textarea {
       width: 100%;
-      min-height: 100px;
-      box-sizing: border-box;
-      padding: 8px 10px;
+      min-height: 110px;
+      padding: 14px 16px;
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
-      color: var(--vscode-input-foreground);
-      background: var(--vscode-input-background);
-      border: 1px solid var(--vscode-input-border, var(--vscode-widget-border));
-      border-radius: 4px;
+      color: #74ab7b;
+      background: rgba(43,43,43,0.50);
+      border: 3px solid #74ab7b;
+      border-radius: 30px;
       resize: vertical;
+      transition: border-color 180ms ease, box-shadow 180ms ease;
+      outline: none;
     }
+    textarea:focus {
+      border-color: #c8e4cc;
+      box-shadow: 0 0 0 3px rgba(116,171,123,0.15);
+    }
+    textarea::placeholder { color: rgba(116,171,123,0.25); opacity: 1; }
+
+    /* MCQ */
+    .mcq-fieldset { margin: 0; padding: 0; border: 0; color: #74ab7b; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); letter-spacing: 0.02em; }
+    .mcq-legend { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+    .mcq-options { display: grid; gap: 26px; margin-top: 24px; }
     .mcq-option {
-      display: block;
-      margin: 8px 0;
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 18px;
+      padding: 10px 14px;
+      border: 1.5px solid rgba(116,171,123,0.28);
+      border-radius: 12px;
       cursor: pointer;
+      color: #74ab7b;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      line-height: 1.5;
+      user-select: none;
+      transition: border-color 140ms ease, background-color 140ms ease;
+      animation: q2-option-enter 360ms ease-out both;
     }
-    .mcq-option input { margin-right: 8px; vertical-align: middle; }
-    .feedback {
-      display: none;
-      margin: 12px 0;
-      padding: 10px 12px;
-      border-radius: 4px;
-      border-left: 3px solid var(--vscode-inputValidation-warningBorder);
-      background: var(--vscode-inputValidation-warningBackground);
-      color: var(--vscode-inputValidation-warningForeground);
+    .mcq-option:hover { border-color: rgba(116,171,123,0.62); background: rgba(116,171,123,0.05); }
+    .mcq-option:nth-child(1) { animation-delay:   0ms; }
+    .mcq-option:nth-child(2) { animation-delay:  55ms; }
+    .mcq-option:nth-child(3) { animation-delay: 110ms; }
+    .mcq-option:nth-child(4) { animation-delay: 165ms; }
+    .mcq-option:nth-child(5) { animation-delay: 220ms; }
+    .mcq-option input[type="radio"] { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+    .mcq-radio {
+      flex: 0 0 40px;
+      width: 40px; height: 40px;
+      border: 3px solid #74ab7b;
+      border-radius: 50%;
+      background: rgba(43,43,43,0.50);
+      transition: background-color 160ms ease, transform 160ms ease;
     }
-    .feedback.visible { display: block; }
-    .feedback-msg { margin: 0 0 8px; }
-    .missed-list {
-      margin: 8px 0 0;
-      padding-left: 18px;
+    .mcq-option:hover .mcq-radio { transform: scale(1.04); }
+    .mcq-option input:checked + .mcq-radio {
+      background: #74ab7b;
+      animation: q2-radio-select 260ms cubic-bezier(0.34,1.56,0.64,1);
     }
-    .missed-list li { margin-bottom: 6px; }
-    .evidence {
+    .mcq-option:has(input:checked) { border-color: #74ab7b; background: rgba(116,171,123,0.10); }
+    .mcq-option input:focus-visible + .mcq-radio { outline: 3px solid #c8e4cc; outline-offset: 4px; }
+    .mcq-option input:disabled ~ * { cursor: default; }
+
+    /* Ordering */
+    .ordering-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 14px; margin: 5px 0;
+      background: rgba(43,43,43,0.50);
+      border: 1px solid rgba(116,171,123,0.28);
+      border-radius: 8px;
+      color: #74ab7b;
+    }
+    .ordering-row button {
+      padding: 3px 9px; font-size: 0.8em;
+      color: #74ab7b; background: rgba(116,171,123,0.16);
+      border: 1px solid rgba(116,171,123,0.3); border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 150ms ease, transform 120ms ease;
+    }
+    .ordering-row button:hover  { background: rgba(116,171,123,0.3); }
+    .ordering-row button:active { transform: scale(0.94); }
+
+    /* Submit pill */
+    .submit-pill {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      width: 180px; margin: 16px auto 0; padding: 11px 0;
+      font-family: var(--vscode-font-family);
+      font-size: 1em; font-weight: 600; letter-spacing: 0.04em;
+      color: #74ab7b;
+      background: rgba(43,43,43,0.50);
+      border: 3px solid #74ab7b;
+      border-radius: 100px;
+      cursor: pointer;
+      transition: background-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+      -webkit-tap-highlight-color: transparent;
+      animation: q2-submit-ready 400ms 320ms ease-out both;
+    }
+    .submit-pill:hover:not(:disabled) { background: #74ab7b; color: #2b2b2b; }
+    .submit-pill:active:not(:disabled) {
+      transform: scale(0.98);
+      border-color: #2b2b2b;
+      background: #74ab7b;
+      box-shadow: inset 0 0 0 17px rgba(43,43,43,0.50);
+      color: rgba(43,43,43,0.50);
+    }
+
+    /* Inline validation message */
+    .validation-msg {
+      text-align: center;
+      font-size: 0.88em;
+      color: rgba(116,171,123,0.65);
+      margin-top: 8px;
+      min-height: 1.2em;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Screen: Loading ──────────────────────────────────────────────────── */
+    #screen-loading {
+      justify-content: center;
+      align-items: center;
+    }
+    .loading-goblin-img {
+      width: 90px; height: 90px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      animation: answer-check 1.2s ease-in-out infinite;
+    }
+    .loading-logo {
+      width: 160px;
+      image-rendering: pixelated;
+      opacity: 0.7;
+      margin-bottom: 20px;
+    }
+
+    /* ── Screens: Result (shared) ─────────────────────────────────────────── */
+    #screen-result-correct,
+    #screen-result-incorrect {
+      justify-content: center;
+      align-items: center;
+    }
+
+    .result-goblin-img {
+      width: 100px; height: 100px;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+    .correct-reveal  { animation: correct-troll-reveal 500ms cubic-bezier(0.22,1,0.36,1) both; }
+    .wrong-reveal    { animation: incorrect-troll-reveal 480ms cubic-bezier(0.22,1,0.36,1) both; }
+
+    /* Speech bubbles */
+    .speech-bubble {
+      border-radius: 20px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      width: 100%;
+      max-width: 340px;
+      line-height: 1.5;
+      font-size: 0.93em;
+    }
+    .bubble-correct {
+      background: rgba(116,171,123,0.12);
+      border: 1.5px solid rgba(116,171,123,0.45);
+      color: #74ab7b;
+      animation: correct-pulse 380ms 160ms ease-out both;
+    }
+    .bubble-incorrect {
+      background: rgba(151,98,99,0.12);
+      border: 1.5px solid rgba(151,98,99,0.45);
+      color: rgba(255,200,200,0.9);
+      animation: incorrect-message-impact 360ms 180ms ease-out both;
+    }
+    .bubble-missed {
+      margin-top: 8px;
+      padding-left: 16px;
+      color: rgba(255,200,200,0.7);
+    }
+    .bubble-missed li { margin-bottom: 4px; }
+    .bubble-evidence {
       display: block;
-      margin-top: 4px;
-      font-size: 0.9em;
-      color: var(--vscode-descriptionForeground);
+      margin-top: 2px;
+      font-size: 0.88em;
+      color: rgba(151,98,99,0.65);
       font-style: italic;
     }
-    .correct-option {
+    .bubble-correct-option {
       margin-top: 8px;
-      font-weight: 500;
+      font-weight: 600;
+      color: rgba(255,200,200,0.9);
     }
-    button.submit {
-      padding: 6px 16px;
-      font-size: var(--vscode-font-size);
-      color: var(--vscode-button-foreground);
-      background: var(--vscode-button-background);
-      border: none;
-      border-radius: 2px;
+
+    /* Bypass button (above goblin on incorrect screen) */
+    .bypass-btn {
+      display: flex; align-items: center; gap: 8px;
+      background: transparent;
+      border: 1.5px solid rgba(116,171,123,0.35);
+      border-radius: 100px;
+      padding: 8px 18px;
+      color: #74ab7b;
+      font-family: var(--vscode-font-family);
+      font-size: 0.9em;
       cursor: pointer;
+      margin-bottom: 20px;
+      transition: background-color 180ms ease, border-color 180ms ease;
+      -webkit-tap-highlight-color: transparent;
     }
-    button.submit:hover {
-      background: var(--vscode-button-hoverBackground);
+    .bypass-btn:hover  { background: rgba(116,171,123,0.1); border-color: #74ab7b; }
+    .bypass-btn:active { transform: scale(0.96); }
+    .bypass-icon { width: 18px; height: 18px; }
+
+    /* Chevron try-again button */
+    .chevron-btn {
+      display: flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 1.5px solid rgba(151,98,99,0.4);
+      border-radius: 50%;
+      width: 48px; height: 48px;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: background-color 180ms ease, border-color 180ms ease, transform 220ms ease;
+      -webkit-tap-highlight-color: transparent;
+      animation: result-arrow-reveal 320ms 300ms ease-out both;
     }
-    .actions {
+    .chevron-btn:hover  { background: rgba(151,98,99,0.1); border-color: #976263; transform: scale(1.08); }
+    .chevron-btn:active { transform: scale(0.96); }
+    .chevron-btn img { width: 24px; height: 24px; }
+
+    /* Next question button on incorrect result */
+    .result-next-q-btn {
+      display: inline-flex; align-items: center;
+      padding: 9px 20px; margin-top: 12px;
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+      font-weight: 600; color: #2b2b2b;
+      background: #74ab7b;
+      border: none; border-radius: 100px;
+      cursor: pointer;
+      transition: background-color 180ms ease, transform 180ms ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .result-next-q-btn:hover  { background: #c8e4cc; }
+    .result-next-q-btn:active { transform: scale(0.96); }
+
+    /* Dispute button */
+    .dispute-btn-result {
+      display: inline-flex; align-items: center;
+      padding: 7px 16px; margin-top: 10px;
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+      font-weight: 500; color: #74ab7b;
+      background: rgba(43,43,43,0.50);
+      border: 2px solid rgba(116,171,123,0.45); border-radius: 100px;
+      cursor: pointer;
+      transition: background-color 180ms ease, border-color 180ms ease, transform 220ms cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .dispute-btn-result:hover  { background: rgba(116,171,123,0.16); border-color: #74ab7b; }
+    .dispute-btn-result:active { transform: scale(0.95); }
+
+    /* ── Screen: Explanation ──────────────────────────────────────────────── */
+    #screen-explanation { align-items: stretch; }
+
+    .explanation-goblin-area {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      flex-shrink: 0;
-      padding-top: 12px;
-      background: var(--vscode-editor-background);
+      justify-content: center;
+      margin: 8px 0 16px;
     }
-    button.bypass, button.dispute {
-      padding: 6px 16px;
-      font-size: var(--vscode-font-size);
-      color: var(--vscode-button-secondaryForeground);
-      background: var(--vscode-button-secondaryBackground);
-      border: none;
-      border-radius: 2px;
+    .explanation-goblin-img {
+      width: 90px; height: 90px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      animation: explanation-troll-wobble 3.6s 600ms ease-in-out infinite;
+    }
+    .exp-heading {
+      margin: 0 0 14px;
+      font-size: 1em; font-weight: 600; letter-spacing: 0.02em;
+      color: #74ab7b; line-height: 1.5; text-align: center;
+      animation: q3-copy-enter 380ms 180ms ease-out both;
+    }
+    .exp-text-box {
+      border: 1px solid rgba(116,171,123,0.24);
+      border-radius: 24px;
+      background: rgba(43,43,43,0.32);
+      padding: 12px 16px;
+      color: #74ab7b;
+      font-size: 0.93em; font-weight: 400; line-height: 1.55; letter-spacing: 0.02em;
+      margin-bottom: 12px;
+      animation: q3-copy-enter 420ms 260ms ease-out both;
+    }
+    .exp-answer-label {
+      margin: 8px 0 6px;
+      font-size: 0.9em; font-weight: 600; letter-spacing: 0.02em;
+      color: #74ab7b;
+      animation: q3-copy-enter 360ms 320ms ease-out both;
+    }
+    .exp-answer-block {
+      border-radius: 24px;
+      background: rgba(43,43,43,0.22);
+      padding: 12px 16px;
+      color: #74ab7b;
+      font-size: 0.93em; font-weight: 500; line-height: 1.5; letter-spacing: 0.02em;
+      margin-bottom: 14px;
+      animation: q3-answer-reveal 420ms 360ms cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .exp-next-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 180px; margin: 16px auto 0; padding: 11px 0;
+      font-family: var(--vscode-font-family);
+      font-size: 1em; font-weight: 600; letter-spacing: 0.04em;
+      color: #74ab7b;
+      background: rgba(43,43,43,0.50);
+      border: 3px solid #74ab7b;
+      border-radius: 100px;
       cursor: pointer;
+      transition: background-color 180ms ease, color 180ms ease;
+      -webkit-tap-highlight-color: transparent;
+      animation: explanation-button-label 400ms 460ms ease-out both;
     }
-    button.bypass:hover, button.dispute:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    button.dispute { margin-top: 8px; }
+    .exp-next-btn:hover  { background: #74ab7b; color: #2b2b2b; }
+    .exp-next-btn:active { transform: scale(0.98); }
+
     .hidden { display: none !important; }
+
+    /* ── Keyframes ─────────────────────────────────────────────────────────── */
+    @keyframes troll-arrive {
+      from { opacity: 0; transform: translateY(16px) scale(0.6); }
+      to   { opacity: 1; transform: translateY(0)    scale(1);   }
+    }
+    @keyframes answer-check {
+      0%, 100% { transform: translateY(0)     scale(1);    opacity: 0.85; }
+      50%       { transform: translateY(-14px) scale(1.04); opacity: 1;    }
+    }
+    @keyframes correct-troll-reveal {
+      0%   { opacity: 0; transform: scale(0.5) translateY(20px); }
+      60%  { opacity: 1; transform: scale(1.08) translateY(-4px); }
+      100% { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes incorrect-troll-reveal {
+      0%   { opacity: 0; transform: scale(0.7) rotate(-8deg); }
+      40%  { opacity: 1; transform: scale(1.05) rotate(4deg); }
+      70%  { transform: scale(0.97) rotate(-2deg); }
+      100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    }
+    @keyframes incorrect-message-impact {
+      0%   { opacity: 0; transform: translateX(-20px) scale(0.95); }
+      60%  { transform: translateX(4px) scale(1.02); }
+      100% { opacity: 1; transform: translateX(0) scale(1); }
+    }
+    @keyframes correct-pulse {
+      0%   { opacity: 0; transform: scale(0.9); }
+      60%  { transform: scale(1.03); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    @keyframes state-enter {
+      from { opacity: 0; transform: translateY(12px); filter: blur(3px); }
+      to   { opacity: 1; transform: translateY(0);    filter: blur(0);   }
+    }
+    @keyframes q2-meta-enter {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+    @keyframes q2-dot-pop {
+      0%   { transform: scale(0.3); opacity: 0.3; }
+      65%  { transform: scale(1.3); }
+      100% { transform: scale(1);   opacity: 1;   }
+    }
+    @keyframes q2-card-enter {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+    @keyframes q2-option-enter {
+      from { opacity: 0; transform: translateX(-12px); }
+      to   { opacity: 1; transform: translateX(0);     }
+    }
+    @keyframes q2-radio-select {
+      0%   { transform: scale(1);    }
+      55%  { transform: scale(1.13); }
+      100% { transform: scale(1);    }
+    }
+    @keyframes q2-submit-ready {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+    @keyframes q2-submit-complete {
+      0%   { background: rgba(43,43,43,0.50); }
+      50%  { background: rgba(116,171,123,0.3); }
+      100% { background: rgba(43,43,43,0.50); }
+    }
+    @keyframes question-two-enter {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0);    }
+    }
+    @keyframes q3-copy-enter {
+      from { opacity: 0; transform: translateY(12px); filter: blur(2px); }
+      to   { opacity: 1; transform: translateY(0);    filter: blur(0);   }
+    }
+    @keyframes q3-answer-reveal {
+      from { opacity: 0; transform: translateX(-16px) scale(0.97); }
+      to   { opacity: 1; transform: translateX(0)     scale(1);    }
+    }
+    @keyframes result-arrow-reveal {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+    @keyframes explanation-troll-wobble {
+      0%, 100% { transform: rotate(0deg) translateY(0); }
+      20%      { transform: rotate(-3deg) translateY(-2px); }
+      40%      { transform: rotate(3deg) translateY(-3px); }
+      60%      { transform: rotate(-2deg) translateY(-1px); }
+      80%      { transform: rotate(2deg) translateY(-2px); }
+    }
+    @keyframes explanation-button-label {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+    @keyframes goblin-click-wobble {
+      0%   { transform: translateY(2px)  scale(1.06, 0.88); }
+      28%  { transform: translateY(-9px) scale(0.94, 1.08); }
+      55%  { transform: translateY(-3px) scale(1.03, 0.98); }
+      75%  { transform: translateY(-6px) scale(0.98, 1.03); }
+      100% { transform: translateY(0)    scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 1ms !important;
+        transition-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+
+    /* ── Difficulty screen ───────────────────────────────────────────────────── */
+    #screen-difficulty {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100%; background: #0a0c0b;
+    }
+    .difficulty-frame {
+      position: relative; width: 360px; height: 394px;
+      border: 1px solid #2a302c; border-radius: 24px; background: #0a0c0b;
+    }
+    .difficulty-slab {
+      --slab-top: 56px;
+      position: absolute; top: var(--slab-top); left: 34px;
+      width: 292px; height: 78px;
+      color: #0a0c0b; cursor: pointer; opacity: 1; transform: translateY(0);
+      animation: difficulty-slab-enter 350ms ease-out backwards;
+      animation-delay: calc(var(--slab-index) * 60ms);
+      transition: opacity 250ms ease, transform 150ms ease-out;
+      background: none; border: none; padding: 0;
+    }
+    .difficulty-slab-standard { --slab-top: 158px; }
+    .difficulty-slab-deep     { --slab-top: 260px; }
+    .difficulty-slab:not(:disabled):hover,
+    .difficulty-slab:not(:disabled):focus-visible { transform: translateY(-2px); }
+    .difficulty-slab:disabled { cursor: default; }
+    .difficulty-slab-selected { transform: translateY(-4px) !important; }
+    .difficulty-frame:has(.difficulty-slab-selected) .difficulty-slab:not(.difficulty-slab-selected) { opacity: 0.32; }
+    .difficulty-card { display: block; width: 100%; height: 100%; overflow: visible; }
+    .difficulty-slab-selected .difficulty-level-bars { animation: difficulty-pips-fill 200ms ease-out both; }
+    @keyframes difficulty-slab-enter {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes difficulty-pips-fill {
+      from { clip-path: inset(0 100% 0 0); }
+      to   { clip-path: inset(0); }
+    }
+
+    /* ── Flow loading ────────────────────────────────────────────────────────── */
+    .flow-loading {
+      display: grid; min-height: 100%; place-items: center; background: #0a0c0b;
+      animation: flow-loading-cycle-2500 var(--loading-duration) linear both;
+    }
+    @keyframes flow-loading-cycle-2500 {
+      0%  { opacity: 0; } 8%  { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; }
+    }
+
+    /* ── Intro logo ──────────────────────────────────────────────────────────── */
+    .intro-logo-img {
+      width: clamp(300px, 45cqw, 420px); height: auto;
+      image-rendering: pixelated;
+      animation: screen-enter 450ms ease both;
+    }
+
+    /* ── Goblin arrival ──────────────────────────────────────────────────────── */
+    .goblin-arrival-img {
+      width: 100px; height: 100px;
+      object-fit: contain; image-rendering: pixelated;
+      animation: troll-arrive 700ms cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    /* ── Chat ────────────────────────────────────────────────────────────────── */
+    .chat-stack {
+      display: flex; flex-direction: column; align-items: center;
+      transform: translateY(60px); transition: transform 280ms ease-out;
+    }
+    .chat-troll-img {
+      width: 100px; height: 100px; object-fit: contain; image-rendering: pixelated;
+      transition: transform 420ms cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .chat-bubble {
+      width: 200px; min-height: 75px; margin-top: -1px;
+      display: grid; place-items: center;
+      border-radius: 30px; background: #74ab7b; padding: 10px 20px;
+      color: #2b2b2b; font-size: 13px; font-weight: 400;
+      line-height: 1.5; letter-spacing: 0.02em; text-align: center;
+      transform-origin: 50% 0;
+      animation: chat-bubble-pop 420ms cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .continue-button {
+      display: grid; width: 72px; height: 58px;
+      place-items: start center; padding-top: 16px;
+      cursor: pointer; background: none; border: none;
+      transition: transform 180ms ease;
+    }
+    .continue-button:hover { transform: translateY(4px); }
+    @keyframes screen-enter {
+      from { opacity: 0; transform: scale(0.985); filter: blur(4px); }
+      to   { opacity: 1; transform: scale(1); filter: blur(0); }
+    }
+    @keyframes troll-arrive {
+      0%   { opacity: 0; transform: translateY(8px) scale(0.15); }
+      68%  { opacity: 1; transform: translateY(-5px) scale(1.08); }
+      84%  { transform: translateY(2px) scale(0.97); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes chat-bubble-pop {
+      from { opacity: 0; transform: translateY(-10px) scale(0.35, 0.15); }
+      65%  { opacity: 1; transform: translateY(2px) scale(1.06, 1.08); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
   </style>
 </head>
 <body>
-  <div class="scroll">
-  <h1>Comprehension check</h1>
-  <p class="lock-note">Editing is locked until you submit, bypass, ask for an explanation, or close this tab. Bypass and "I don't know" keep the code and do not count as correct. Closing removes the code.</p>
-  <div class="snippet-wrap">
-    <div class="snippet-head">
-      <span>Code</span>
-      ${langLabel}
+<div class="app-shell">
+
+  <!-- Screen 0a: Difficulty selector -->
+  <div id="screen-difficulty">
+    <div class="difficulty-frame">
+      <button type="button" class="difficulty-slab difficulty-slab-quick" style="--slab-index:0">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-quick" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BDDBC1"/><stop offset="1" stop-color="#74AB7B"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-quick)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="131" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/><rect x="169" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#BDDBC1"/>
+          <text x="75.9" y="19" fill="#0A0C0B" font-family="Inter,sans-serif" font-size="16" font-weight="700">Quick</text>
+          <text x="127.4" y="19" fill="#1B3A2A" font-family="Inter,sans-serif" font-size="16" font-weight="400">30 seconds</text>
+        </svg>
+      </button>
+      <button type="button" class="difficulty-slab difficulty-slab-standard" style="--slab-index:1">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-standard" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#74AB7B"/><stop offset="1" stop-color="#3A914D"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-standard)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="131" y="45" width="30" height="6" fill="#0A0C0B"/><rect x="169" y="45" width="30" height="6" fill="#0A0C0B" fill-opacity=".22"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#74AB7B"/>
+          <text x="70.4" y="19" fill="#0A0C0B" font-family="Inter,sans-serif" font-size="16" font-weight="700">Standard</text>
+          <text x="147.7" y="19" fill="#0F2A19" font-family="Inter,sans-serif" font-size="16" font-weight="400">2 minutes</text>
+        </svg>
+      </button>
+      <button type="button" class="difficulty-slab difficulty-slab-deep" style="--slab-index:2">
+        <svg class="difficulty-card" viewBox="0 0 292 78" aria-hidden="true">
+          <defs><linearGradient id="dg-deep" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#175E2D"/><stop offset="1" stop-color="#014720"/></linearGradient></defs>
+          <path d="M0 28H292L272 78H20Z" fill="url(#dg-deep)"/>
+          <path d="M0 28H5L25 78H20Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M292 28H287L267 78H272Z" fill="#0A0C0B" fill-opacity=".2"/>
+          <path d="M12.4 34H279.6L268 63H24Z" fill="#0A0C0B" fill-opacity=".14" stroke="#0A0C0B" stroke-opacity=".38" stroke-width="1.5"/>
+          <g class="difficulty-level-bars"><rect x="93" y="45" width="30" height="6" fill="#BDDBC1"/><rect x="131" y="45" width="30" height="6" fill="#BDDBC1"/><rect x="169" y="45" width="30" height="6" fill="#BDDBC1"/></g>
+          <path d="M16.4 69H275.6L272 78H20Z" fill="#0A0C0B" fill-opacity=".32"/>
+          <path d="M0 28V12H6V6H12V0H280V6H286V12H292V28Z" fill="#175E2D"/>
+          <text x="82.2" y="19" fill="#F2F8F3" font-family="Inter,sans-serif" font-size="16" font-weight="700">Deep</text>
+          <text x="129" y="19" fill="#D6E6DA" font-family="Inter,sans-serif" font-size="16" font-weight="400">10 minutes</text>
+        </svg>
+      </button>
     </div>
-    <pre><code>${escapeHtml(snippet)}</code></pre>
   </div>
-  <p id="question" class="question"></p>
-  <div id="feedback" class="feedback" aria-live="polite">
-    <p id="feedback-msg" class="feedback-msg"></p>
-    <ul id="missed-list" class="missed-list hidden"></ul>
-    <p id="correct-option" class="correct-option hidden"></p>
-    <button type="button" class="dispute hidden" id="dispute-btn">My answer was right</button>
-  </div>
-  <div id="answer-area" class="answer-area"></div>
-  <div id="loading-bubble" class="bubble loading-bubble" aria-hidden="true">
-    <span></span><span></span><span></span>
-  </div>
-  </div>
-  <div class="actions">
-    <button type="button" class="submit" id="submit-btn">Submit</button>
-    <button type="button" class="bypass" id="bypass-btn">Bypass</button>
-    <button type="button" class="bypass" id="explain-btn">I don't know, explain it</button>
-  </div>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    const questionEl = document.getElementById("question");
-    const feedbackEl = document.getElementById("feedback");
-    const feedbackMsgEl = document.getElementById("feedback-msg");
-    const missedListEl = document.getElementById("missed-list");
-    const correctOptionEl = document.getElementById("correct-option");
-    const answerAreaEl = document.getElementById("answer-area");
-    const submitBtn = document.getElementById("submit-btn");
-    const bypassBtn = document.getElementById("bypass-btn");
-    const explainBtn = document.getElementById("explain-btn");
-    const disputeBtn = document.getElementById("dispute-btn");
 
-    let currentKind = "free-text";
-    let lastAnswer = "";
+  <!-- Screen 0b: Flow loading (GIF) -->
+  <div class="screen hidden flow-loading flow-loading-2500" id="screen-flow-loading" style="--loading-duration:2500ms" role="status" aria-label="Loading">
+    <img src="${uris.goblinWalk}" width="612" height="384" alt="" aria-hidden="true" style="width:340px;height:auto;image-rendering:pixelated;">
+  </div>
 
-    function clearFeedback() {
-      feedbackEl.classList.remove("visible");
-      feedbackMsgEl.textContent = "";
-      missedListEl.innerHTML = "";
-      missedListEl.classList.add("hidden");
-      correctOptionEl.textContent = "";
-      correctOptionEl.classList.add("hidden");
-      disputeBtn.classList.add("hidden");
-    }
+  <!-- Screen 0c: Intro (logo only) -->
+  <div class="screen hidden" id="screen-intro" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <img src="${uris.logo}" class="intro-logo-img" alt="DrawBridge">
+  </div>
 
-    function renderQuestion(payload) {
-      currentKind = payload.kind || "free-text";
-      questionEl.className = "question bubble";
-      questionEl.textContent = payload.questionText || "";
-      clearFeedback();
-      submitBtn.classList.remove("hidden");
-      bypassBtn.classList.remove("hidden");
-      explainBtn.classList.remove("hidden");
-      answerAreaEl.innerHTML = "";
+  <!-- Screen 0d: Goblin arrival -->
+  <div class="screen hidden" id="screen-goblin" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <img src="${uris.goblinIdle}" class="goblin-arrival-img" alt="" aria-hidden="true">
+  </div>
 
-      if (currentKind === "ordering" && Array.isArray(payload.items)) {
-        payload.items.forEach(function (item, idx) {
-          const row = document.createElement("div");
-          row.className = "mcq-option";
-          row.dataset.index = String(idx);
-          const up = document.createElement("button");
-          up.type = "button";
-          up.textContent = "Up";
-          const down = document.createElement("button");
-          down.type = "button";
-          down.textContent = "Down";
-          up.addEventListener("click", function () {
-            if (row.previousElementSibling) {
-              answerAreaEl.insertBefore(row, row.previousElementSibling);
-            }
-          });
-          down.addEventListener("click", function () {
-            if (row.nextElementSibling) {
-              answerAreaEl.insertBefore(row.nextElementSibling, row);
-            }
-          });
-          row.appendChild(up);
-          row.appendChild(down);
-          row.appendChild(document.createTextNode(" " + item));
-          answerAreaEl.appendChild(row);
-        });
-      } else if (
-        (currentKind === "multiple-choice" || (Array.isArray(payload.options) && payload.options.length > 0)) &&
-        Array.isArray(payload.options) &&
-        payload.options.length > 0
-      ) {
-        currentKind = "multiple-choice";
-        payload.options.forEach(function (opt, idx) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "choice";
-          button.dataset.index = String(idx);
-          button.textContent = opt;
-          button.addEventListener("click", function () {
-            const selected = answerAreaEl.querySelectorAll(".choice");
-            selected.forEach(function (item) { item.classList.remove("selected"); });
-            button.classList.add("selected");
-            button.dataset.index = String(idx);
-            reactThen(button, function () {});
-          });
-          answerAreaEl.appendChild(button);
-        });
+  <!-- Screen 0e: Chat -->
+  <div class="screen hidden" id="screen-chat" style="display:flex;align-items:center;justify-content:center;min-height:100%">
+    <div class="chat-stack">
+      <img src="${uris.goblinIdle}" class="chat-troll-img" alt="" aria-hidden="true">
+      <div class="chat-bubble chat-bubble-pop" id="chat-bubble-text" aria-live="polite"></div>
+      <button type="button" class="continue-button" id="chat-continue-btn" aria-label="Continue">
+        <img src="${uris.arrowDown}" width="55" height="27" alt="" aria-hidden="true">
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Screen 1: Question ────────────────────────────────────────────── -->
+  <div class="screen hidden" id="screen-question">
+
+    <header class="q-meta">
+      <span class="q-label" id="q-label">Question 1</span>
+      <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
+    </header>
+
+    <div class="goblin-area">
+      <button type="button" class="goblin-btn" id="explain-btn"
+              aria-label="Show explanation and skip this question" disabled>
+        <img id="goblin-img" src="${uris.goblinSleep}" class="goblin-btn-img" alt="" aria-hidden="true">
+        <span class="goblin-tooltip">Show explanation</span>
+      </button>
+    </div>
+
+    <div class="question-card">
+      <p id="question-text" class="question-text"></p>
+      <div id="answer-area" class="answer-area"></div>
+      <button type="button" class="submit-pill" id="submit-btn" aria-label="Submit answer">
+        Submit!
+      </button>
+      <p class="validation-msg" id="validation-msg" aria-live="polite"></p>
+    </div>
+
+  </div>
+
+  <!-- ── Screen 2: Loading ──────────────────────────────────────────────── -->
+  <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
+    <img src="${uris.logo}" class="loading-logo" alt="DrawBridge" aria-hidden="true">
+    <img src="${uris.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
+  </div>
+
+  <!-- ── Screen 3: Result — Correct ────────────────────────────────────── -->
+  <div class="screen hidden" id="screen-result-correct">
+    <img src="${uris.goblinCorrect}" class="result-goblin-img correct-reveal"
+         id="goblin-correct-img" alt="" aria-hidden="true">
+    <div class="speech-bubble bubble-correct" id="bubble-correct" aria-live="polite">
+      <p id="bubble-correct-text"></p>
+    </div>
+  </div>
+
+  <!-- ── Screen 4: Result — Incorrect ──────────────────────────────────── -->
+  <div class="screen hidden" id="screen-result-incorrect">
+    <button type="button" class="bypass-btn" id="bypass-btn">
+      <img src="${uris.arrowUp}" class="bypass-icon" alt="" aria-hidden="true">
+      Bypass
+    </button>
+    <img src="${uris.goblinWrong}" class="result-goblin-img wrong-reveal"
+         id="goblin-wrong-img" alt="" aria-hidden="true">
+    <div class="speech-bubble bubble-incorrect" id="bubble-incorrect" aria-live="polite">
+      <p id="bubble-incorrect-text"></p>
+      <ul id="bubble-missed" class="bubble-missed hidden"></ul>
+      <p id="bubble-correct-option" class="bubble-correct-option hidden"></p>
+    </div>
+    <button type="button" class="chevron-btn" id="try-again-btn" aria-label="Try again">
+      <img src="${uris.arrowDownRed}" alt="" aria-hidden="true">
+    </button>
+    <button type="button" class="result-next-q-btn hidden" id="result-next-q-btn">Next Question</button>
+    <button type="button" class="dispute-btn-result hidden" id="dispute-btn">My answer was right</button>
+  </div>
+
+  <!-- ── Screen 5: Explanation ─────────────────────────────────────────── -->
+  <div class="screen hidden" id="screen-explanation">
+    <div class="explanation-goblin-area">
+      <img src="${uris.goblinIdle}" class="explanation-goblin-img" alt="" aria-hidden="true">
+    </div>
+    <h2 id="exp-heading" class="exp-heading"></h2>
+    <div class="exp-text-box" id="exp-text-box"></div>
+    <p class="exp-answer-label hidden" id="exp-answer-label">Correct answer</p>
+    <div class="exp-answer-block hidden" id="exp-answer-block"></div>
+    <button type="button" class="exp-next-btn" id="exp-next-btn">Next Question</button>
+  </div>
+
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+
+  /* ── URI constants ────────────────────────────────────────────────────── */
+  var URI_SLEEP   = ${JSON.stringify(uris.goblinSleep)};
+  var URI_IDLE    = ${JSON.stringify(uris.goblinIdle)};
+  var URI_CORRECT = ${JSON.stringify(uris.goblinCorrect)};
+  var URI_WRONG   = ${JSON.stringify(uris.goblinWrong)};
+
+  /* ── Element refs ─────────────────────────────────────────────────────── */
+  var qLabelEl          = document.getElementById("q-label");
+  var progressEl        = document.getElementById("progress-dots");
+  var questionTextEl    = document.getElementById("question-text");
+  var answerAreaEl      = document.getElementById("answer-area");
+  var submitBtn         = document.getElementById("submit-btn");
+  var explainBtn        = document.getElementById("explain-btn");
+  var goblinImg         = document.getElementById("goblin-img");
+  var validationMsgEl   = document.getElementById("validation-msg");
+
+  var bypassBtn         = document.getElementById("bypass-btn");
+  var tryAgainBtn       = document.getElementById("try-again-btn");
+  var resultNextQBtn    = document.getElementById("result-next-q-btn");
+  var disputeBtn        = document.getElementById("dispute-btn");
+
+  var bubbleCorrectText = document.getElementById("bubble-correct-text");
+  var bubbleIncorrectText = document.getElementById("bubble-incorrect-text");
+  var bubbleMissedEl    = document.getElementById("bubble-missed");
+  var bubbleCorrectOpt  = document.getElementById("bubble-correct-option");
+
+  var expHeadingEl      = document.getElementById("exp-heading");
+  var expTextBoxEl      = document.getElementById("exp-text-box");
+  var expAnswerLblEl    = document.getElementById("exp-answer-label");
+  var expAnswerBlkEl    = document.getElementById("exp-answer-block");
+  var expNextBtn        = document.getElementById("exp-next-btn");
+
+  /* ── State ────────────────────────────────────────────────────────────── */
+  var currentKind = "free-text";
+  var lastAnswer  = "";
+  var questionNum = 1;
+  var showQCount  = 0;
+  var TOTAL_DOTS  = 5;
+
+  /* ── Screen management ────────────────────────────────────────────────── */
+  var SCREEN_IDS = [
+    "screen-question",
+    "screen-loading",
+    "screen-result-correct",
+    "screen-result-incorrect",
+    "screen-explanation"
+  ];
+
+  function showScreen(id) {
+    for (var i = 0; i < SCREEN_IDS.length; i++) {
+      var el = document.getElementById(SCREEN_IDS[i]);
+      if (!el) continue;
+      if (SCREEN_IDS[i] === id) {
+        el.classList.remove("hidden");
       } else {
-        const ta = document.createElement("textarea");
-        ta.id = "answer-input";
-        ta.placeholder = "Explain in your own words, then press Submit.";
-        ta.addEventListener("keydown", function (event) {
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-            event.preventDefault();
-            collectSubmit();
-          }
-        });
-        answerAreaEl.appendChild(ta);
-        ta.focus();
+        el.classList.add("hidden");
       }
     }
+  }
 
-    function showFeedback(payload) {
-      feedbackMsgEl.textContent = payload.message || "";
-      missedListEl.innerHTML = "";
+  /* ── Progress dots ────────────────────────────────────────────────────── */
+  function renderDots(current) {
+    progressEl.innerHTML = "";
+    for (var i = 1; i <= TOTAL_DOTS; i++) {
+      var d = document.createElement("span");
+      d.className = "dot " + (i < current ? "dot-done" : i === current ? "dot-active" : "dot-inactive");
+      progressEl.appendChild(d);
+    }
+  }
+
+  /* ── Goblin image swap with crossfade ─────────────────────────────────── */
+  function setGoblinState(uri, canExplain) {
+    goblinImg.style.opacity = "0";
+    setTimeout(function () {
+      goblinImg.src = uri;
+      goblinImg.style.opacity = "1";
+      explainBtn.disabled = !canExplain;
+    }, 160);
+  }
+
+  /* ── Re-trigger a CSS animation by cloning the class ─────────────────── */
+  function retriggerAnimation(el, cls) {
+    if (!el) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
+  /* ── Render answer area ───────────────────────────────────────────────── */
+  function renderAnswerArea(kind, payload) {
+    currentKind = kind;
+    answerAreaEl.innerHTML = "";
+
+    if (kind === "ordering" && Array.isArray(payload.items) && payload.items.length) {
+      payload.items.forEach(function (item, idx) {
+        var row = document.createElement("div");
+        row.className = "ordering-row";
+        row.dataset.index = String(idx);
+        var up = document.createElement("button");
+        up.type = "button"; up.textContent = "\u25B2"; up.setAttribute("aria-label", "Move up");
+        var down = document.createElement("button");
+        down.type = "button"; down.textContent = "\u25BC"; down.setAttribute("aria-label", "Move down");
+        up.addEventListener("click", function () {
+          if (row.previousElementSibling) answerAreaEl.insertBefore(row, row.previousElementSibling);
+        });
+        down.addEventListener("click", function () {
+          if (row.nextElementSibling) answerAreaEl.insertBefore(row.nextElementSibling, row);
+        });
+        var lbl = document.createElement("span"); lbl.textContent = item;
+        row.appendChild(up); row.appendChild(down); row.appendChild(lbl);
+        answerAreaEl.appendChild(row);
+      });
+    } else if (kind === "multiple-choice" && Array.isArray(payload.options) && payload.options.length) {
+      var fs = document.createElement("fieldset"); fs.className = "mcq-fieldset";
+      var leg = document.createElement("legend"); leg.className = "mcq-legend";
+      leg.textContent = payload.questionText || "Choose an answer";
+      fs.appendChild(leg);
+      var grid = document.createElement("div"); grid.className = "mcq-options";
+      payload.options.forEach(function (opt, idx) {
+        var lbl = document.createElement("label"); lbl.className = "mcq-option";
+        var inp = document.createElement("input");
+        inp.type = "radio"; inp.name = "mcq"; inp.value = String(idx);
+        var radio = document.createElement("span"); radio.className = "mcq-radio"; radio.setAttribute("aria-hidden", "true");
+        var txt = document.createElement("span"); txt.textContent = opt;
+        lbl.appendChild(inp); lbl.appendChild(radio); lbl.appendChild(txt);
+        grid.appendChild(lbl);
+      });
+      fs.appendChild(grid);
+      answerAreaEl.appendChild(fs);
+    } else {
+      var ta = document.createElement("textarea");
+      ta.id = "answer-input";
+      ta.placeholder = "Explain in your own words, then press Submit!";
+      ta.addEventListener("keydown", function (e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); collectSubmit(); }
+      });
+      answerAreaEl.appendChild(ta);
+      ta.focus();
+    }
+  }
+
+  /* ── Render question (host-driven) ───────────────────────────────────── */
+  function renderQuestion(payload) {
+    showQCount++;
+    questionNum = showQCount;
+    qLabelEl.textContent = "Question " + questionNum;
+    renderDots(questionNum);
+    validationMsgEl.textContent = "";
+    setGoblinState(URI_SLEEP, true);
+    questionTextEl.textContent = payload.questionText || "";
+    renderAnswerArea(payload.kind || "free-text", payload);
+    showScreen("screen-question");
+  }
+
+  /* ── Show feedback ────────────────────────────────────────────────────
+   *
+   *  explained === true → explanation screen
+   *  passed === true    → correct result screen (extension auto-closes)
+   *  passed === false   → incorrect result screen
+   *  else               → inline validation on question screen
+   * ──────────────────────────────────────────────────────────────────── */
+  function showFeedback(payload) {
+
+    /* Explanation screen */
+    if (payload.explained) {
+      expHeadingEl.textContent = questionTextEl.textContent || "";
+      var rawMsg = payload.message || "";
+      expTextBoxEl.textContent = rawMsg.startsWith("Explanation: ")
+        ? rawMsg.slice("Explanation: ".length)
+        : rawMsg;
+      if (payload.correctOption) {
+        expAnswerBlkEl.textContent = payload.correctOption;
+        expAnswerLblEl.classList.remove("hidden");
+        expAnswerBlkEl.classList.remove("hidden");
+      } else {
+        expAnswerLblEl.classList.add("hidden");
+        expAnswerBlkEl.classList.add("hidden");
+      }
+      if (payload.allowNextQuestion) {
+        expNextBtn.classList.remove("hidden");
+      } else {
+        expNextBtn.classList.add("hidden");
+      }
+      showScreen("screen-explanation");
+      return;
+    }
+
+    /* Correct result screen */
+    if (payload.passed === true) {
+      bubbleCorrectText.textContent = payload.message || "";
+      retriggerAnimation(document.getElementById("goblin-correct-img"), "correct-reveal");
+      showScreen("screen-result-correct");
+      return;
+    }
+
+    /* Incorrect result screen */
+    if (payload.passed === false) {
+      bubbleIncorrectText.textContent = payload.message || "";
+      bubbleMissedEl.innerHTML = "";
       if (Array.isArray(payload.missed) && payload.missed.length > 0) {
-        missedListEl.classList.remove("hidden");
+        bubbleMissedEl.classList.remove("hidden");
         payload.missed.forEach(function (item) {
-          const li = document.createElement("li");
+          var li = document.createElement("li");
           li.textContent = item.text || "";
           if (item.evidence) {
-            const ev = document.createElement("span");
-            ev.className = "evidence";
-            ev.textContent = item.evidence;
+            var ev = document.createElement("span");
+            ev.className = "bubble-evidence"; ev.textContent = item.evidence;
             li.appendChild(ev);
           }
-          missedListEl.appendChild(li);
+          bubbleMissedEl.appendChild(li);
         });
       } else {
-        missedListEl.classList.add("hidden");
+        bubbleMissedEl.classList.add("hidden");
       }
       if (payload.correctOption) {
-        correctOptionEl.textContent = "Correct answer: " + payload.correctOption;
-        correctOptionEl.classList.remove("hidden");
+        bubbleCorrectOpt.textContent = "Correct answer: " + payload.correctOption;
+        bubbleCorrectOpt.classList.remove("hidden");
       } else {
-        correctOptionEl.classList.add("hidden");
+        bubbleCorrectOpt.classList.add("hidden");
       }
-      feedbackEl.classList.add("visible");
-      if (payload.explained) {
-        submitBtn.classList.add("hidden");
-        bypassBtn.classList.add("hidden");
-        explainBtn.classList.add("hidden");
-        disputeBtn.classList.add("hidden");
+      if (payload.allowNextQuestion) {
+        resultNextQBtn.classList.remove("hidden");
+      } else {
+        resultNextQBtn.classList.add("hidden");
       }
       if (payload.allowDispute) {
         disputeBtn.classList.remove("hidden");
       } else {
         disputeBtn.classList.add("hidden");
       }
+      retriggerAnimation(document.getElementById("goblin-wrong-img"), "wrong-reveal");
+      showScreen("screen-result-incorrect");
+      return;
+    }
 
-      if (currentKind === "free-text") {
-        const ta = document.getElementById("answer-input");
-        if (ta) {
-          ta.value = "";
-          ta.focus();
-        }
+    /* Validation / other — stay on question screen with inline message */
+    validationMsgEl.textContent = payload.message || "";
+    showScreen("screen-question");
+  }
+
+  /* ── Collect and post submit ──────────────────────────────────────────── */
+  function collectSubmit() {
+    validationMsgEl.textContent = "";
+
+    if (currentKind === "ordering") {
+      var order = Array.from(answerAreaEl.querySelectorAll("[data-index]")).map(function (r) {
+        return parseInt(r.dataset.index, 10);
+      });
+      setGoblinState(URI_SLEEP, false);
+      showScreen("screen-loading");
+      vscode.postMessage({ type: "submit", order: order });
+      return;
+    }
+    if (currentKind === "multiple-choice") {
+      var sel = answerAreaEl.querySelector('input[name="mcq"]:checked');
+      if (!sel) {
+        validationMsgEl.textContent = "Please select an option before submitting.";
+        return;
+      }
+      lastAnswer = sel.parentElement ? sel.parentElement.textContent.trim() : "";
+      setGoblinState(URI_SLEEP, false);
+      showScreen("screen-loading");
+      vscode.postMessage({ type: "submit", selectedIndex: parseInt(sel.value, 10) });
+      return;
+    }
+    var ta = document.getElementById("answer-input");
+    var answer = ta ? ta.value : "";
+    lastAnswer = answer;
+    setGoblinState(URI_SLEEP, false);
+    showScreen("screen-loading");
+    vscode.postMessage({ type: "submit", answer: answer });
+  }
+
+  /* ── Button listeners ─────────────────────────────────────────────────── */
+  submitBtn.addEventListener("click", collectSubmit);
+
+  explainBtn.addEventListener("click", function () {
+    explainBtn.classList.remove("goblin-clicked");
+    void explainBtn.offsetWidth;
+    explainBtn.classList.add("goblin-clicked");
+    vscode.postMessage({ type: "explain" });
+  });
+  explainBtn.addEventListener("animationend", function (e) {
+    if (e.animationName === "goblin-click-wobble") {
+      explainBtn.classList.remove("goblin-clicked");
+    }
+  });
+
+  bypassBtn.addEventListener("click", function () {
+    vscode.postMessage({ type: "bypass" });
+  });
+
+  tryAgainBtn.addEventListener("click", function () {
+    var checked = answerAreaEl.querySelector('input[name="mcq"]:checked');
+    if (checked) { checked.checked = false; }
+    var ta = document.getElementById("answer-input");
+    if (ta) { ta.value = ""; }
+    showScreen("screen-question");
+    setTimeout(function () {
+      var ta2 = document.getElementById("answer-input");
+      if (ta2) { ta2.focus(); }
+    }, 50);
+  });
+
+  resultNextQBtn.addEventListener("click", function () {
+    vscode.postMessage({ type: "next_question" });
+  });
+
+  disputeBtn.addEventListener("click", function () {
+    vscode.postMessage({ type: "dispute", answer: lastAnswer });
+  });
+
+  expNextBtn.addEventListener("click", function () {
+    vscode.postMessage({ type: "next_question" });
+  });
+
+  /* ── Startup: show intro screens then signal ready ───────────────────── */
+  renderDots(1);
+
+  var CHAT_MESSAGES = [
+    "Hey! I'm Drawgoblin",
+    "I'll guide you through your first test in DrawBridge",
+    "When you copy and paste code, I'll quiz you to let you pass!",
+    "Get it..drawbridge..",
+    "Well anyways, please answer these 5 questions, and i'll let you pass!"
+  ];
+
+  // Show difficulty screen first; delay "ready" until chat is done
+  var introScreenIds = ["screen-difficulty", "screen-flow-loading", "screen-intro", "screen-goblin", "screen-chat"];
+  var SCREEN_IDS_ALL = introScreenIds.concat(SCREEN_IDS); // SCREEN_IDS is existing array
+
+  function showScreenById(id) {
+    var allIds = SCREEN_IDS_ALL;
+    for (var i = 0; i < allIds.length; i++) {
+      var el = document.getElementById(allIds[i]);
+      if (!el) continue;
+      if (allIds[i] === id) el.classList.remove("hidden");
+      else el.classList.add("hidden");
+    }
+  }
+
+  // Difficulty selection
+  var diffBtns = document.querySelectorAll(".difficulty-slab");
+  for (var i = 0; i < diffBtns.length; i++) {
+    diffBtns[i].addEventListener("click", function(e) {
+      var btn = e.currentTarget;
+      btn.closest(".difficulty-frame").querySelectorAll(".difficulty-slab").forEach(function(b) {
+        b.classList.remove("difficulty-slab-selected");
+      });
+      btn.classList.add("difficulty-slab-selected");
+      for (var j = 0; j < diffBtns.length; j++) diffBtns[j].disabled = true;
+      setTimeout(function() { showScreenById("screen-flow-loading"); }, 700);
+      setTimeout(function() { showScreenById("screen-intro"); }, 700 + 2500);
+      setTimeout(function() { showScreenById("screen-goblin"); }, 700 + 2500 + 1500);
+      setTimeout(function() { showScreenById("screen-chat"); }, 700 + 2500 + 1500 + 900);
+    });
+  }
+
+  // Chat cycling
+  var chatMsgIndex = 0;
+  var chatBubbleEl = document.getElementById("chat-bubble-text");
+  var continueBtnEl = document.getElementById("chat-continue-btn");
+  function updateChatBubble() {
+    if (chatBubbleEl) chatBubbleEl.textContent = CHAT_MESSAGES[chatMsgIndex];
+  }
+  if (continueBtnEl) {
+    continueBtnEl.addEventListener("click", function() {
+      chatMsgIndex++;
+      if (chatMsgIndex >= CHAT_MESSAGES.length) {
+        showScreenById("screen-question");
+        vscode.postMessage({ type: "ready" });
       } else {
-        const checked = answerAreaEl.querySelector('input[name="mcq"]:checked');
-        if (checked) {
-          checked.checked = false;
-        }
+        updateChatBubble();
       }
+    });
+  }
+  updateChatBubble();
+
+  // Start on difficulty screen
+  showScreenById("screen-difficulty");
+
+  /* ── Host message handler ─────────────────────────────────────────────── */
+  window.addEventListener("message", function (event) {
+    var msg = event.data;
+    if (!msg || !msg.type) return;
+    if (msg.type === "showQuestion") {
+      renderQuestion(msg);
+    } else if (msg.type === "showFeedback") {
+      showFeedback(msg);
     }
-
-    function reactThen(button, send) {
-      if (button) {
-        button.classList.add("pressed");
-      }
-      const bubble = document.getElementById("loading-bubble");
-      if (bubble) {
-        bubble.classList.add("visible");
-      }
-      window.setTimeout(function () {
-        if (button) {
-          button.classList.remove("pressed");
-        }
-        if (bubble) {
-          bubble.classList.remove("visible");
-        }
-        send();
-      }, 420);
-    }
-
-    function collectSubmit() {
-      if (currentKind === "ordering") {
-        const order = Array.from(answerAreaEl.querySelectorAll("[data-index]")).map(function (row) {
-          return parseInt(row.dataset.index, 10);
-        });
-        vscode.postMessage({ type: "submit", order: order });
-        return;
-      }
-      if (currentKind === "multiple-choice") {
-        const selected = answerAreaEl.querySelector(".choice.selected");
-        if (!selected) {
-          showFeedback({ message: "Please select an option before submitting." });
-          return;
-        }
-        lastAnswer = selected.textContent || "";
-        vscode.postMessage({
-          type: "submit",
-          selectedIndex: parseInt(selected.dataset.index, 10),
-        });
-        return;
-      }
-      const ta = document.getElementById("answer-input");
-      const answer = ta ? ta.value : "";
-      lastAnswer = answer;
-      vscode.postMessage({ type: "submit", answer: answer });
-    }
-
-    submitBtn.addEventListener("click", function () {
-      reactThen(submitBtn, collectSubmit);
-    });
-    bypassBtn.addEventListener("click", function () {
-      reactThen(bypassBtn, function () {
-        vscode.postMessage({ type: "bypass" });
-      });
-    });
-    explainBtn.addEventListener("click", function () {
-      reactThen(explainBtn, function () {
-        vscode.postMessage({ type: "explain" });
-      });
-    });
-    disputeBtn.addEventListener("click", function () {
-      vscode.postMessage({ type: "dispute", answer: lastAnswer });
-    });
-
-    vscode.postMessage({ type: "ready" });
-
-    window.addEventListener("message", function (event) {
-      const msg = event.data;
-      if (!msg || !msg.type) {
-        return;
-      }
-      if (msg.type === "showQuestion") {
-        renderQuestion(msg);
-      } else if (msg.type === "showFeedback") {
-        showFeedback(msg);
-      }
-    });
-  </script>
+  });
+</script>
 </body>
 </html>`;
 }
 
-export function createQuizPanel(snippet: string, language: string): QuizView {
+export function createQuizPanel(
+  snippet: string,
+  language: string,
+  extensionUri?: vscode.Uri,
+): QuizView {
   const nonce = getNonce();
+
+  const localResourceRoots = extensionUri
+    ? [vscode.Uri.joinPath(extensionUri, "media")]
+    : [];
+
   const panel = vscode.window.createWebviewPanel(
     "comprehensionGuard.quiz",
     "Comprehension check",
-    { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-    { enableScripts: true, retainContextWhenHidden: true },
+    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+    { enableScripts: true, retainContextWhenHidden: true, localResourceRoots },
   );
-  panel.reveal(vscode.ViewColumn.Active, false);
+  panel.reveal(vscode.ViewColumn.Beside, false);
+
+  const makeUri = (file: string): string =>
+    extensionUri
+      ? panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", file)).toString()
+      : "";
+
+  const uris: MediaUris = {
+    goblinSleep:   makeUri("goblin-sleep.png"),
+    goblinIdle:    makeUri("goblin-idle.png"),
+    goblinCorrect: makeUri("goblin-correct.png"),
+    goblinWrong:   makeUri("goblin-wrong.png"),
+    arrowDown:     makeUri("6758d.svg"),
+    arrowDownRed:  makeUri("d10af.svg"),
+    arrowUp:       makeUri("e3091.svg"),
+    dotFull:       makeUri("e0bf4.svg"),
+    dotHalf:       makeUri("a822a.svg"),
+    dotFull2:      makeUri("9e436.svg"),
+    dotFull3:      makeUri("a365e.svg"),
+    logo:          makeUri("drawbridge-logo.png"),
+    goblinWalk:    makeUri("goblin_walk_circle.gif"),
+  };
 
   let disposed = false;
   let ready = false;
@@ -534,13 +1359,8 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
   let queuedAction: QuizAction | null = null;
 
   const post = (message: unknown): void => {
-    if (disposed) {
-      return;
-    }
-    if (!ready) {
-      queued.push(message);
-      return;
-    }
+    if (disposed) return;
+    if (!ready) { queued.push(message); return; }
     void panel.webview.postMessage(message);
   };
 
@@ -555,9 +1375,7 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
   };
 
   panel.webview.onDidReceiveMessage((message: unknown) => {
-    if (disposed || !message || typeof message !== "object") {
-      return;
-    }
+    if (disposed || !message || typeof message !== "object") return;
     const msg = message as { type?: string; answer?: string; selectedIndex?: number; order?: number[] };
     if (msg.type === "ready") {
       ready = true;
@@ -566,32 +1384,23 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       }
       return;
     }
-    if (msg.type === "bypass") {
-      resolvePending({ type: "bypass" });
-      return;
-    }
-    if (msg.type === "explain") {
-      resolvePending({ type: "explain" });
-      return;
-    }
+    if (msg.type === "bypass") { resolvePending({ type: "bypass" }); return; }
+    if (msg.type === "explain") { resolvePending({ type: "explain" }); return; }
+    if (msg.type === "cancel") { resolvePending({ type: "cancel" }); return; }
+    if (msg.type === "next_question") { resolvePending({ type: "next_question" }); return; }
     if (msg.type === "dispute") {
-      resolvePending({
-        type: "dispute",
-        answer: typeof msg.answer === "string" ? msg.answer : "",
-      });
+      resolvePending({ type: "dispute", answer: typeof msg.answer === "string" ? msg.answer : "" });
       return;
     }
-    if (msg.type !== "submit") {
-      return;
-    }
+    if (msg.type !== "submit") return;
     resolvePending({
       type: "submit",
       answer: typeof msg.answer === "string" ? msg.answer : undefined,
       selectedIndex:
         typeof msg.selectedIndex === "number" && Number.isFinite(msg.selectedIndex)
-          ? msg.selectedIndex
-          : undefined,
-      order: Array.isArray(msg.order) ? msg.order.filter((item) => typeof item === "number") : undefined,
+          ? msg.selectedIndex : undefined,
+      order: Array.isArray(msg.order)
+        ? msg.order.filter((item) => typeof item === "number") : undefined,
     });
   });
 
@@ -600,13 +1409,11 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
     resolvePending({ type: "cancel" });
   });
 
-  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce);
+  panel.webview.html = getWebviewHtml(panel.webview, snippet, language, nonce, uris);
 
   return {
     showQuestion(question: GeneratedQuestion): void {
-      if (disposed) {
-        return;
-      }
+      if (disposed) return;
       post({
         type: "showQuestion",
         kind: question.kind,
@@ -622,10 +1429,10 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
       correctOption?: string;
       allowDispute?: boolean;
       explained?: boolean;
+      passed?: boolean;
+      allowNextQuestion?: boolean;
     }): void {
-      if (disposed) {
-        return;
-      }
+      if (disposed) return;
       post({
         type: "showFeedback",
         message: opts.message,
@@ -633,6 +1440,8 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
         correctOption: opts.correctOption ?? "",
         allowDispute: opts.allowDispute === true,
         explained: opts.explained === true,
+        passed: opts.passed,
+        allowNextQuestion: opts.allowNextQuestion !== false,
       });
     },
 
@@ -642,18 +1451,12 @@ export function createQuizPanel(snippet: string, language: string): QuizView {
         queuedAction = null;
         return Promise.resolve(action);
       }
-      if (disposed) {
-        return Promise.resolve({ type: "cancel" });
-      }
-      return new Promise((resolve) => {
-        pendingResolve = resolve;
-      });
+      if (disposed) return Promise.resolve({ type: "cancel" });
+      return new Promise((resolve) => { pendingResolve = resolve; });
     },
 
     close(): void {
-      if (!disposed) {
-        panel.dispose();
-      }
+      if (!disposed) panel.dispose();
     },
   };
 }

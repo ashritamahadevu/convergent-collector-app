@@ -10,6 +10,7 @@ import {
   editsFromHookEnvelope,
   equivalentText,
   generatedCode,
+  isOurHookCommand,
   looksLikeAgentInvocation,
   isFreshEvent,
   parseApplyPatch,
@@ -326,6 +327,26 @@ test("disk fallback ignores focused single insertions, typing, and bulk checkout
   assert.equal(quizSnippet("x".repeat(30_000)).length, 24_000);
 });
 
+function installedConfigs(writes: { path: string; contents: string }[]) {
+  const read = (needle: string) => {
+    const write = writes.find((item) => item.path.includes(needle));
+    if (!write) {
+      throw new Error("missing " + needle);
+    }
+    return { kind: "ok" as const, value: JSON.parse(write.contents) };
+  };
+  return {
+    claude: read(`${path.sep}.claude${path.sep}`),
+    codex: read(`${path.sep}.codex${path.sep}`),
+    cursor: read(`${path.sep}.cursor${path.sep}`),
+    gemini: read(`${path.sep}.gemini${path.sep}settings.json`),
+    copilot: read(`${path.sep}.copilot${path.sep}`),
+    droid: read(`${path.sep}.factory${path.sep}`),
+    goose: read(`comprehension-guard${path.sep}hooks${path.sep}`),
+    antigravity: read(`${path.sep}.gemini${path.sep}config${path.sep}`),
+  };
+}
+
 test("hook install merges without dropping existing hooks and is idempotent", () => {
   const home = path.join("/tmp", "guard-home");
   const nodePath = "/usr/local/bin/node";
@@ -347,12 +368,22 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
       value: { version: 1, hooks: { sessionStart: [{ command: "echo start" }] } },
     },
   });
-  assert.deepEqual(first.installed.sort(), ["Claude Code", "Codex", "Cursor"]);
+  assert.deepEqual(first.installed.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
   assert.deepEqual(first.errors, []);
   const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
   const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
   const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
-  assert.ok(claudeWrite && codexWrite && cursorWrite);
+  const geminiWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.gemini${path.sep}settings.json`));
+  assert.ok(claudeWrite && codexWrite && cursorWrite && geminiWrite);
   const claudeJson = JSON.parse(claudeWrite.contents);
   assert.equal(claudeJson.theme, "dark");
   assert.equal(claudeJson.hooks.Notification[0].hooks[0].command, "echo hi");
@@ -367,14 +398,23 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
     homeDir: home,
     nodePath,
     scriptSource: script,
-    claude: { kind: "ok", value: claudeJson },
-    codex: { kind: "ok", value: JSON.parse(codexWrite.contents) },
-    cursor: { kind: "ok", value: cursorJson },
+    ...installedConfigs(first.writes),
   });
   assert.deepEqual(second.installed, []);
-  assert.deepEqual(second.unchanged.sort(), ["Claude Code", "Codex", "Cursor"]);
-  assert.equal(second.writes.length, 1);
-  assert.equal(second.writes[0].contents, script);
+  assert.deepEqual(second.unchanged.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
+  assert.deepEqual(
+    second.writes.map((write) => path.basename(write.path)).sort(),
+    ["notify.js", "plugin.json"],
+  );
 
   const invalid = planHookInstall({
     homeDir: home,
@@ -386,6 +426,136 @@ test("hook install merges without dropping existing hooks and is idempotent", ()
   });
   assert.equal(invalid.errors.length, 1);
   assert.ok(!invalid.writes.some((write) => write.path.includes(`${path.sep}.claude${path.sep}`)));
+});
+
+test("pause hook is added beside notify and a second install is idempotent", () => {
+  const home = path.join("/tmp", "guard-home-pause");
+  const nodePath = "/usr/local/bin/node";
+  const script = "// notifier\n";
+  const pause = "// pause\n";
+  const first = planHookInstall({
+    homeDir: home,
+    nodePath,
+    scriptSource: script,
+    pauseSource: pause,
+    claude: { kind: "missing" },
+    codex: { kind: "missing" },
+    cursor: { kind: "missing" },
+  });
+  assert.deepEqual(first.installed.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
+  const claudeWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.claude${path.sep}settings.json`));
+  const codexWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.codex${path.sep}hooks.json`));
+  const cursorWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}.cursor${path.sep}hooks.json`));
+  const pauseWrite = first.writes.find((write) => write.path.endsWith(`${path.sep}pause.js`));
+  assert.ok(claudeWrite && codexWrite && cursorWrite && pauseWrite);
+  assert.equal(pauseWrite.contents, pause);
+
+  const claudeJson = JSON.parse(claudeWrite.contents);
+  const pre = claudeJson.hooks.PreToolUse[0];
+  assert.equal(pre.matcher, "Edit|Write|NotebookEdit|MultiEdit");
+  assert.equal(pre.hooks.length, 2);
+  assert.match(pre.hooks[0].command, /notify\.js/);
+  assert.equal(pre.hooks[0].async, undefined);
+  assert.equal(pre.hooks[0].timeout, 10);
+  assert.match(pre.hooks[1].command, /pause\.js/);
+  assert.equal(pre.hooks[1].async, undefined);
+  assert.equal(pre.hooks[1].timeout, 600);
+  assert.equal(claudeJson.hooks.PostToolUse[0].hooks.length, 1);
+  assert.match(claudeJson.hooks.PostToolUse[0].hooks[0].command, /notify\.js/);
+  assert.equal(isOurHookCommand(pre.hooks[0].command), true);
+  assert.equal(isOurHookCommand(pre.hooks[1].command), true);
+  assert.equal(isOurHookCommand("echo hi"), false);
+
+  const codexJson = JSON.parse(codexWrite.contents);
+  const codexPre = codexJson.hooks.PreToolUse[0];
+  assert.equal(codexPre.matcher, "apply_patch|Edit|Write");
+  assert.equal(codexPre.hooks.length, 2);
+  assert.match(codexPre.hooks[0].command, /notify\.js/);
+  assert.match(codexPre.hooks[1].command, /pause\.js/);
+  assert.equal(codexPre.hooks[1].timeout, 600);
+  assert.equal(codexPre.hooks[1].async, undefined);
+  assert.equal(codexJson.hooks.PostToolUse[0].hooks.length, 1);
+
+  const cursorJson = JSON.parse(cursorWrite.contents);
+  assert.match(cursorJson.hooks.afterFileEdit[0].command, /notify\.js/);
+  assert.equal(cursorJson.hooks.preToolUse.length, 1);
+  assert.match(cursorJson.hooks.preToolUse[0].command, /pause\.js/);
+  assert.equal(cursorJson.hooks.preToolUse[0].timeout, 600);
+  assert.equal(cursorJson.hooks.preToolUse[0].command.includes("notify.js"), false);
+
+  const second = planHookInstall({
+    homeDir: home,
+    nodePath,
+    scriptSource: script,
+    pauseSource: pause,
+    ...installedConfigs(first.writes),
+  });
+  assert.deepEqual(second.installed, []);
+  assert.deepEqual(second.unchanged.sort(), [
+    "Antigravity",
+    "Claude Code",
+    "Codex",
+    "Copilot CLI",
+    "Cursor",
+    "Droid",
+    "Gemini CLI",
+    "Goose",
+  ]);
+  assert.deepEqual(
+    second.writes.map((write) => path.basename(write.path)).sort(),
+    ["notify.js", "pause.js", "plugin.json"],
+  );
+});
+
+test("a Gemini CLI AfterTool write becomes one edit and a BeforeTool does not", () => {
+  const source = "function coalesce(bp) {\n  if (!bp) return 0;\n  return bp;\n}\n";
+  const after = editsFromHookEnvelope({
+    payload: {
+      hook_event_name: "AfterTool",
+      session_id: "g",
+      cwd: "/tmp",
+      tool_name: "write_file",
+      tool_input: { file_path: "/tmp/mm.js", content: source },
+    },
+  });
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.agent, "gemini");
+  assert.equal(after[0]?.filePath.endsWith("mm.js"), true);
+  assert.equal(after[0]?.snippet, source);
+  assert.deepEqual(
+    editsFromHookEnvelope({
+      payload: {
+        hook_event_name: "BeforeTool",
+        tool_name: "write_file",
+        tool_input: { file_path: "/tmp/mm.js", content: source },
+      },
+    }),
+    [],
+  );
+  const replaced = editsFromHookEnvelope({
+    payload: {
+      hook_event_name: "AfterTool",
+      tool_name: "replace",
+      tool_input: {
+        file_path: "/tmp/mm.js",
+        old_string: "return 0;",
+        new_string: "return 1;",
+        allow_multiple: true,
+      },
+    },
+  });
+  assert.equal(replaced[0]?.agent, "gemini");
+  assert.equal(replaced[0]?.hunks[0]?.replaceAll, true);
+  assert.equal(looksLikeAgentInvocation("gemini fix the parser"), true);
 });
 
 test("stale inbox events and overlapping gates are ignored", () => {

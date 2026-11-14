@@ -257,6 +257,8 @@ Proportional to current state (single-user, extension-only, LLM + grading workin
 
 `comprehensionGuard.mode` is `auto`, `learn`, or `walkthrough`. Auto keeps a single check unless an agent changes at least 7 files or 500 lines, then it offers a walkthrough. Session count follows how many core files are still below mastery, not a fixed script of three. The understanding map colors files from mastery times recall retrievability, so a file fades when the concept is not reviewed. Login opens one due recall instead of a notification. Each graded check, bypass, and explanation is a `review_events` row (question and answer included, source code excluded). Interview and exam questions are generated on the machine and synced as `prep_sets`.
 
+Agents with a pause hook are held one chunk at a time. Tree-sitter scores the changed functions, maps each one onto the same concept tags as Bayesian mastery, and skips a chunk the student already knows unless an exam or interview is close. The question itself is generated and graded by the shared quiz engine (predict and multiple choice stay deterministic, explain uses the free-response judge, change unlocks the editor). A pass or fail updates mastery, the recall card, and the review log. While that pause is active, the post-edit walkthrough does not quiz the same file again.
+
 ## 8. References
 
 Spaced repetition:

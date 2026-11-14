@@ -151,7 +151,7 @@ test("extension capture is opt-in and persists question details without source c
   assert.equal(saved.project.name, "Unassigned"); assert.equal(saved.check.score, 1);
 });
 
-test("ordinary quiz captures raw score and selected answer; walkthrough bypass is unscored", async t => {
+test("ordinary quiz captures scores, walkthrough bypass is unscored, and new questions get distinct IDs", async t => {
   const f = await fixture(t); resetStub();
   settings.set("comprehensionGuard.desktopSyncEnabled", true);
   settings.set("comprehensionGuard.provider", "ollama");
@@ -175,10 +175,25 @@ test("ordinary quiz captures raw score and selected answer; walkthrough bypass i
   await wait(() => panels[1].questions().length === 1); panels[1].fromWebview({ type: "bypass" });
   assert.equal(await session, true);
   const box = new DashboardOutbox(path.join(context.globalStorageUri.fsPath, "dashboard-outbox"));
+  const followupGate = runComprehensionGate("function total() { return 6; }", context as never, "javascript", { source: "agent" });
+  await wait(() => panels.length === 3); panels[2].fromWebview({ type: "ready" });
+  await wait(() => panels[2].questions().length === 1); panels[2].fromWebview({ type: "explain" });
+  const start = Date.now();
+  while ((await box.pending()).length !== 3) {
+    if (Date.now() - start > 2000) throw new Error("Explanation record was not queued");
+    await new Promise(r => setTimeout(r, 5));
+  }
+  await new Promise(r => setImmediate(r));
+  panels[2].fromWebview({ type: "next_question" });
+  await wait(() => panels[2].questions().length === 2);
+  panels[2].fromWebview({ type: "submit", selectedIndex: 1 });
+  assert.equal(await followupGate, true);
   await box.flush(async () => ({ endpoint: f.backend.endpoint, token }));
-  const history = f.backend.database.history(); assert.equal(history.length, 2);
+  const history = f.backend.database.history(); assert.equal(history.length, 4);
+  assert.equal(new Set(history.map(e => e.eventId)).size, 4);
   const graded = history.find(e => e.check.outcome === "pass")!;
   assert.equal(graded.check.score, 1); assert.equal(graded.check.answer, "6");
   assert.equal(history.find(e => e.check.outcome === "bypass")!.check.score, null);
-  assert.equal(f.backend.database.growth(null).completedChecks, 1);
+  assert.equal(history.find(e => e.check.outcome === "explained")!.check.score, null);
+  assert.equal(f.backend.database.growth(null).completedChecks, 2);
 });

@@ -35,6 +35,8 @@ export class Range {
 export const ViewColumn = { Active: -1, One: 1 };
 export const ConfigurationTarget = { Global: 1, Workspace: 2 };
 export const StatusBarAlignment = { Left: 1, Right: 2 };
+export class ThemeColor { constructor(public id: string) {} }
+export const OverviewRulerLane = { Left: 1, Center: 2, Right: 4, Full: 7 };
 
 /** "section.key" -> value. Tests set this directly. */
 export const settings = new Map<string, unknown>();

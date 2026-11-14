@@ -38,12 +38,21 @@ import {
   markEditorGate,
   releasePath,
 } from "./gateLock";
-import { runComprehensionGate } from "./quiz";
+import { runComprehensionGate, runSession } from "./quiz";
+import { newDashboardCheckId, recordDashboardCheck } from "./dashboard/service";
+import { generateQuestion } from "./llm";
+import { getMastery, getProfile, logReview, rememberCheck } from "./memory/remember";
+import type { LearnerPreferences } from "./sizing/chunkPolicy";
+import { gradeLocal } from "./sizing/questions";
+import { PauseSession, pauseSessionId, type PauseWire } from "./sizing/pauseSession";
+import type { CheckPreset, LocalQuestion, QuestionType } from "./sizing/types";
 import { offerWalkthrough } from "./walkthrough";
-import { getCharThreshold, isEnabled, setBypassArmed, state, wantsWalkthrough } from "./state";
+import { addAttempt } from "./store";
+import type { AttemptRecord, QuestionKind } from "./types";
+import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, wantsWalkthrough } from "./state";
 
 /**
- * Quizzes code written by Claude Code, Codex, or the Cursor agent.
+ * Quizzes code written by Claude Code, Codex, the Cursor agent, or Gemini CLI.
  *
  * Hooks are the reliable signal: a notifier posts the tool payload to a
  * localhost port, or leaves a file in an inbox if the editor is closed.
@@ -52,6 +61,9 @@ import { getCharThreshold, isEnabled, setBypassArmed, state, wantsWalkthrough } 
  */
 
 const MAX_QUEUE = 12;
+
+/** One checkpoint per agent session, and one question picker at a time. */
+const pauseSessions = new PauseSession((questions) => askCheckpoint(questions));
 
 type PendingDiskEdit = {
   fsPath: string;
@@ -62,7 +74,10 @@ type PendingDiskEdit = {
 
 type QueuedEdit = AgentEdit & { key: string };
 
+let activeContext: vscode.ExtensionContext | undefined;
+
 export function registerAgentGuard(context: vscode.ExtensionContext): void {
+  activeContext = context;
   const home = resolveGuardHome(process.env.COMPREHENSION_GUARD_HOME, os.homedir());
   const queue: QueuedEdit[] = [];
   const pending = new Map<string, PendingDiskEdit>();
@@ -114,11 +129,14 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
         }
         const batch = queue.splice(0);
         const lines = batch.reduce((count, edit) => count + edit.snippet.split("\n").length, 0);
-        if (wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
+        if (!readAgentPause() && wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
           await offerWalkthrough(context, batch);
           continue;
         }
         for (const edit of batch) {
+          if (readAgentPause() && isCoveredByEditorGate(edit.filePath, edit.snippet)) {
+            continue;
+          }
           await runAgentQuiz(context, edit);
         }
       }
@@ -144,7 +162,20 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     }
   };
 
-  const transport = startTransport(home, onHook);
+  const acceptHook = (body: unknown): void => {
+    if (!readAgentPause()) {
+      onHook(body);
+      return;
+    }
+    pauseSessions.track(noteEditedFiles(home, body));
+  };
+
+  const transport = startTransport(home, acceptHook, (body) =>
+    pauseSessions.onPause(body, {
+      enabled: readAgentPause() && isEnabled(),
+      preferences: readPreferences(),
+    }),
+  );
   context.subscriptions.push(transport);
 
   const flushPending = (): void => {
@@ -165,6 +196,15 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       }
       if (item.snippet.length < getCharThreshold()) {
         noteAccepted(item.fsPath, item.current);
+        continue;
+      }
+      if (readAgentPause()) {
+        pauseSessions.track(
+          pauseSessions.noteFile("disk", readPreferences(), item.fsPath, item.current, {
+            snippet: item.snippet,
+            hunks: [{ newText: item.snippet }],
+          }),
+        );
         continue;
       }
       enqueue({
@@ -523,14 +563,28 @@ async function installAgentHooks(
     );
     return;
   }
+  let pauseSource: string | undefined;
+  try {
+    pauseSource = await fs.promises.readFile(path.join(context.extensionPath, "hook", "pause.js"), "utf8");
+  } catch {
+    void vscode.window.showWarningMessage(
+      "Comprehension Guard: pause script is missing from the extension install. Agent pause was not installed.",
+    );
+  }
   const nodePath = resolveNodeBinary();
   const plan = planHookInstall({
     homeDir: home,
     nodePath,
     scriptSource,
+    pauseSource,
     claude: readConfig(path.join(home, ".claude", "settings.json")),
     codex: readConfig(path.join(home, ".codex", "hooks.json")),
     cursor: readConfig(path.join(home, ".cursor", "hooks.json")),
+    gemini: readConfig(path.join(home, ".gemini", "settings.json")),
+    copilot: readConfig(path.join(home, ".copilot", "hooks", "comprehension-guard.json")),
+    droid: readConfig(path.join(home, ".factory", "hooks.json")),
+    goose: readConfig(path.join(home, ".agents", "plugins", "comprehension-guard", "hooks", "hooks.json")),
+    antigravity: readConfig(path.join(home, ".gemini", "config", "hooks.json")),
   });
   for (const write of plan.writes) {
     await fs.promises.mkdir(path.dirname(write.path), { recursive: true });
@@ -560,12 +614,14 @@ async function installAgentHooks(
 function startTransport(
   home: string,
   onEvent: (body: unknown) => void,
+  onPause: (body: unknown) => Promise<PauseWire>,
 ): vscode.Disposable {
   const dir = guardDirectory(home);
   const token = crypto.randomBytes(16).toString("hex");
   const endpointFile = path.join(dir, "endpoint.json");
   const server = http.createServer((req, res) => {
-    if (req.method !== "POST" || (req.url ?? "").split("?")[0] !== "/event") {
+    const pathname = (req.url ?? "").split("?")[0];
+    if (req.method !== "POST" || (pathname !== "/event" && pathname !== "/pause")) {
       res.writeHead(404);
       res.end();
       return;
@@ -593,10 +649,32 @@ function startTransport(
       if (rejected) {
         return;
       }
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (pathname === "/pause") {
+        let body: unknown;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          writePause(res, continueWire());
+          return;
+        }
+        void onPause(body)
+          .then((decision) => {
+            if (!res.writableEnded) {
+              writePause(res, decision);
+            }
+          })
+          .catch(() => {
+            if (!res.writableEnded) {
+              writePause(res, continueWire());
+            }
+          });
+        return;
+      }
       res.writeHead(204);
       res.end();
       try {
-        onEvent(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        onEvent(JSON.parse(raw));
       } catch {
         // Ignore malformed bodies.
       }
@@ -663,6 +741,277 @@ function startTransport(
       }
     },
   };
+}
+
+function writePause(res: http.ServerResponse, body: PauseWire): void {
+  const raw = JSON.stringify(body);
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(raw),
+  });
+  res.end(raw);
+}
+
+function continueWire(): PauseWire {
+  return { allow: true, reason: "continue", userMessage: "", agentMessage: "" };
+}
+
+function readAgentPause(): boolean {
+  return vscode.workspace.getConfiguration("comprehensionGuard").get<boolean>("agentPause", true);
+}
+
+function readPreset(): CheckPreset {
+  const value = vscode.workspace.getConfiguration("comprehensionGuard").get<string>("checkPreset", "standard");
+  if (value === "quick" || value === "standard" || value === "deep") {
+    return value;
+  }
+  return "standard";
+}
+
+function readPreferences(): LearnerPreferences {
+  const config = vscode.workspace.getConfiguration("comprehensionGuard");
+  const profile = activeContext ? getProfile(activeContext) : {};
+  const settingLanguage = (config.get<string>("preferredLanguage", "") ?? "").trim();
+  const settingStrict = (config.get<string>("strictness", "") ?? "").trim();
+  const masteryByConcept: Record<string, number> = {};
+  if (activeContext) {
+    for (const row of getMastery(activeContext)) {
+      if (row.concept) {
+        masteryByConcept[row.concept] = row.mastery;
+      }
+    }
+  }
+  return {
+    preset: readPreset(),
+    preferredLanguage: settingLanguage || profile.preferredLanguage,
+    strictness: profile.strictness || settingStrict || "standard",
+    examDate: profile.examDate,
+    interviewDate: profile.interviewDate,
+    masteryByConcept,
+  };
+}
+
+async function noteEditedFiles(home: string, body: unknown): Promise<void> {
+  try {
+    if (!isEnabled() || !acceptIncoming(body)) {
+      return;
+    }
+    const edits = editsFromHookEnvelope(body, {
+      readFile: readOptional,
+      readSnapshot: (absPath) => readSnapshot(home, absPath),
+    });
+    const sessionId = pauseSessionId(body);
+    const preferences = readPreferences();
+    for (const edit of edits) {
+      const text = edit.next ?? (await readCurrentText(edit.filePath));
+      if (text === undefined) {
+        continue;
+      }
+      await pauseSessions.noteFile(sessionId, preferences, edit.filePath, text, {
+        snippet: edit.snippet,
+        hunks: edit.hunks,
+        created: edit.created,
+      });
+    }
+  } catch {
+    // Leave the agent unblocked if analysis cannot run.
+  }
+}
+
+type AskStep = "pass" | "fail" | "bypass";
+type PickResult = number | "bypass" | "dismiss";
+
+async function askCheckpoint(questions: LocalQuestion[]): Promise<boolean> {
+  if (questions.length === 0) {
+    return true;
+  }
+  setQuizActive(true);
+  try {
+    for (const question of questions) {
+      if (question.file) {
+        markEditorGate(question.file, question.code ?? question.prompt);
+      }
+      const result = await askOne(question);
+      if (result === "bypass") {
+        void vscode.window.setStatusBarMessage(
+          "Comprehension Guard: check bypassed. The agent can continue.",
+          4000,
+        );
+        return true;
+      }
+      if (result === "fail") {
+        return false;
+      }
+    }
+    void vscode.window.showInformationMessage("Comprehension Guard: check passed. The agent can continue.");
+    return true;
+  } finally {
+    setQuizActive(false);
+  }
+}
+
+async function askOne(question: LocalQuestion): Promise<AskStep> {
+  const context = activeContext;
+  if (context && question.code && question.requestedKind && question.requestedKind !== "multiple_choice") {
+    try {
+      const passed = await askWithEngine(context, question);
+      return passed ? "pass" : "fail";
+    } catch {
+      // Fall back to the local question when the model is unavailable.
+    }
+  }
+  const result = question.type === "ordering" ? await askOrdering(question) : await askChoice(question);
+  await recordLocalPause(question, result === "pass", result === "bypass");
+  return result;
+}
+
+async function askWithEngine(context: vscode.ExtensionContext, question: LocalQuestion): Promise<boolean> {
+  const kind = engineKind(question.requestedKind ?? "multiple_choice");
+  const generated = await generateQuestion({
+    context,
+    snippet: question.code ?? "",
+    language: "",
+    mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
+    kind,
+  });
+  generated.conceptTags = question.concept ? [question.concept] : generated.conceptTags;
+  return runSession(context, {
+    snippet: question.code ?? "",
+    filePath: question.file,
+    questions: [generated],
+    source: "agent",
+  });
+}
+
+function engineKind(kind: QuestionType): QuestionKind {
+  if (kind === "ordering") return "ordering";
+  if (kind === "change") return "debug";
+  if (kind === "explain") return "free-text";
+  return "multiple-choice";
+}
+
+async function recordLocalPause(question: LocalQuestion, passed: boolean, bypassed = false): Promise<void> {
+  const context = activeContext;
+  if (!context || !question.concept) {
+    return;
+  }
+  await recordDashboardCheck(context, {
+    eventId: newDashboardCheckId(), timestamp: Date.now(), filePath: question.file,
+    check: {
+      concepts: [question.concept], question: question.prompt,
+      // This local picker currently returns only an outcome, not the selected answer.
+      answer: "", feedback: bypassed ? "Check bypassed." : passed ? "Correct." : "Not quite.",
+      misconception: "", outcome: bypassed ? "bypass" : passed ? "pass" : "fail",
+      score: bypassed ? null : passed ? 1 : 0, source: "agent",
+      mode: question.type === "ordering" ? "ordering" : "multiple-choice", filePath: null, retries: 0,
+    },
+  });
+  if (bypassed) return;
+  const record: AttemptRecord = {
+    timestamp: Date.now(),
+    language: "",
+    charCount: question.code?.length ?? 0,
+    mode: "multiple-choice",
+    conceptTags: [question.concept],
+    passed,
+    outcome: passed ? "pass" : "fail",
+    followups: 0,
+    judgeConfigId: "local-pause",
+    score: passed ? 1 : 0,
+    source: "agent",
+    filePath: question.file,
+  };
+  await addAttempt(context, record);
+  const masteryAfter = await rememberCheck(context, record);
+  await logReview(context, {
+    concepts: record.conceptTags,
+    eventKind: "check",
+    source: "agent",
+    mode: "multiple-choice",
+    score: record.score,
+    passed,
+    followups: 0,
+    masteryAfter,
+    filePath: question.file,
+    question: question.prompt,
+    studentAnswer: "",
+    misconception: "",
+    askedForExplanation: false,
+    explanation: "",
+    judgeConfigId: "local-pause",
+  });
+}
+
+async function askChoice(question: LocalQuestion): Promise<AskStep> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const picked = await pickOption(question);
+    if (picked === "dismiss") {
+      return "fail";
+    }
+    if (picked === "bypass") {
+      return "bypass";
+    }
+    if (gradeLocal(question, { selectedIndex: picked })) {
+      return "pass";
+    }
+    if (attempt === 0) {
+      await vscode.window.showWarningMessage(question.hint);
+    }
+  }
+  return "fail";
+}
+
+async function askOrdering(question: LocalQuestion): Promise<AskStep> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const order: number[] = [];
+    const used = new Set<number>();
+    while (order.length < question.options.length) {
+      const picked = await pickOption(question, used);
+      if (picked === "dismiss") {
+        return "fail";
+      }
+      if (picked === "bypass") {
+        return "bypass";
+      }
+      order.push(picked);
+      used.add(picked);
+    }
+    if (gradeLocal(question, { order })) {
+      return "pass";
+    }
+    if (attempt === 0) {
+      await vscode.window.showWarningMessage(question.hint);
+    }
+  }
+  return "fail";
+}
+
+async function pickOption(question: LocalQuestion, hidden?: ReadonlySet<number>): Promise<PickResult> {
+  const items: Array<vscode.QuickPickItem & { pick: PickResult }> = [];
+  question.options.forEach((label, index) => {
+    if (hidden?.has(index)) {
+      return;
+    }
+    items.push({ label, pick: index });
+  });
+  items.push({ label: "Bypass this check", pick: "bypass" });
+  const picked = await vscode.window.showQuickPick(items, {
+    title: question.prompt,
+    placeHolder: question.prompt,
+    ignoreFocusOut: true,
+  });
+  if (!picked) {
+    return "dismiss";
+  }
+  return picked.pick;
+}
+
+async function readCurrentText(fsPath: string): Promise<string | undefined> {
+  const open = findOpen(fsPath);
+  if (open) {
+    return open.getText();
+  }
+  return readText(fsPath);
 }
 
 function acceptIncoming(body: unknown): boolean {
@@ -774,6 +1123,18 @@ function agentLabel(agent: string): string {
   }
   if (agent === "cursor") {
     return "Cursor agent";
+  }
+  if (agent === "gemini") {
+    return "Gemini CLI";
+  }
+  if (agent === "droid") {
+    return "Droid";
+  }
+  if (agent === "goose") {
+    return "Goose";
+  }
+  if (agent === "antigravity") {
+    return "Antigravity";
   }
   if (agent === "disk") {
     return "an external edit";

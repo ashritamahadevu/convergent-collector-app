@@ -8,6 +8,8 @@ This version supports History, Growth, and connection status. It records one que
 
 Deferred: mastery/Elo synchronization, recall cards, exam dates, prep sets, file maps, AI-written percentages, code profiles, multi-question test grouping, accounts, and cloud/cross-device sync. Existing Supabase code is unchanged and separately configured. The dashboard cannot automatically access VS Code's internal state. Only newly captured, opted-in checks are sent; no historical backfill.
 
+After merging the newer agent-pause flow, locally scored pause questions also emit check records. That local picker currently returns only pass/fail/bypass, so its selected-answer text is empty and its retry count is unavailable (zero). Model-backed pause questions use the ordinary session recorder. Follow-up questions in the newer quiz UI get separate event IDs.
+
 ## First local run
 
 Prerequisite: Node.js 22.13 or newer with `node:sqlite` support (verified on Node 22.22). Node 22 prints an experimental SQLite warning. The extension itself does not import SQLite.

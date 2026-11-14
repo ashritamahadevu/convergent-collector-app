@@ -97,6 +97,9 @@ export function aggregate(
   verdicts: CriterionVerdict[],
   nonCriticalPassFraction: number,
 ): { outcome: Outcome; missed: Criterion[] } {
+  if (criteria.length === 0) {
+    return { outcome: "fail", missed: [] };
+  }
   const verdictById = new Map<string, CriterionVerdict["verdict"]>();
   for (const v of verdicts) {
     verdictById.set(v.id, v.verdict);

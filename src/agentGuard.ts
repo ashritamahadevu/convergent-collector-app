@@ -59,7 +59,9 @@ import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, want
  * from the focused editor. A burst of many files (git checkout, pull) is ignored.
  */
 
-const MAX_QUEUE = 12;
+const QUIET_BATCH_MS = 700;
+/** Claude Code writes the next file about 1.4–1.8s later, so a session stays open longer. */
+const SESSION_BATCH_MS = 2500;
 
 /** One checkpoint per agent session, and one question picker at a time. */
 const pauseSessions = new PauseSession((questions) => askCheckpoint(questions));
@@ -71,7 +73,7 @@ type PendingDiskEdit = {
   snippet: string;
 };
 
-type QueuedEdit = AgentEdit & { key: string };
+type QueuedEdit = AgentEdit & { key: string; lineCount: number; group: string };
 
 let activeContext: vscode.ExtensionContext | undefined;
 
@@ -84,7 +86,8 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
   let batchTimer: ReturnType<typeof setTimeout> | undefined;
   let draining = false;
 
-  const enqueue = (edit: AgentEdit): void => {
+  const enqueue = (edit: AgentEdit, group = ""): void => {
+    const lineCount = edit.snippet.split(/\r?\n/).length;
     const snippet = quizSnippet(edit.snippet);
     if (snippet.length < getCharThreshold() || looksBinary(snippet)) {
       return;
@@ -102,18 +105,17 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     if (queue.some((item) => item.key === key)) {
       return;
     }
-    if (queue.length >= MAX_QUEUE) {
-      void vscode.window.setStatusBarMessage(
-        "Comprehension Guard: skipping extra agent edits until the current check finishes.",
-        4000,
-      );
+    if (heldKeys.has(key)) {
+      void revertEdit(edit);
       return;
     }
-    queue.push({ ...edit, snippet, key });
+    holdPath(edit.filePath);
+    queue.push({ ...edit, snippet, key, lineCount, group });
     if (batchTimer) {
       clearTimeout(batchTimer);
     }
-    batchTimer = setTimeout(() => void drain(), 700);
+    const wait = group && !group.startsWith("default\0") ? SESSION_BATCH_MS : QUIET_BATCH_MS;
+    batchTimer = setTimeout(() => void drain(), wait);
   };
 
   const drain = async (): Promise<void> => {
@@ -126,17 +128,38 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
         while (state.processing) {
           await delay(200);
         }
-        const batch = queue.splice(0);
-        const lines = batch.reduce((count, edit) => count + edit.snippet.split("\n").length, 0);
-        if (!readAgentPause() && wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
-          await offerWalkthrough(context, batch);
+        const group = queue[0].group;
+        const batch: QueuedEdit[] = [];
+        for (let i = 0; i < queue.length; ) {
+          if (queue[i].group === group) {
+            batch.push(queue.splice(i, 1)[0]);
+          } else {
+            i += 1;
+          }
+        }
+        const lines = batch.reduce((count, edit) => count + edit.lineCount, 0);
+        const files = new Set(batch.map((edit) => normPath(edit.filePath))).size;
+        if (!readAgentPause() && wantsWalkthrough(files, lines)) {
+          for (const edit of batch) {
+            releasePath(edit.filePath);
+          }
+          void offerWalkthrough(context, batch).catch(() => undefined);
           continue;
         }
         for (const edit of batch) {
+          try {
+            await persistHeld(home, edit);
+            await revertEdit(edit);
+          } catch {
+            // The quiz still runs. The in-memory edit is the copy we can write back.
+          }
+        }
+        for (const edit of batch) {
           if (readAgentPause() && isCoveredByEditorGate(edit.filePath, edit.snippet)) {
+            releasePath(edit.filePath);
             continue;
           }
-          await runAgentQuiz(context, edit);
+          await runAgentQuiz(context, edit, home);
         }
       }
     } finally {
@@ -155,9 +178,16 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       readFile: readOptional,
       readSnapshot: (absPath) => readSnapshot(home, absPath),
     });
+    const group = hookGroup(body);
     for (const edit of edits) {
-      const prepared = withBaseline(edit, edit.restore ? undefined : acceptedText(edit.filePath));
-      enqueue(prepared);
+      const open = findOpen(edit.filePath);
+      const baseline = edit.restore
+        ? undefined
+        : open?.isDirty
+          ? open.getText()
+          : acceptedText(edit.filePath);
+      const prepared = withBaseline(edit, baseline);
+      enqueue(prepared, group);
     }
   };
 
@@ -249,8 +279,92 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
       if (flushTimer) {
         clearTimeout(flushTimer);
       }
+      if (batchTimer) {
+        clearTimeout(batchTimer);
+      }
     },
   });
+
+  void offerHeldEdits(home, enqueue);
+}
+
+function heldPath(home: string, filePath: string): string {
+  return path.join(guardDirectory(home), "held", snapshotFileName(filePath) + ".json");
+}
+
+const heldKeys = new Set<string>();
+
+async function persistHeld(home: string, edit: AgentEdit): Promise<void> {
+  const file = heldPath(home, edit.filePath);
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(file, JSON.stringify(edit), "utf8");
+  heldKeys.add(normPath(edit.filePath) + "\0" + quizSnippet(edit.snippet));
+}
+
+async function clearHeld(home: string, filePath: string): Promise<void> {
+  await fs.promises.rm(heldPath(home, filePath), { force: true });
+}
+
+async function offerHeldEdits(
+  home: string,
+  enqueue: (edit: AgentEdit, group?: string) => void,
+): Promise<void> {
+  const dir = path.join(guardDirectory(home), "held");
+  let names: string[] = [];
+  try {
+    names = await fs.promises.readdir(dir);
+  } catch {
+    return;
+  }
+  const edits: AgentEdit[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) {
+      continue;
+    }
+    try {
+      const raw = await fs.promises.readFile(path.join(dir, name), "utf8");
+      const edit = JSON.parse(raw) as AgentEdit;
+      if (edit && typeof edit.filePath === "string" && typeof edit.snippet === "string") {
+        edits.push(edit);
+      }
+    } catch {
+      // Skip a damaged record.
+    }
+  }
+  if (edits.length === 0 || !isEnabled()) {
+    return;
+  }
+  const choice = await vscode.window.showInformationMessage(
+    "Comprehension Guard: " + edits.length + " agent edit" + (edits.length === 1 ? "" : "s") + " still need a check.",
+    "Check them",
+    "Discard",
+  );
+  if (choice === "Discard") {
+    for (const edit of edits) {
+      await clearHeld(home, edit.filePath);
+    }
+    return;
+  }
+  if (choice !== "Check them") {
+    return;
+  }
+  for (const edit of edits) {
+    enqueue(edit, "held");
+  }
+}
+
+function hookGroup(body: unknown): string {
+  const session = pauseSessionId(body);
+  const record = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  const payload = record.payload && typeof record.payload === "object"
+    ? record.payload as Record<string, unknown>
+    : record;
+  const prompt = typeof payload.prompt_id === "string"
+    ? payload.prompt_id
+    : typeof payload.promptId === "string"
+      ? payload.promptId
+      : "";
+  return session + "\0" + prompt;
 }
 
 function observeDocument(
@@ -305,6 +419,18 @@ function observeDocument(
     return;
   }
 
+  let onDisk = "";
+  try {
+    onDisk = fs.readFileSync(fsPath, "utf8");
+  } catch {
+    noteAccepted(fsPath, current);
+    return;
+  }
+  if (!equivalentText(onDisk, current)) {
+    noteAccepted(fsPath, current);
+    return;
+  }
+
   const take = shouldUseDiskFallback({
     suppressed: false,
     processing: false,
@@ -349,9 +475,19 @@ function rememberOpen(doc: vscode.TextDocument, pending: Map<string, PendingDisk
 async function runAgentQuiz(
   context: vscode.ExtensionContext,
   edit: AgentEdit,
+  home: string,
 ): Promise<void> {
-  const fileText = await readText(edit.filePath);
-  const prepared = prepareHeldEdit(edit, fileText, acceptedText(edit.filePath));
+  const open = findOpen(edit.filePath);
+  const buffer = open?.getText();
+  const disk = await readText(edit.filePath);
+  let landed = disk ?? buffer;
+  if (edit.restore && landed !== undefined && equivalentText(landed, edit.restore.previous)) {
+    landed = edit.restore.next;
+  }
+  const baseline = open?.isDirty && buffer !== undefined && landed !== undefined && !equivalentText(buffer, landed)
+    ? buffer
+    : acceptedText(edit.filePath);
+  const prepared = prepareHeldEdit(edit, landed, baseline);
   const added = prepared.restore
     ? diffAddedText(prepared.restore.previous, prepared.restore.next)
     : "";
@@ -360,22 +496,26 @@ async function runAgentQuiz(
     if (prepared.restore && looksLikeAgentInvocation(added)) {
       await revertEdit(prepared);
     }
+    releasePath(edit.filePath);
     return;
   }
   const snippet = quizSnippet(prepared.snippet);
   if (!isEnabled() || snippet.length < getCharThreshold()) {
+    releasePath(edit.filePath);
     return;
   }
   if (isCoveredByEditorGate(edit.filePath, snippet)) {
+    releasePath(edit.filePath);
     return;
   }
   if (state.bypassArmed) {
     setBypassArmed(false);
     await rememberFile(edit.filePath);
+    await clearHeld(home, edit.filePath);
+    releasePath(edit.filePath);
     return;
   }
 
-  holdPath(edit.filePath);
   markEditorGate(edit.filePath, snippet);
   state.suppressEditGuard = true;
   state.processing = true;
@@ -392,8 +532,12 @@ async function runAgentQuiz(
       "Comprehension Guard: checking code from " + agentLabel(edit.agent) + ".",
       4000,
     );
-    // Keep the generated code out of the file while the quiz is open.
-    const withheld = await revertEdit(prepared);
+    // The batch revert already ran. Revert again only if the agent text is still in the file.
+    const alreadyHeld = prepared.restore !== undefined && (
+      (disk !== undefined && equivalentText(disk, prepared.restore.previous)) ||
+      (buffer !== undefined && equivalentText(buffer, prepared.restore.previous))
+    );
+    const withheld = alreadyHeld || await revertEdit(prepared);
     let language: string | undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
@@ -413,7 +557,9 @@ async function runAgentQuiz(
     unlock();
     if (passed) {
       const inserted = await applyHeldEdit(prepared);
-      if (!inserted) {
+      if (inserted) {
+        await clearHeld(home, edit.filePath);
+      } else {
         void vscode.window.showWarningMessage(
           "Comprehension Guard: the check was passed, but the generated code could not be written into the file.",
         );
@@ -425,13 +571,18 @@ async function runAgentQuiz(
         void vscode.window.showWarningMessage(
           "Comprehension Guard: the check did not pass, but the file had already changed again so it was left as-is.",
         );
+      } else {
+        await clearHeld(home, edit.filePath);
       }
     } else if (prepared.restore) {
       noteAccepted(edit.filePath, prepared.restore.previous);
+      await clearHeld(home, edit.filePath);
     }
   } catch {
     unlock();
-    await applyHeldEdit(prepared);
+    void vscode.window.showWarningMessage(
+      "Comprehension Guard: the check stopped early. The generated code is still held and was not written into the file.",
+    );
   } finally {
     state.processing = false;
     await delay(150);
@@ -458,9 +609,6 @@ async function applyHeldEdit(edit: AgentEdit): Promise<boolean> {
     await fs.promises.writeFile(edit.filePath, next, "utf8");
     if (open) {
       await replaceDocument(open, next);
-      if (open.isDirty) {
-        await open.save();
-      }
     }
     noteAccepted(edit.filePath, next);
     return true;
@@ -513,31 +661,21 @@ async function revertEdit(edit: AgentEdit): Promise<boolean> {
   return true;
 }
 
-async function writeBack(fsPath: string, previous: string, expected: string): Promise<boolean> {
+async function writeBack(fsPath: string, next: string, _expected: string): Promise<boolean> {
+  try {
+    await fs.promises.mkdir(path.dirname(fsPath), { recursive: true });
+    await fs.promises.writeFile(fsPath, next, "utf8");
+  } catch {
+    return false;
+  }
   const open = findOpen(fsPath);
-  if (open && equivalentText(open.getText(), expected)) {
-    const applied = await replaceDocument(open, previous);
+  if (open && !equivalentText(open.getText(), next)) {
+    const applied = await replaceDocument(open, next);
     if (!applied) {
       return false;
     }
-    if (open.isDirty) {
-      await open.save();
-    }
-    noteAccepted(fsPath, previous);
-    return true;
   }
-  const disk = await readText(fsPath);
-  if (disk === undefined || !equivalentText(disk, expected)) {
-    return false;
-  }
-  await fs.promises.writeFile(fsPath, previous, "utf8");
-  if (open && equivalentText(open.getText(), expected)) {
-    await replaceDocument(open, previous);
-    if (open.isDirty) {
-      await open.save();
-    }
-  }
-  noteAccepted(fsPath, previous);
+  noteAccepted(fsPath, open?.getText() ?? next);
   return true;
 }
 

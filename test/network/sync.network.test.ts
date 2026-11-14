@@ -78,10 +78,10 @@ describe("supabase sync offline", () => {
     configure(server.base); // network back
     server.handler = () => ({ kind: "json", status: 201, body: {} });
     await new Promise((r) => setTimeout(r, 1500));
-    assert.equal(queue(ctx).length, 1, "still queued: nothing retries on its own");
+    assert.equal(queue(ctx).length, 0, "a failed flush retries without a new event");
     queueReview(ctx as never, review(2));
     await waitFor(() => queue(ctx).length === 0, 3000, "queue drained");
-    assert.equal(server.requests.length, 2);
+    assert.ok(server.requests.length >= 2);
   });
 
   test("BUG: concurrent flushes overwrite each other -> a queued event is lost while offline", async () => {
@@ -95,12 +95,15 @@ describe("supabase sync offline", () => {
     await new Promise((r) => setTimeout(r, 1200)); // flush #1 finishes last and writes [q1]
     const left = queue(ctx).map((op) => op.row.question);
     console.log("[observed] queue after two offline flushes: " + JSON.stringify(left));
-    assert.deepEqual(left, ["q1"], "q2 was dropped from the queue without ever being sent");
+    assert.deepEqual(left.sort(), ["q1", "q2"]);
   });
 
   test("BUG: concurrent flushes double-insert review_events when online", async () => {
     configure(server.base);
     const ctx = signedInContext();
+    const session = JSON.parse(ctx.secretStore.get(SESSION_KEY) as string) as { expiresAt: number };
+    session.expiresAt = Date.now() + 3_600_000;
+    ctx.secretStore.set(SESSION_KEY, JSON.stringify(session));
     server.handler = (_q, i) => ({ kind: "json", status: 201, body: {}, delayMs: i === 0 ? 400 : 0 });
     queueReview(ctx as never, review(1));
     await new Promise((r) => setTimeout(r, 50));
@@ -108,7 +111,7 @@ describe("supabase sync offline", () => {
     await new Promise((r) => setTimeout(r, 1000));
     const q1Posts = server.requests.filter((r) => r.body.includes('"question":"q1"')).length;
     console.log("[observed] q1 POSTed " + q1Posts + " times to " + server.requests[0]?.url);
-    assert.equal(q1Posts, 2, "insert-only row sent twice -> duplicate review_events");
+    assert.equal(q1Posts, 1, "insert-only row is sent once");
     assert.equal(queue(ctx).length, 0);
   });
 
@@ -120,8 +123,8 @@ describe("supabase sync offline", () => {
     }
     await settle();
     const q = queue(ctx);
-    assert.equal(q.length, 200);
-    assert.equal(q[0].row.question, "q50");
+    assert.equal(q.length, 250);
+    assert.equal(q[0].row.question, "q0");
   });
 
   test("BUG: expired session -> every upsert 401s, no refresh is attempted, queue never drains", async () => {
@@ -133,7 +136,7 @@ describe("supabase sync offline", () => {
     queueReview(ctx as never, review(2));
     await settle();
     assert.equal(queue(ctx).length, 2);
-    assert.equal(server.requests.some((r) => r.url.includes("refresh_token")), false);
+    assert.equal(server.requests.some((r) => r.url.includes("refresh_token")), true);
   });
 
   test("hung Supabase does not block logReview (what quiz.ts awaits)", async () => {

@@ -231,15 +231,14 @@ describe("question generation: network down before the quiz", () => {
     assert.match(r.error!.message, /3-4 options/);
   });
 
-  test("BUG: free-text with no criteria is accepted (after a second paid call) and comes back with criteria: []", async () => {
+  test("free-text with no criteria is rejected after the retry", async () => {
     useOllama(server.base);
     const { criteria: _drop, ...noCriteria } = FREE_TEXT_QUESTION;
     void _drop;
     server.handler = () => ollamaReply(noCriteria);
     const r = await timed(() => gen(fakeContext()));
-    assert.ifError(r.error);
-    assert.deepEqual(r.value!.criteria, []);
-    assert.equal(r.value!.flagged, true);
+    assert.ok(r.error);
+    assert.match(r.error!.message, /criteria/i);
     assert.equal(server.requests.length, 2);
   });
 
@@ -248,8 +247,8 @@ describe("question generation: network down before the quiz", () => {
     server.handler = () => ollamaReply({ ...FREE_TEXT_QUESTION, criteria: [FREE_TEXT_QUESTION.criteria[0]] });
     const r = await timed(() => gen(fakeContext()));
     assert.ifError(r.error);
-    assert.equal(server.requests.length, 2, "generation ran twice");
-    assert.equal(r.value!.flagged, true);
+    assert.equal(server.requests.length, 1, "one criterion is accepted");
+    assert.equal(r.value!.criteria.length, 1);
   });
 
   test("slow but under the timeout (3s) succeeds", async () => {
@@ -312,28 +311,32 @@ describe("grading: network drops after the question is shown", () => {
     assert.deepEqual(r, { kind: "no_decision", reason: "parse_failed" });
   });
 
-  test("BUG: judge says FAIL in upper case -> no_decision (and quiz.ts then passes the student)", async () => {
+  test("judge says FAIL in upper case -> decided fail", async () => {
     useOllama(server.base);
     const raw = JSON.stringify(judgeJson(["fail", "fail"])).replace(/"fail"/g, '"FAIL"');
     server.handler = () => ollamaReply(raw);
     const r = await runJudge(fakeContext());
-    assert.deepEqual(r, { kind: "no_decision", reason: "parse_failed" });
+    assert.equal(r.kind, "decided");
+    if (r.kind === "decided") {
+      assert.deepEqual(r.verdicts.map((v) => v.verdict), ["fail", "fail"]);
+    }
   });
 
-  test("BUG: judge renames criterion ids -> 'decided' with ids that do not match (aggregate then fails a correct answer)", async () => {
+  test("judge renames criterion ids -> verdicts stay on the generated ids", async () => {
     useOllama(server.base);
     server.handler = () => ollamaReply(judgeJson(["pass", "pass"], ["criterion_1", "criterion_2"]));
     const r = await runJudge(fakeContext());
     assert.equal(r.kind, "decided");
     if (r.kind === "decided") {
-      assert.deepEqual(r.verdicts.map((v) => v.id), ["criterion_1", "criterion_2"]);
+      assert.deepEqual(r.verdicts.map((v) => v.id), ["c1", "c2"]);
+      assert.deepEqual(r.verdicts.map((v) => v.verdict), ["pass", "pass"]);
     }
   });
 
-  test("question with no criteria -> judge returns 'decided' with no verdicts and never calls the model", async () => {
+  test("question with no criteria -> judge returns no_decision and never calls the model", async () => {
     useOllama(server.base);
     const r = await runJudge(fakeContext(), { ...FREE_TEXT_QUESTION, criteria: [] } as GeneratedQuestion);
-    assert.deepEqual(r, { kind: "decided", verdicts: [] });
+    assert.deepEqual(r, { kind: "no_decision", reason: "empty_criteria" });
     assert.equal(server.requests.length, 0);
   });
 });

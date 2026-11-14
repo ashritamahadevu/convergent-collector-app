@@ -38,7 +38,7 @@ export type GradingMode = "free-text" | "multiple-choice";
 export type GuardMode = "auto" | "learn" | "walkthrough";
 export type QuestionKind = "free-text" | "multiple-choice" | "ordering" | "debug";
 /** Bypass is stored but excluded from the pass rate. Disputed counts as correct. */
-export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained";
+export type AttemptOutcome = "pass" | "fail" | "bypass" | "disputed" | "explained" | "ungraded";
 export type AttemptSource = "paste" | "inline" | "agent" | "recall" | "walkthrough";
 export type AttemptRecord = {
   timestamp: number;

@@ -99,6 +99,7 @@ export async function saveMisgradeReport(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(report),
+      signal: AbortSignal.timeout(1500),
     });
     if (!response.ok) {
       return { sent: false, detail: "Saved locally. The report URL returned " + response.status + "." };

@@ -25,6 +25,11 @@ export type QuizView = {
     allowNextQuestion?: boolean;
   }): void;
   waitForSubmit(): Promise<QuizAction>;
+  /** Bypass or close that arrived while grading was in flight. Leaves submits queued. */
+  pollInterrupt(): "bypass" | "cancel" | undefined;
+  onInterrupt(listener: (kind: "bypass" | "cancel") => void): () => void;
+  beginGrade(): void;
+  endGrade(): void;
   close(): void;
 };
 
@@ -1303,7 +1308,11 @@ function getWebviewHtml(
     if (!msg || !msg.type) return;
     if (msg.type === "showQuestion") {
       renderQuestion(msg);
+    } else if (msg.type === "grading") {
+      if (submitBtn) submitBtn.disabled = true;
+      validationMsgEl.textContent = "Grading your answer…";
     } else if (msg.type === "showFeedback") {
+      if (submitBtn) submitBtn.disabled = false;
       showFeedback(msg);
     }
   });
@@ -1354,9 +1363,17 @@ export function createQuizPanel(
 
   let disposed = false;
   let ready = false;
+  let grading = false;
   const queued: unknown[] = [];
   let pendingResolve: ((value: QuizAction) => void) | null = null;
   let queuedAction: QuizAction | null = null;
+  const interruptListeners = new Set<(kind: "bypass" | "cancel") => void>();
+
+  const emitInterrupt = (kind: "bypass" | "cancel"): void => {
+    for (const listener of interruptListeners) {
+      listener(kind);
+    }
+  };
 
   const post = (message: unknown): void => {
     if (disposed) return;
@@ -1384,7 +1401,7 @@ export function createQuizPanel(
       }
       return;
     }
-    if (msg.type === "bypass") { resolvePending({ type: "bypass" }); return; }
+    if (msg.type === "bypass") { emitInterrupt("bypass"); resolvePending({ type: "bypass" }); return; }
     if (msg.type === "explain") { resolvePending({ type: "explain" }); return; }
     if (msg.type === "cancel") { resolvePending({ type: "cancel" }); return; }
     if (msg.type === "next_question") { resolvePending({ type: "next_question" }); return; }
@@ -1392,7 +1409,7 @@ export function createQuizPanel(
       resolvePending({ type: "dispute", answer: typeof msg.answer === "string" ? msg.answer : "" });
       return;
     }
-    if (msg.type !== "submit") return;
+    if (msg.type !== "submit" || grading) return;
     resolvePending({
       type: "submit",
       answer: typeof msg.answer === "string" ? msg.answer : undefined,
@@ -1406,6 +1423,7 @@ export function createQuizPanel(
 
   panel.onDidDispose(() => {
     disposed = true;
+    emitInterrupt("cancel");
     resolvePending({ type: "cancel" });
   });
 
@@ -1443,6 +1461,36 @@ export function createQuizPanel(
         passed: opts.passed,
         allowNextQuestion: opts.allowNextQuestion !== false,
       });
+    },
+
+    onInterrupt(listener: (kind: "bypass" | "cancel") => void): () => void {
+      interruptListeners.add(listener);
+      return () => {
+        interruptListeners.delete(listener);
+      };
+    },
+
+    beginGrade(): void {
+      grading = true;
+      post({ type: "grading" });
+    },
+
+    endGrade(): void {
+      grading = false;
+    },
+
+    pollInterrupt(): "bypass" | "cancel" | undefined {
+      if (queuedAction?.type === "bypass") {
+        queuedAction = null;
+        return "bypass";
+      }
+      if (disposed || queuedAction?.type === "cancel") {
+        if (queuedAction?.type === "cancel") {
+          queuedAction = null;
+        }
+        return "cancel";
+      }
+      return undefined;
     },
 
     waitForSubmit(): Promise<QuizAction> {

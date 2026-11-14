@@ -21,6 +21,8 @@ export const state = {
   quizActive: false,
   /** Set when Bypass is used during an open quiz. Keeps the code. */
   bypassDuringQuiz: false,
+  /** True while a document lock is reverting someone else's edit. */
+  lockRestoring: false,
 };
 
 const bypassListeners = new Set<() => void>();
@@ -166,8 +168,11 @@ export function wantsWalkthrough(fileCount: number, lineCount: number): boolean 
   if (mode === "learn") {
     return false;
   }
+  if (fileCount <= 1) {
+    return false;
+  }
   if (mode === "walkthrough") {
-    return fileCount > 1;
+    return true;
   }
   return (
     fileCount >= getWalkthroughFileThreshold() ||

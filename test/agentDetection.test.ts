@@ -315,7 +315,7 @@ test("disk fallback ignores focused single insertions, typing, and bulk checkout
   };
   assert.equal(shouldUseDiskFallback({ ...base, bigSingle: true }), false);
   assert.equal(shouldUseDiskFallback({ ...base, isDirty: true }), false);
-  assert.equal(shouldUseDiskFallback(base), true);
+  assert.equal(shouldUseDiskFallback(base), false, "the focused editor is not a disk write");
   assert.equal(shouldUseDiskFallback({ ...base, isActive: false, isDirty: true }), true);
   assert.equal(shouldUseDiskFallback({ ...base, totalInserted: 20 }), false);
   assert.equal(shouldUseDiskFallback({ ...base, hasBaseline: false }), false);

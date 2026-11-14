@@ -15,7 +15,7 @@ export function ideCandidatePaths(platform, home, env = {}) {
   if (platform === "darwin") {
     return [
       "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
-      path.join(home, "Applications", "Cursor.app", "Contents", "Resources", "app", "bin", "cursor"),
+      path.posix.join(home.replace(/\\/g, "/"), "Applications", "Cursor.app", "Contents", "Resources", "app", "bin", "cursor"),
     ];
   }
   if (platform === "win32") {

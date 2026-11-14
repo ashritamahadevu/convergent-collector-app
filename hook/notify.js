@@ -176,6 +176,15 @@ function postJson(body) {
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
+    let settled = false;
+    let sent = false;
+    const finish = (ok) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(ok);
+    };
     const req = http.request(
       {
         host: "127.0.0.1",
@@ -191,15 +200,16 @@ function postJson(body) {
       },
       (res) => {
         res.resume();
-        resolve(res.statusCode >= 200 && res.statusCode < 300);
+        finish(res.statusCode >= 200 && res.statusCode < 300);
       },
     );
-    req.on("error", () => resolve(false));
+    req.on("error", () => finish(false));
     req.on("timeout", () => {
       req.destroy();
-      resolve(false);
+      finish(sent);
     });
     req.end(body);
+    sent = true;
   });
 }
 

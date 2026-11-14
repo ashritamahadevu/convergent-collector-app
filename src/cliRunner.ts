@@ -202,12 +202,21 @@ function finishChild(
   });
   child.on("error", (err) => {
     clearTimeout(timer);
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      reject(new Error(spec.command + " is not installed."));
+      return;
+    }
     reject(err);
   });
   child.on("close", (code) => {
     clearTimeout(timer);
+    const detail = (stderr || stdout).replace(/\s+/g, " ").trim().slice(0, 240);
+    if (/not recognized|command not found|No such file|ENOENT/i.test(detail)) {
+      reject(new Error(spec.command + " is not installed."));
+      return;
+    }
     if (code !== 0) {
-      const detail = (stderr || stdout).replace(/\s+/g, " ").trim().slice(0, 240);
       if (LOGIN_ERROR.test(detail)) {
         reject(new Error(spec.command + " is not signed in. " + detail));
         return;

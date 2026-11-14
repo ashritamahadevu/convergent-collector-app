@@ -124,9 +124,18 @@ export function questionForChunk(choice: ChunkChoice, prefs: LearnerPreferences)
   const suffix = language ? ` Answer in ${language}.` : "";
   if (choice.questionType === "ordering") {
     const question = orderingQuestion(slot, choice.unit);
-    return { ...question, prompt: question.prompt + suffix };
+    return {
+      ...question,
+      prompt: question.prompt + suffix,
+      code: choice.unit.code,
+      requestedKind: choice.questionType,
+    };
   }
-  return choiceQuestion(slot, choice.unit, promptForKind(choice.questionType, choice.unit) + suffix);
+  return {
+    ...choiceQuestion(slot, choice.unit, promptForKind(choice.questionType, choice.unit) + suffix),
+    code: choice.unit.code,
+    requestedKind: choice.questionType,
+  };
 }
 
 function promptForKind(type: QuestionType, unit: UnitFact): string {

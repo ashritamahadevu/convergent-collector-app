@@ -68,7 +68,7 @@ test("a single high-logic unit on standard stays inside 300 seconds", () => {
   assert.equal(plan.slots[0].type, "explain");
   assert.equal(plan.slots[0].points, 7);
   assert.equal(plan.slots[0].estimatedSeconds, 90);
-  assert.equal(plan.slots[0].concept, "auth");
+  assert.equal(plan.slots[0].concept, "api-semantics");
   assert.equal(plan.slots[0].keyIdea, "function parse(): void");
   assert.equal(plan.coverage, 1);
   assert.equal(plan.sessions, 1);
@@ -232,7 +232,7 @@ test("key idea uses the trimmed signature, else the unit name", () => {
   );
   assert.equal(long.slots[0].keyIdea.length, 120);
   assert.equal(long.slots[0].keyIdea, "x".repeat(120));
-  assert.equal(long.slots[0].concept, "control flow");
+  assert.equal(long.slots[0].concept, "control-flow");
 
   const blank = draftPlan([unit({ unit: "noname", signature: "   ", formulaValue: 2, logic: 1 })], "quick");
   assert.equal(blank.slots[0].keyIdea, "noname");

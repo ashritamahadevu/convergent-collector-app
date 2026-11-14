@@ -1,3 +1,4 @@
+import { canonicalConcept } from "./concepts";
 import type { CheckPreset, QuestionType, UnitFact } from "./types";
 
 /**
@@ -120,7 +121,7 @@ export function nextChunkMessage(prefs: LearnerPreferences): string {
 }
 
 export function conceptOf(unit: UnitFact): string {
-  return unit.riskTags[0] ?? "control flow";
+  return canonicalConcept(unit);
 }
 
 function skipKnown(unit: UnitFact, prefs: LearnerPreferences): boolean {

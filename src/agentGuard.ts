@@ -38,13 +38,16 @@ import {
   markEditorGate,
   releasePath,
 } from "./gateLock";
-import { runComprehensionGate } from "./quiz";
-import { getMastery, getProfile } from "./memory/remember";
+import { runComprehensionGate, runSession } from "./quiz";
+import { generateQuestion } from "./llm";
+import { getMastery, getProfile, logReview, rememberCheck } from "./memory/remember";
 import type { LearnerPreferences } from "./sizing/chunkPolicy";
 import { gradeLocal } from "./sizing/questions";
 import { PauseSession, pauseSessionId, type PauseWire } from "./sizing/pauseSession";
-import type { CheckPreset, LocalQuestion } from "./sizing/types";
+import type { CheckPreset, LocalQuestion, QuestionType } from "./sizing/types";
 import { offerWalkthrough } from "./walkthrough";
+import { addAttempt } from "./store";
+import type { AttemptRecord, QuestionKind } from "./types";
 import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, wantsWalkthrough } from "./state";
 
 /**
@@ -125,11 +128,14 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
         }
         const batch = queue.splice(0);
         const lines = batch.reduce((count, edit) => count + edit.snippet.split("\n").length, 0);
-        if (wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
+        if (!readAgentPause() && wantsWalkthrough(new Set(batch.map((edit) => edit.filePath)).size, lines)) {
           await offerWalkthrough(context, batch);
           continue;
         }
         for (const edit of batch) {
+          if (readAgentPause() && isCoveredByEditorGate(edit.filePath, edit.snippet)) {
+            continue;
+          }
           await runAgentQuiz(context, edit);
         }
       }
@@ -821,7 +827,10 @@ async function askCheckpoint(questions: LocalQuestion[]): Promise<boolean> {
   setQuizActive(true);
   try {
     for (const question of questions) {
-      const result = question.type === "ordering" ? await askOrdering(question) : await askChoice(question);
+      if (question.file) {
+        markEditorGate(question.file, question.code ?? question.prompt);
+      }
+      const result = await askOne(question);
       if (result === "bypass") {
         void vscode.window.setStatusBarMessage(
           "Comprehension Guard: check bypassed. The agent can continue.",
@@ -838,6 +847,88 @@ async function askCheckpoint(questions: LocalQuestion[]): Promise<boolean> {
   } finally {
     setQuizActive(false);
   }
+}
+
+async function askOne(question: LocalQuestion): Promise<AskStep> {
+  const context = activeContext;
+  if (context && question.code && question.requestedKind && question.requestedKind !== "multiple_choice") {
+    try {
+      const passed = await askWithEngine(context, question);
+      return passed ? "pass" : "fail";
+    } catch {
+      // Fall back to the local question when the model is unavailable.
+    }
+  }
+  const result = question.type === "ordering" ? await askOrdering(question) : await askChoice(question);
+  if (result !== "bypass") {
+    await recordLocalPause(question, result === "pass");
+  }
+  return result;
+}
+
+async function askWithEngine(context: vscode.ExtensionContext, question: LocalQuestion): Promise<boolean> {
+  const kind = engineKind(question.requestedKind ?? "multiple_choice");
+  const generated = await generateQuestion({
+    context,
+    snippet: question.code ?? "",
+    language: "",
+    mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
+    kind,
+  });
+  generated.conceptTags = question.concept ? [question.concept] : generated.conceptTags;
+  return runSession(context, {
+    snippet: question.code ?? "",
+    filePath: question.file,
+    questions: [generated],
+    source: "agent",
+  });
+}
+
+function engineKind(kind: QuestionType): QuestionKind {
+  if (kind === "ordering") return "ordering";
+  if (kind === "change") return "debug";
+  if (kind === "explain") return "free-text";
+  return "multiple-choice";
+}
+
+async function recordLocalPause(question: LocalQuestion, passed: boolean): Promise<void> {
+  const context = activeContext;
+  if (!context || !question.concept) {
+    return;
+  }
+  const record: AttemptRecord = {
+    timestamp: Date.now(),
+    language: "",
+    charCount: question.code?.length ?? 0,
+    mode: "multiple-choice",
+    conceptTags: [question.concept],
+    passed,
+    outcome: passed ? "pass" : "fail",
+    followups: 0,
+    judgeConfigId: "local-pause",
+    score: passed ? 1 : 0,
+    source: "agent",
+    filePath: question.file,
+  };
+  await addAttempt(context, record);
+  const masteryAfter = await rememberCheck(context, record);
+  await logReview(context, {
+    concepts: record.conceptTags,
+    eventKind: "check",
+    source: "agent",
+    mode: "multiple-choice",
+    score: record.score,
+    passed,
+    followups: 0,
+    masteryAfter,
+    filePath: question.file,
+    question: question.prompt,
+    studentAnswer: "",
+    misconception: "",
+    askedForExplanation: false,
+    explanation: "",
+    judgeConfigId: "local-pause",
+  });
 }
 
 async function askChoice(question: LocalQuestion): Promise<AskStep> {

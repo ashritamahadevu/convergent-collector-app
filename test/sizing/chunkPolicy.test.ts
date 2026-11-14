@@ -61,7 +61,7 @@ test("deep asks for a change when the chunk is large", () => {
 test("strict steps a quick preset to its deepest question and still asks a known chunk", () => {
   const unit = fact({ mastery: 0.95, formulaValue: 2, branches: 2, loops: 1 });
   assert.equal(questionKind(unit, { preset: "quick", strictness: "strict", now: NOW }), "ordering");
-  assert.ok(chooseChunk([unit], { preset: "standard", strictness: "strict", masteryByConcept: { "control flow": 0.95 }, now: NOW }));
+  assert.ok(chooseChunk([unit], { preset: "standard", strictness: "strict", masteryByConcept: { "control-flow": 0.95 }, now: NOW }));
 });
 
 test("an exam within 14 days steps quick up to standard", () => {

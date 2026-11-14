@@ -176,6 +176,10 @@ export type LocalQuestion = {
   answer: number | number[];
   hint: string;
   explanation: string;
+  /** Source of the unit, so the quiz engine can ask about the real code. */
+  code?: string;
+  /** Question type chosen by the chunk policy, before local fallback. */
+  requestedKind?: QuestionType;
 };
 
 export type HookAgent = "claude-code" | "codex" | "cursor" | "unknown";

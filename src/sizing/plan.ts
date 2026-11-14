@@ -1,3 +1,4 @@
+import { canonicalConcept } from "./concepts";
 import type {
   CheckPreset,
   DraftPlan,
@@ -214,7 +215,7 @@ function buildMergeGroups(units: UnitFact[], merge: string[][] | undefined): Map
 
 function conceptFor(unit: UnitFact, override: ConceptOverride | undefined): string {
   if (override?.concept && override.concept.length > 0) return override.concept;
-  return unit.riskTags[0] ?? "control flow";
+  return canonicalConcept(unit);
 }
 
 function keyIdeaFor(unit: UnitFact, override: ConceptOverride | undefined): string {

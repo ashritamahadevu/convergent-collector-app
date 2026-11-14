@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import * as vscodeStub from "./vscodeStub";
 import { closedPort, fakeContext, startMockServer, waitFor, type MockServer } from "./harness";
-import { flushSync, queueReview, signIn } from "../../src/memory/sync";
+import { flushSync, queueReview, resetSyncForTests, signIn } from "../../src/memory/sync";
 import { logReview } from "../../src/memory/remember";
 
 /**
@@ -30,6 +30,7 @@ after(async () => {
 });
 
 beforeEach(() => {
+  resetSyncForTests();
   vscodeStub.resetStub();
   server.requests.length = 0;
 });

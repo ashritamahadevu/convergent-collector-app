@@ -7,7 +7,7 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import * as vscodeStub from "./vscodeStub";
 import { FREE_TEXT_QUESTION, SNIPPET, fakeContext, judgeJson } from "./harness";
 import { runCliPrompt } from "../../src/cliRunner";
-import { generateQuestion, judge, setLogSink } from "../../src/llm";
+import { clearQuestionCache, generateQuestion, judge, setLogSink } from "../../src/llm";
 import type { GeneratedQuestion } from "../../src/types";
 
 /**
@@ -68,6 +68,7 @@ const sysRoot = process.env.SystemRoot ?? "C:\\Windows";
 const SYSTEM_PATH = [path.join(sysRoot, "System32"), path.join(sysRoot, "System32", "WindowsPowerShell", "v1.0"), sysRoot].join(";");
 
 beforeEach(() => {
+  clearQuestionCache();
   vscodeStub.resetStub();
   process.env.PATH = dir + ";" + SYSTEM_PATH;
   delete process.env.CG_FAKE_PIDFILE;

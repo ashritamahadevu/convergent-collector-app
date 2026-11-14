@@ -11,7 +11,7 @@ import {
   setQuizActive,
   state,
 } from "./state";
-import { runComprehensionGate } from "./quiz";
+import { beginQuestion, runComprehensionGate } from "./quiz";
 
 /**
  * Registers the inline-insertion guard.
@@ -90,6 +90,13 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
 
     setQuizActive(true);
     state.processing = true;
+    const prepared = beginQuestion(
+      context,
+      snippet,
+      editor.document.languageId,
+      undefined,
+      editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+    );
     const lock = lockDocument(editor.document);
     try {
       const passed = await runComprehensionGate(
@@ -99,6 +106,7 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         {
           source: "inline",
           filePath: editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+          prepared,
           editor,
           range: placed,
           lock,

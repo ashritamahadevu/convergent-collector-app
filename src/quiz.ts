@@ -1,13 +1,13 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { aggregate, gradeMcq, gradeOrdering, runPreChecks } from "./decision";
-import { generateQuestion, getJudgeConfigId, judge, providerNeedsApiKey } from "./llm";
-import { getApiKey } from "./secrets";
+import { getJudgeConfigId, judge } from "./llm";
+import { localGeneratedQuestion } from "./sizing/questions";
 import {
   getGradingMode,
   getMaxFollowups,
   getMinAnswerLength,
   getNonCriticalPassFraction,
-  getProvider,
   insertedRange,
   state,
   subscribeQuizBypass,
@@ -18,9 +18,43 @@ import { addAttempt, saveMisgradeReport } from "./store";
 import type { AttemptOutcome, AttemptRecord, AttemptSource, CriterionVerdict, GeneratedQuestion } from "./types";
 import { sameCode } from "./debugCode";
 import type { DocumentLock } from "./documentLock";
-import { createQuizPanel, type QuizAction } from "./quizPanel";
+import { createQuizPanel, type QuizAction, type QuizView } from "./quizPanel";
 
 let missingApiKeyHintShown = false;
+
+/** Shown immediately when the snippet has no function the local checker can ask about. */
+const INSTANT_FALLBACK: GeneratedQuestion = {
+  kind: "free-text",
+  question: "What does this code do? Explain it in your own words to insert it.",
+  referenceAnswer: "",
+  criteria: [],
+  conceptTags: [],
+};
+
+const LANGUAGE_EXTENSION: Record<string, string> = {
+  javascript: ".js",
+  javascriptreact: ".jsx",
+  typescript: ".ts",
+  typescriptreact: ".tsx",
+  python: ".py",
+  go: ".go",
+  rust: ".rs",
+  java: ".java",
+  ruby: ".rb",
+  php: ".php",
+  c: ".c",
+  cpp: ".cpp",
+};
+
+function fileForQuestion(language: string, filePath?: string): string {
+  if (filePath && path.extname(filePath)) {
+    return filePath;
+  }
+  return "snippet" + (LANGUAGE_EXTENSION[language] ?? ".js");
+}
+
+/** Long enough to see the correct-answer screen, short enough that the code is not held. */
+const PASS_HOLD_MS = 400;
 
 type GateMeta = {
   source?: AttemptSource;
@@ -29,7 +63,34 @@ type GateMeta = {
   editor?: vscode.TextEditor;
   range?: vscode.Range;
   lock?: DocumentLock;
+  /** Question request started before the panel, so generation overlaps detection. */
+  prepared?: Promise<GeneratedQuestion>;
+  kind?: GeneratedQuestion["kind"];
 };
+
+/**
+ * Builds the question on this machine, immediately. Paste, inline, and agent
+ * checks call this before they finish inserting or reverting. `variant` flips
+ * a follow-up toward an ordering question when the code has steps.
+ */
+export function beginQuestion(
+  _context: vscode.ExtensionContext,
+  snippet: string,
+  language: string,
+  kind?: GeneratedQuestion["kind"],
+  filePath?: string,
+  variant = 0,
+): Promise<GeneratedQuestion> {
+  const style = kind === "ordering" || variant % 2 === 1 ? "ordering" : "auto";
+  return localGeneratedQuestion(snippet, fileForQuestion(language, filePath), style).then(
+    (question) => question ?? { ...INSTANT_FALLBACK },
+    () => ({ ...INSTANT_FALLBACK }),
+  );
+}
+
+function isMissingKey(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "missing-key";
+}
 
 type DebugPlant = {
   editor: vscode.TextEditor;
@@ -41,9 +102,9 @@ type DebugPlant = {
 /**
  * Runs the comprehension check for a snippet of code.
  *
- * With extension context and a configured API key, uses LLM-generated questions
- * in a webview (prechecks, judge, follow-ups). Without context or key, falls
- * back to the deterministic min-length input box gate.
+ * The question is built locally from the snippet, so the panel does not wait
+ * on a model. Free-text fallback still uses the judge when the snippet has
+ * no function to ask about. Without extension context, the min-length gate runs.
  */
 export async function runComprehensionGate(
   snippet: string,
@@ -55,34 +116,46 @@ export async function runComprehensionGate(
     return fallbackGate(snippet, language);
   }
 
-  const provider = getProvider();
-  const key = providerNeedsApiKey(provider) ? await getApiKey(context, provider) : "local";
-  if (!key?.trim()) {
-    if (!missingApiKeyHintShown) {
+  const mode = getGradingMode();
+  const lang = language ?? "";
+  const view = createQuizPanel(snippet, lang, context.extensionUri);
+  let nextAction = waitForQuizAction(view);
+  const prepared = meta?.prepared ?? beginQuestion(context, snippet, lang, meta?.kind, meta?.filePath);
+  const raced = await Promise.race([
+    nextAction.then((action) => ({ kind: "action" as const, action })),
+    prepared.then(
+      (question) => ({ kind: "question" as const, question }),
+      (err: unknown) => ({ kind: "error" as const, err }),
+    ),
+  ]);
+
+  if (raced.kind === "action") {
+    view.close();
+    if (raced.action.type === "cancel") {
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: quiz closed. The code was removed.",
+        4000,
+      );
+      return false;
+    }
+    vscode.window.setStatusBarMessage(
+      "Comprehension Guard: bypassed. The code stays and is not counted as correct.",
+      4000,
+    );
+    return true;
+  }
+
+  if (raced.kind === "error") {
+    if (isMissingKey(raced.err) && !missingApiKeyHintShown) {
       missingApiKeyHintShown = true;
       void vscode.window.showInformationMessage(
         "Comprehension Guard: set an API key to enable LLM grading (command: Comprehension Guard: Set API Key).",
       );
     }
-    return fallbackGate(snippet, language, context.extensionUri);
+    return fallbackGate(snippet, language, context.extensionUri, view, nextAction);
   }
 
-  const mode = getGradingMode();
-  const lang = language ?? "";
-
-  let question: GeneratedQuestion;
-  try {
-    question = await generateQuestion({
-      context,
-      snippet,
-      language: lang,
-      mode,
-    });
-  } catch {
-    return fallbackGate(snippet, language, context.extensionUri);
-  }
-
-  const view = createQuizPanel(snippet, lang, context.extensionUri);
+  let question = raced.question;
   view.showQuestion(question);
   const debug = question.kind === "debug"
     ? await beginDebug(meta, snippet, question.buggyCode ?? "")
@@ -165,8 +238,10 @@ export async function runComprehensionGate(
   }
   try {
     // eslint-disable-next-line no-constant-condition
+    let usePending = true;
     while (true) {
-      const payload = await waitForQuizAction(view);
+      const payload = usePending ? await nextAction : await waitForQuizAction(view);
+      usePending = false;
 
       if (payload.type === "explain") {
         await restoreDebug(debug);
@@ -187,7 +262,7 @@ export async function runComprehensionGate(
         const nextAction = await view.waitForSubmit();
         if (nextAction.type === "next_question" && followups < maxFollowups) {
           try {
-            question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
+            question = await beginQuestion(context, snippet, lang, "multiple-choice", meta?.filePath, followups);
           } catch {
             view.showFeedback({
               message: "Could not generate a follow-up question. Please close the panel.",
@@ -254,7 +329,7 @@ export async function runComprehensionGate(
           return false;
         }
         try {
-          question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
+          question = await beginQuestion(context, snippet, lang, "multiple-choice", meta?.filePath, followups);
         } catch {
           view.showFeedback({
             message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",
@@ -299,7 +374,7 @@ export async function runComprehensionGate(
         if (ok) {
           await recordAttempt(true, "pass");
           view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
-          await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+          await new Promise<void>((resolve) => setTimeout(resolve, PASS_HOLD_MS));
           view.close();
           return true;
         }
@@ -333,7 +408,7 @@ export async function runComprehensionGate(
         if (ok) {
           await recordAttempt(true, "pass", undefined, score);
           view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
-          await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+          await new Promise<void>((resolve) => setTimeout(resolve, PASS_HOLD_MS));
           view.close();
           return true;
         }
@@ -381,7 +456,7 @@ export async function runComprehensionGate(
       if (res.kind === "no_decision") {
         await recordAttempt(true, "pass");
         view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
-        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+        await new Promise<void>((resolve) => setTimeout(resolve, PASS_HOLD_MS));
         view.close();
         return true;
       }
@@ -398,7 +473,7 @@ export async function runComprehensionGate(
       if (agg.outcome === "pass") {
         await recordAttempt(true, "pass", criterionResults);
         view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
-        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+        await new Promise<void>((resolve) => setTimeout(resolve, PASS_HOLD_MS));
         view.close();
         return true;
       }
@@ -671,9 +746,16 @@ function mapCriterionResults(
  * Deterministic min-length gate, shown in the same webview as the LLM quiz.
  * Used when there is no API key or question generation fails.
  */
-async function fallbackGate(snippet: string, language?: string, extensionUri?: vscode.Uri): Promise<boolean> {
+async function fallbackGate(
+  snippet: string,
+  language?: string,
+  extensionUri?: vscode.Uri,
+  existing?: QuizView,
+  pending?: Promise<QuizAction>,
+): Promise<boolean> {
   const minAnswerLength = getMinAnswerLength();
-  const view = createQuizPanel(snippet, language ?? "", extensionUri);
+  const view = existing ?? createQuizPanel(snippet, language ?? "", extensionUri);
+  let usePending = pending !== undefined;
   view.showQuestion({
     kind: "free-text",
     question: "What does this code do? Explain it in your own words to insert it.",
@@ -684,7 +766,8 @@ async function fallbackGate(snippet: string, language?: string, extensionUri?: v
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const payload = await waitForQuizAction(view);
+    const payload = usePending && pending ? await pending : await waitForQuizAction(view);
+    usePending = false;
 
     if (payload.type === "explain") {
       view.showFeedback({

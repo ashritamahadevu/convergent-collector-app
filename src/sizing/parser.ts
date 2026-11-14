@@ -105,6 +105,23 @@ async function loadLanguage(wasmPath: string): Promise<TreeSitterLanguage | null
   }
 }
 
+/** Load the parser and the languages a coding session usually edits, before the first check. */
+export function warmParsers(): void {
+  const common = [
+    "tree-sitter-javascript.wasm",
+    "tree-sitter-typescript.wasm",
+    "tree-sitter-tsx.wasm",
+    "tree-sitter-python.wasm",
+  ];
+  void (async () => {
+    const ready = await ensureInit();
+    if (!ready) {
+      return;
+    }
+    await Promise.all(common.map((file) => loadLanguage(path.join(wasmDir(), file))));
+  })();
+}
+
 export async function parseSource(
   filePath: string,
   source: string,

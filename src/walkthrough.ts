@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { AgentEdit } from "./agentProtocol";
-import { generateQuestion, getJudgeConfigId } from "./llm";
+import { getJudgeConfigId } from "./llm";
+import { localGeneratedQuestion } from "./sizing/questions";
 import { annotateFile, dueConcepts, getMastery } from "./memory/remember";
 import { buildProjectMap, type ProjectFile } from "./memory/projectMap";
 import { queuePrepSet } from "./memory/sync";
@@ -84,22 +85,11 @@ async function runWalkSession(context: vscode.ExtensionContext, saved: SavedWalk
     await context.globalState.update(WALK_KEY, undefined);
     return;
   }
-  const questions: GeneratedQuestion[] = [];
   const snippet = group.map((file) => file.snippet).join("\n\n").slice(0, 8000);
-  const kinds = ["multiple-choice", "free-text", "ordering", "debug"] as const;
-  for (const kind of kinds) {
-    try {
-      questions.push(await generateQuestion({
-        context,
-        snippet,
-        language: "",
-        mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
-        kind,
-      }));
-    } catch {
-      // Skip a question the model could not build.
-    }
-  }
+  const built = await Promise.all(
+    group.map((file) => localGeneratedQuestion(file.snippet, file.path)),
+  );
+  const questions: GeneratedQuestion[] = built.filter((question): question is GeneratedQuestion => question !== null);
   const passed = await runSession(context, {
     snippet,
     filePath: group[0]?.path,
@@ -163,12 +153,10 @@ export async function buildPrepSet(context: vscode.ExtensionContext, kind: "inte
   const questions = [];
   for (const hit of hits) {
     try {
-      const question = await generateQuestion({
-        context,
-        snippet: hit.text,
-        language: "",
-        mode: "free-text",
-      });
+      const question = await localGeneratedQuestion(hit.text, hit.path);
+      if (!question) {
+        continue;
+      }
       questions.push({
         question: question.question,
         referenceAnswer: question.referenceAnswer,

@@ -38,8 +38,7 @@ import {
   markEditorGate,
   releasePath,
 } from "./gateLock";
-import { runComprehensionGate, runSession } from "./quiz";
-import { generateQuestion } from "./llm";
+import { beginQuestion, runComprehensionGate } from "./quiz";
 import { getMastery, getProfile, logReview, rememberCheck } from "./memory/remember";
 import type { LearnerPreferences } from "./sizing/chunkPolicy";
 import { gradeLocal } from "./sizing/questions";
@@ -113,7 +112,7 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     if (batchTimer) {
       clearTimeout(batchTimer);
     }
-    batchTimer = setTimeout(() => void drain(), 700);
+    batchTimer = setTimeout(() => void drain(), 120);
   };
 
   const drain = async (): Promise<void> => {
@@ -124,7 +123,7 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     try {
       while (queue.length > 0) {
         while (state.processing) {
-          await delay(200);
+          await delay(40);
         }
         const batch = queue.splice(0);
         const lines = batch.reduce((count, edit) => count + edit.snippet.split("\n").length, 0);
@@ -221,7 +220,8 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     if (flushTimer) {
       clearTimeout(flushTimer);
     }
-    flushTimer = setTimeout(flushPending, DISK_FALLBACK_DELAY_MS);
+    const delay = pending.size <= 1 ? 160 : DISK_FALLBACK_DELAY_MS;
+    flushTimer = setTimeout(flushPending, delay);
   };
 
   for (const doc of vscode.workspace.textDocuments) {
@@ -379,6 +379,13 @@ async function runAgentQuiz(
   markEditorGate(edit.filePath, snippet);
   state.suppressEditGuard = true;
   state.processing = true;
+  const questionPromise = beginQuestion(
+    context,
+    snippet,
+    languageFromPath(edit.filePath),
+    undefined,
+    edit.filePath,
+  );
   let release: (() => void) | undefined;
   let released = false;
   const unlock = (): void => {
@@ -409,6 +416,7 @@ async function runAgentQuiz(
     const passed = await runComprehensionGate(snippet, context, language, {
       source: "agent",
       filePath: edit.filePath,
+      prepared: questionPromise,
     });
     unlock();
     if (passed) {
@@ -724,7 +732,7 @@ function startTransport(
         // Drop unreadable events.
       }
     }
-  }, 800);
+  }, 200);
 
   return {
     dispose: () => {
@@ -868,20 +876,34 @@ async function askOne(question: LocalQuestion): Promise<AskStep> {
 
 async function askWithEngine(context: vscode.ExtensionContext, question: LocalQuestion): Promise<boolean> {
   const kind = engineKind(question.requestedKind ?? "multiple_choice");
-  const generated = await generateQuestion({
-    context,
-    snippet: question.code ?? "",
-    language: "",
-    mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
-    kind,
-  });
-  generated.conceptTags = question.concept ? [question.concept] : generated.conceptTags;
-  return runSession(context, {
-    snippet: question.code ?? "",
-    filePath: question.file,
-    questions: [generated],
+  const snippet = question.code ?? "";
+  return runComprehensionGate(snippet, context, languageFromPath(question.file ?? ""), {
     source: "agent",
+    filePath: question.file,
+    kind,
+    prepared: beginQuestion(context, snippet, languageFromPath(question.file ?? ""), kind, question.file),
   });
+}
+
+function languageFromPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const names: Record<string, string> = {
+    ".js": "javascript",
+    ".jsx": "javascriptreact",
+    ".ts": "typescript",
+    ".tsx": "typescriptreact",
+    ".py": "python",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".rb": "ruby",
+    ".php": "php",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+  };
+  return names[ext] ?? "";
 }
 
 function engineKind(kind: QuestionType): QuestionKind {

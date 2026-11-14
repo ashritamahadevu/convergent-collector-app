@@ -3,6 +3,7 @@ import { registerPasteGuard } from "./pasteGuard";
 import { registerAgentGuard } from "./agentGuard";
 import { registerEditGuard } from "./editGuard";
 import { setLogSink } from "./llm";
+import { warmParsers } from "./sizing/parser";
 import { clearApiKey, setApiKey } from "./secrets";
 import { dueConcepts, getMastery, getProfile, saveProfile } from "./memory/remember";
 import { showUnderstandingMapFor } from "./mapPanel";
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerPasteGuard(context);
   registerAgentGuard(context);
   registerEditGuard(context);
+  warmParsers();
   void resumeWalkthrough(context);
   void offerLoginRecall(context);
 

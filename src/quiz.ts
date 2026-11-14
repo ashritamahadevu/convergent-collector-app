@@ -1,13 +1,13 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import { aggregate, gradeMcq, gradeOrdering, runPreChecks } from "./decision";
-import { getJudgeConfigId, judge } from "./llm";
-import { localGeneratedQuestion } from "./sizing/questions";
+import { generateQuestion, getJudgeConfigId, judge, providerNeedsApiKey } from "./llm";
+import { getApiKey } from "./secrets";
 import {
   getGradingMode,
   getMaxFollowups,
   getMinAnswerLength,
   getNonCriticalPassFraction,
+  getProvider,
   insertedRange,
   state,
   subscribeQuizBypass,
@@ -21,37 +21,6 @@ import type { DocumentLock } from "./documentLock";
 import { createQuizPanel, type QuizAction, type QuizView } from "./quizPanel";
 
 let missingApiKeyHintShown = false;
-
-/** Shown immediately when the snippet has no function the local checker can ask about. */
-const INSTANT_FALLBACK: GeneratedQuestion = {
-  kind: "free-text",
-  question: "What does this code do? Explain it in your own words to insert it.",
-  referenceAnswer: "",
-  criteria: [],
-  conceptTags: [],
-};
-
-const LANGUAGE_EXTENSION: Record<string, string> = {
-  javascript: ".js",
-  javascriptreact: ".jsx",
-  typescript: ".ts",
-  typescriptreact: ".tsx",
-  python: ".py",
-  go: ".go",
-  rust: ".rs",
-  java: ".java",
-  ruby: ".rb",
-  php: ".php",
-  c: ".c",
-  cpp: ".cpp",
-};
-
-function fileForQuestion(language: string, filePath?: string): string {
-  if (filePath && path.extname(filePath)) {
-    return filePath;
-  }
-  return "snippet" + (LANGUAGE_EXTENSION[language] ?? ".js");
-}
 
 /** Long enough to see the correct-answer screen, short enough that the code is not held. */
 const PASS_HOLD_MS = 400;
@@ -69,23 +38,25 @@ type GateMeta = {
 };
 
 /**
- * Builds the question on this machine, immediately. Paste, inline, and agent
- * checks call this before they finish inserting or reverting. `variant` flips
- * a follow-up toward an ordering question when the code has steps.
+ * Asks the model for a question immediately. Paste, inline, and agent checks
+ * call this before they finish inserting or reverting, so the model works during that time.
  */
 export function beginQuestion(
-  _context: vscode.ExtensionContext,
+  context: vscode.ExtensionContext,
   snippet: string,
   language: string,
   kind?: GeneratedQuestion["kind"],
-  filePath?: string,
-  variant = 0,
+  _filePath?: string,
 ): Promise<GeneratedQuestion> {
-  const style = kind === "ordering" || variant % 2 === 1 ? "ordering" : "auto";
-  return localGeneratedQuestion(snippet, fileForQuestion(language, filePath), style).then(
-    (question) => question ?? { ...INSTANT_FALLBACK },
-    () => ({ ...INSTANT_FALLBACK }),
-  );
+  const provider = getProvider();
+  const mode = kind === "multiple-choice" ? "multiple-choice" : getGradingMode();
+  return (async () => {
+    const key = providerNeedsApiKey(provider) ? await getApiKey(context, provider) : "local";
+    if (!key?.trim()) {
+      throw Object.assign(new Error("missing-key"), { code: "missing-key" });
+    }
+    return generateQuestion({ context, snippet, language, mode, kind });
+  })();
 }
 
 function isMissingKey(err: unknown): boolean {
@@ -102,9 +73,10 @@ type DebugPlant = {
 /**
  * Runs the comprehension check for a snippet of code.
  *
- * The question is built locally from the snippet, so the panel does not wait
- * on a model. Free-text fallback still uses the judge when the snippet has
- * no function to ask about. Without extension context, the min-length gate runs.
+ * The panel opens immediately and shows the question the model returns.
+ * Generation starts early, so it overlaps detection. If the model cannot
+ * answer, the min-length fallback gate runs. Without extension context, that
+ * fallback runs directly.
  */
 export async function runComprehensionGate(
   snippet: string,
@@ -262,7 +234,7 @@ export async function runComprehensionGate(
         const nextAction = await view.waitForSubmit();
         if (nextAction.type === "next_question" && followups < maxFollowups) {
           try {
-            question = await beginQuestion(context, snippet, lang, "multiple-choice", meta?.filePath, followups);
+            question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
           } catch {
             view.showFeedback({
               message: "Could not generate a follow-up question. Please close the panel.",
@@ -329,7 +301,7 @@ export async function runComprehensionGate(
           return false;
         }
         try {
-          question = await beginQuestion(context, snippet, lang, "multiple-choice", meta?.filePath, followups);
+          question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
         } catch {
           view.showFeedback({
             message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",

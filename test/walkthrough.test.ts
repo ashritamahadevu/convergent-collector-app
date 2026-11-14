@@ -20,6 +20,7 @@ const llm = req("./walkthrough/mock-llm.cjs");
 llm.install();
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const wt = req("../src/walkthrough.ts") as typeof import("../src/walkthrough");
+const llmModule = req("../src/llm.ts") as typeof import("../src/llm");
 
 const fake = vscode.__fake;
 const WALK_KEY = "comprehensionGuard.walkthrough";
@@ -74,20 +75,12 @@ function edit(filePath: string, body = "") {
 }
 
 function answer(correct: boolean) {
-  return (msg: { kind: string; options?: string[]; items?: string[] }) => {
+  return (msg: { kind: string }) => {
     if (msg.kind === "multiple-choice") {
-      const options = msg.options ?? [];
-      const right = options.findIndex(
-        (option) => /branch/.test(option) && /not recursive/.test(option) && !/^no branches/.test(option),
-      );
-      const index = right >= 0 ? right : 0;
-      const wrong = options.length > 1 ? (index + 1) % options.length : 0;
-      return { type: "submit", selectedIndex: correct ? index : wrong };
+      return { type: "submit", selectedIndex: correct ? 1 : 0 };
     }
     if (msg.kind === "ordering") {
-      const count = msg.items?.length ?? 0;
-      const right = count > 0 ? [...Array(count).keys()] : [1, 0, 2];
-      return { type: "submit", order: correct ? right : [...right].reverse() };
+      return { type: "submit", order: correct ? [1, 0, 2] : [2, 1, 0] };
     }
     return { type: "submit", answer: correct ? "GOOD it adds one when x is truthy" : "no idea what this does" };
   };
@@ -98,31 +91,25 @@ function saved(ctx: { store: Map<string, unknown> }): Saved | undefined {
 }
 
 function filesInPrompts(): string[][] {
-  // Each session opens one panel and asks one local question per file in the group.
-  return (fake.panels as { posted: { type: string; questionText?: string }[] }[])
-    .map((panel) => {
-      const names: string[] = [];
-      for (const msg of panel.posted) {
-        if (msg.type !== "showQuestion" || !msg.questionText) {
-          continue;
-        }
-        const match = msg.questionText.match(/\b([A-Za-z0-9_]+) in /);
-        if (match) {
-          names.push(match[1]);
-        }
-      }
-      return names;
-    })
-    .filter((names) => names.length > 0);
+  // The walkthrough sends one snippet per session to three generate calls.
+  const seen: string[][] = [];
+  for (const call of llm.calls as { kind: string; code: string }[]) {
+    if (call.kind !== "multiple-choice") {
+      continue;
+    }
+    seen.push([...call.code.matchAll(/function (\w+)\(/g)].map((m) => m[1]));
+  }
+  return seen;
 }
 
 beforeEach(() => {
   fake.reset();
   fake.config = { provider: "ollama", model: "mock" };
   llm.reset();
+  llmModule.clearQuestionCache();
 });
 
-test("Start runs session 1 with a local question and advances on pass", async () => {
+test("Start runs session 1 with MC, free-text and ordering questions and advances on pass", async () => {
   const ctx = makeContext();
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
   fake.onQuestion = answer(true);
@@ -132,9 +119,8 @@ test("Start runs session 1 with a local question and advances on pass", async ()
   assert.equal(fake.panels.length, 1, "one quiz panel per session");
   assert.deepEqual(
     fake.panels[0].posted.filter((m: { type: string }) => m.type === "showQuestion").map((m: { kind: string }) => m.kind),
-    ["multiple-choice"],
+    ["multiple-choice", "free-text", "ordering"],
   );
-  assert.equal((llm.calls as unknown[]).length, 0, "the walkthrough question is local");
   assert.equal(saved(ctx)?.session, 1);
   assert.equal(saved(ctx)?.snoozeUntil, undefined);
 });
@@ -189,7 +175,8 @@ test("resume 'Later' leaves state unchanged and offers again next activation", a
 test("closing the quiz mid-session does not advance the session", async () => {
   const ctx = makeContext();
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
-  fake.onQuestion = () => ({ type: "close" });
+  const ok = answer(true);
+  fake.onQuestion = (msg: { kind: string }, _p: unknown, i: number) => (i === 0 ? ok(msg) : { type: "close" });
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
   assert.equal(saved(ctx)?.session, 0);
   assert.equal(saved(ctx)?.snoozeUntil, undefined, "re-offered on the next activation");
@@ -211,14 +198,13 @@ test("observed: answering every question wrong still advances the session (docum
   assert.equal(saved(ctx)?.session, 1);
 });
 
-test("a local question still opens when the model is set to fail, and closing it does not advance", async () => {
+test("BUG-W2: if no question can be generated the session should not count as passed", { todo: "BUG-W2 runSession returns true for an empty question list" }, async () => {
   const ctx = makeContext();
   llm.setFailGenerate(true);
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
-  assert.equal(fake.panels.length, 1);
+  assert.equal(fake.panels.length, 0);
   assert.equal(saved(ctx)?.session, 0);
-  assert.equal((llm.calls as unknown[]).length, 0);
 });
 
 test("group size: low or no mastery gives 1 file per session, mastery >= 0.75 gives 2", async () => {
@@ -236,8 +222,8 @@ test("group size: low or no mastery gives 1 file per session, mastery >= 0.75 gi
 
   // High mastery: 3 files -> 2 sessions (2 + 1).
   llm.reset();
+  llmModule.clearQuestionCache();
   fake.infoMessages = [];
-  fake.panels = [];
   fake.onQuestion = answer(true);
   const ctx2 = makeContext();
   await ctx2.globalState.update("comprehensionGuard.conceptMastery", [
@@ -289,8 +275,7 @@ test("observed: with 7 files and correct answers, mastery rises mid-walkthrough 
   }
   const groups = filesInPrompts();
   const covered = new Set(groups.flat());
-  assert.ok(covered.has("a_js") && covered.has("b_js"), "groups: " + JSON.stringify(groups));
-  assert.ok(!covered.has("c_js") && !covered.has("d_js"), "groups: " + JSON.stringify(groups));
+  assert.ok(!covered.has("b_js"), "groups: " + JSON.stringify(groups));
 });
 
 test("BUG-W4: mastery rising mid-walkthrough should not skip a file", { todo: "BUG-W4 groups are recomputed from live mastery but session index is reused" }, async () => {
@@ -358,14 +343,11 @@ test("observed: non-core files (json, md, css, html) are listed in the count but
   assert.equal(filesInPrompts().length, 1, "only the core file got a session");
 });
 
-test("walkthrough questions are local and do not call the model", async () => {
+test("observed: an ordering question costs two generate calls (rubric lint runs on it)", async () => {
   const ctx = makeContext();
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
   fake.onQuestion = answer(true);
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
-  assert.equal((llm.calls as unknown[]).length, 0);
-  assert.deepEqual(
-    fake.panels[0].posted.filter((m: { type: string }) => m.type === "showQuestion").map((m: { kind: string }) => m.kind),
-    ["multiple-choice"],
-  );
+  const kinds = (llm.calls as { kind: string }[]).map((c) => c.kind);
+  assert.equal(kinds.filter((k) => k === "ordering").length, 2);
 });

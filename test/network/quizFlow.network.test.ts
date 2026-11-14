@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
 import * as vscodeStub from "./vscodeStub";
 import {
-  NONSENSE_ANSWER,
+  FREE_TEXT_QUESTION,
+  MCQ_QUESTION,
   OLLAMA,
   SNIPPET,
+  closedPort,
   fakeContext,
+  ollamaReply,
   redirectFetch,
   startMockServer,
   waitFor,
@@ -14,12 +17,11 @@ import {
 } from "./harness";
 import { clearQuestionCache, setLogSink } from "../../src/llm";
 import { runComprehensionGate } from "../../src/quiz";
-import { localGeneratedQuestion } from "../../src/sizing/questions";
 import { requestQuizBypass, setQuizActive } from "../../src/state";
 
 /**
  * The paste, inline, and agent gates share runComprehensionGate. The question
- * is built locally, so these tests fail if the panel waits on a model.
+ * the student sees is the one the model returns.
  */
 
 let server: MockServer;
@@ -33,32 +35,37 @@ before(async () => {
 
 after(async () => {
   restoreFetch();
+  server.releaseHung({ kind: "json", body: {} });
   await server.close();
 });
+
+function routeOllamaTo(target: string): void {
+  restoreFetch();
+  restoreFetch = redirectFetch([{ from: OLLAMA, to: target }]);
+}
 
 beforeEach(() => {
   clearQuestionCache();
   vscodeStub.resetStub();
   vscodeStub.settings.set("comprehensionGuard.provider", "ollama");
   server.requests.length = 0;
-  server.handler = () => ({ kind: "hang" });
+  server.handler = () => ollamaReply(FREE_TEXT_QUESTION);
+  routeOllamaTo(server.base);
   setQuizActive(false);
 });
 
-type Gate = { promise: Promise<boolean>; settled: () => boolean; result: () => boolean | undefined };
+type Gate = { promise: Promise<boolean>; settled: () => boolean };
 
-function startGate(ctx: ReturnType<typeof fakeContext>, snippet = SNIPPET): Gate {
+function startGate(ctx: ReturnType<typeof fakeContext>): Gate {
   let done = false;
-  let value: boolean | undefined;
-  const promise = runComprehensionGate(snippet, ctx as never, "javascript", {
+  const promise = runComprehensionGate(SNIPPET, ctx as never, "javascript", {
     source: "paste",
     filePath: "C:/w/a.js",
-  }).then((v) => {
+  }).then((value) => {
     done = true;
-    value = v;
-    return v;
+    return value;
   });
-  return { promise, settled: () => done, result: () => value };
+  return { promise, settled: () => done };
 }
 
 async function openPanel(index = 0) {
@@ -69,109 +76,73 @@ async function openPanel(index = 0) {
   return panel;
 }
 
-const attempts = (ctx: ReturnType<typeof fakeContext>) =>
-  (ctx.store.get("comprehensionGuard.attempts") as { outcome: string; passed: boolean }[] | undefined) ?? [];
+function generateRequests(): { body: string }[] {
+  return server.requests.filter((request) => request.kind === "generate");
+}
 
-describe("local question, no model wait", () => {
-  test("the question is on screen without an HTTP request", async () => {
-    const started = Date.now();
+describe("the model writes the question", () => {
+  test("the panel shows the question the model returned", async () => {
     const gate = startGate(fakeContext());
     const panel = await openPanel();
-    const elapsed = Date.now() - started;
     const shown = panel.questions()[0];
-    assert.ok(elapsed < 3000, "question took " + elapsed + "ms");
-    assert.equal(server.requests.length, 0, "question generation made an HTTP call");
-    assert.equal(shown.kind, "multiple-choice");
-    assert.match(String(shown.questionText), /total/);
-    assert.equal(gate.settled(), false);
+    assert.equal(shown.questionText, FREE_TEXT_QUESTION.question);
+    assert.ok(generateRequests().length >= 1, "the check never asked the model for a question");
+    assert.match(generateRequests()[0].body, /Generate ONE/);
+    assert.match(generateRequests()[0].body, /function total/);
     panel.dispose();
     assert.equal(await gate.promise, false);
   });
 
-  test("the correct option passes immediately and is recorded", async () => {
-    const local = await localGeneratedQuestion(SNIPPET, "C:/w/a.js");
-    assert.ok(local);
-    assert.equal(local.kind, "multiple-choice");
-    const ctx = fakeContext();
-    const gate = startGate(ctx);
-    const panel = await openPanel();
-    assert.equal(server.requests.length, 0);
-    panel.fromWebview({ type: "submit", selectedIndex: local.correctIndex });
-    assert.equal(await gate.promise, true);
-    assert.equal(server.requests.length, 0, "grading made an HTTP call");
-    assert.equal(attempts(ctx)[0]?.outcome, "pass");
-    assert.match(String(panel.feedback()[0]?.message), /Correct/);
-  });
-
-  test("a wrong option does not pass, and the next question is also local", async () => {
-    const local = await localGeneratedQuestion(SNIPPET, "C:/w/a.js");
-    assert.ok(local && typeof local.correctIndex === "number");
-    const ctx = fakeContext();
-    const gate = startGate(ctx);
-    const panel = await openPanel();
-    const wrong = (local.correctIndex + 1) % (local.options?.length ?? 1);
-    panel.fromWebview({ type: "submit", selectedIndex: wrong });
-    await waitFor(() => panel.feedback().length > 0, 1000, "wrong-answer feedback");
-    assert.equal(gate.settled(), false);
-    assert.match(String(panel.feedback()[0]?.message), /not correct/i);
-    panel.fromWebview({ type: "next_question" });
-    await waitFor(() => panel.questions().length > 1, 1000, "follow-up question");
-    assert.equal(server.requests.length, 0, "the follow-up waited on a model");
-    panel.fromWebview({ type: "submit", selectedIndex: local.correctIndex });
-    assert.equal(await gate.promise, true);
-    assert.equal(attempts(ctx).at(-1)?.outcome, "pass");
-  });
-
-  test("Explain shows the local explanation without a model call", async () => {
-    const local = await localGeneratedQuestion(SNIPPET, "C:/w/a.js");
-    assert.ok(local);
+  test("a follow-up asks the model for another question", async () => {
+    server.handler = () => ollamaReply(MCQ_QUESTION);
     const gate = startGate(fakeContext());
     const panel = await openPanel();
-    panel.fromWebview({ type: "explain" });
-    await waitFor(() => panel.feedback().length > 0, 1000, "explanation");
-    assert.match(String(panel.feedback()[0]?.message), /Explanation/);
-    assert.match(String(panel.feedback()[0]?.message), new RegExp(local.referenceAnswer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.equal(server.requests.length, 0);
-    panel.fromWebview({ type: "cancel" });
+    assert.equal(panel.questions()[0].questionText, MCQ_QUESTION.question);
+    panel.fromWebview({ type: "submit", selectedIndex: 0 });
+    await waitFor(() => panel.feedback().length > 0, 1000, "wrong-answer feedback");
+    panel.fromWebview({ type: "next_question" });
+    await waitFor(() => panel.questions().length > 1, 3000, "follow-up question");
+    assert.ok(generateRequests().length >= 2, "the follow-up did not ask the model");
+    assert.match(generateRequests().at(-1)!.body, /Generate ONE multiple-choice/);
+    panel.fromWebview({ type: "submit", selectedIndex: MCQ_QUESTION.correctIndex });
     assert.equal(await gate.promise, true);
   });
 
-  test("a snippet with no function uses the instant written question", async () => {
-    const ctx = fakeContext();
-    const started = Date.now();
-    const gate = startGate(ctx, "hello from a paste that is not a function ".repeat(6));
-    const panel = await openPanel();
-    assert.ok(Date.now() - started < 3000);
-    assert.match(String(panel.questions()[0].questionText), /What does this code do\?/);
-    assert.equal(server.requests.length, 0);
-    panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
-    assert.equal(await gate.promise, true);
-    assert.equal(server.requests.length, 0);
-  });
-
-  test("Bypass ends the check without waiting", async () => {
+  test("the panel is open while the model is still writing, and Bypass ends the hold", async () => {
+    server.handler = () => ({ kind: "hang" });
     setQuizActive(true);
     const gate = startGate(fakeContext());
-    await waitFor(() => vscodeStub.panels.length > 0, 1000, "panel");
+    await waitFor(() => vscodeStub.panels.length > 0, 1000, "panel during generation");
+    assert.equal(gate.settled(), false);
     assert.equal(requestQuizBypass(), true);
     assert.equal(await gate.promise, true);
-    assert.equal(server.requests.length, 0);
     setQuizActive(false);
+  });
+
+  test("if the model cannot be reached, the written fallback opens", async () => {
+    routeOllamaTo("http://127.0.0.1:" + (await closedPort()));
+    const gate = startGate(fakeContext());
+    const panel = await openPanel();
+    assert.match(String(panel.questions()[0].questionText), /What does this code do\?/);
+    panel.fromWebview({ type: "submit", answer: "x".repeat(15) });
+    assert.equal(await gate.promise, true);
   });
 });
 
 describe("agent-edit quiz and the Bypass command", () => {
   test("agent quizzes never set quizActive, so the Bypass command cannot reach them", async () => {
     const { state, setBypassArmed } = await import("../../src/state");
+    server.handler = () => ({ kind: "hang" });
     state.processing = true;
     const gate = startGate(fakeContext());
-    await waitFor(() => vscodeStub.panels.length > 0, 1000, "panel");
+    await waitFor(() => generateRequests().length > 0, 1000, "model request");
     const reached = requestQuizBypass();
     if (!reached) {
       setBypassArmed(true);
     }
-    assert.equal(reached, false, "Bypass did not reach the open agent quiz");
-    assert.equal(state.bypassArmed, true, "a one-shot bypass is now armed for an unrelated future insertion");
+    assert.equal(reached, false);
+    assert.equal(state.bypassArmed, true);
+    server.releaseHung(ollamaReply(FREE_TEXT_QUESTION));
     const panel = await openPanel();
     assert.equal(gate.settled(), false);
     panel.dispose();

@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import type { AgentEdit } from "./agentProtocol";
-import { getJudgeConfigId } from "./llm";
-import { localGeneratedQuestion } from "./sizing/questions";
+import { generateQuestion, getJudgeConfigId } from "./llm";
 import { annotateFile, dueConcepts, getMastery } from "./memory/remember";
 import { buildProjectMap, type ProjectFile } from "./memory/projectMap";
 import { queuePrepSet } from "./memory/sync";
@@ -86,9 +85,20 @@ async function runWalkSession(context: vscode.ExtensionContext, saved: SavedWalk
     return;
   }
   const snippet = group.map((file) => file.snippet).join("\n\n").slice(0, 8000);
-  const built = await Promise.all(
-    group.map((file) => localGeneratedQuestion(file.snippet, file.path)),
-  );
+  const kinds = ["multiple-choice", "free-text", "ordering", "debug"] as const;
+  const built = await Promise.all(kinds.map(async (kind) => {
+    try {
+      return await generateQuestion({
+        context,
+        snippet,
+        language: "",
+        mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
+        kind,
+      });
+    } catch {
+      return null;
+    }
+  }));
   const questions: GeneratedQuestion[] = built.filter((question): question is GeneratedQuestion => question !== null);
   const passed = await runSession(context, {
     snippet,
@@ -153,10 +163,12 @@ export async function buildPrepSet(context: vscode.ExtensionContext, kind: "inte
   const questions = [];
   for (const hit of hits) {
     try {
-      const question = await localGeneratedQuestion(hit.text, hit.path);
-      if (!question) {
-        continue;
-      }
+      const question = await generateQuestion({
+        context,
+        snippet: hit.text,
+        language: "",
+        mode: "free-text",
+      });
       questions.push({
         question: question.question,
         referenceAnswer: question.referenceAnswer,

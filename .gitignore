@@ -7,6 +7,10 @@ dist/*
 !dist/extension.js
 out/
 
+# JetBrains / Gradle
+**/.gradle/
+jetbrains/build/
+
 # Packaged extension
 *.vsix
 

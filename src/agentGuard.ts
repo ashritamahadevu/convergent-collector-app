@@ -38,15 +38,13 @@ import {
   markEditorGate,
   releasePath,
 } from "./gateLock";
+import { checkShapeFor, collapseEdits, modelKindFor, planForEdits, type CodeChunk } from "./heldReview";
 import { beginQuestion, runComprehensionGate } from "./quiz";
-import { getMastery, getProfile, logReview, rememberCheck } from "./memory/remember";
+import { getMastery, getProfile } from "./memory/remember";
 import type { LearnerPreferences } from "./sizing/chunkPolicy";
-import { gradeLocal } from "./sizing/questions";
-import { PauseSession, pauseSessionId, type PauseWire } from "./sizing/pauseSession";
-import type { CheckPreset, LocalQuestion, QuestionType } from "./sizing/types";
+import type { PauseWire } from "./sizing/pauseSession";
+import type { CheckPreset } from "./sizing/types";
 import { offerWalkthrough } from "./walkthrough";
-import { addAttempt } from "./store";
-import type { AttemptRecord, QuestionKind } from "./types";
 import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, wantsWalkthrough } from "./state";
 
 /**
@@ -60,8 +58,8 @@ import { getCharThreshold, isEnabled, setBypassArmed, setQuizActive, state, want
 
 const MAX_QUEUE = 12;
 
-/** One checkpoint per agent session, and one question picker at a time. */
-const pauseSessions = new PauseSession((questions) => askCheckpoint(questions));
+/** Quiet time after the agent's last tool call before the held code is checked. */
+const REVIEW_SETTLE_MS = 1200;
 
 type PendingDiskEdit = {
   fsPath: string;
@@ -81,6 +79,9 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
   const pending = new Map<string, PendingDiskEdit>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let batchTimer: ReturnType<typeof setTimeout> | undefined;
+  let reviewTimer: ReturnType<typeof setTimeout> | undefined;
+  let reviewActive = false;
+  const reviewQueue: AgentEdit[] = [];
   let draining = false;
 
   const enqueue = (edit: AgentEdit): void => {
@@ -160,20 +161,110 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     }
   };
 
+  const scheduleReview = (): void => {
+    if (reviewTimer) {
+      clearTimeout(reviewTimer);
+    }
+    reviewTimer = setTimeout(() => void runSettledReview(), REVIEW_SETTLE_MS);
+  };
+
+  const collectReview = (body: unknown): void => {
+    const edits = editsFromHookEnvelope(body, {
+      readFile: readOptional,
+      readSnapshot: (absPath) => readSnapshot(home, absPath),
+    });
+    for (const edit of edits) {
+      const prepared = withBaseline(edit, edit.restore ? undefined : acceptedText(edit.filePath));
+      const snippet = quizSnippet(prepared.snippet);
+      if (snippet.length < getCharThreshold() || looksBinary(snippet) || isIgnoredCodePath(prepared.filePath)) {
+        continue;
+      }
+      reviewQueue.push({ ...prepared, snippet });
+    }
+    if (reviewQueue.length > 0) {
+      scheduleReview();
+    }
+  };
+
+  const runSettledReview = async (): Promise<void> => {
+    reviewTimer = undefined;
+    if (reviewActive || reviewQueue.length === 0) {
+      return;
+    }
+    const batch = collapseEdits(reviewQueue.splice(0));
+    reviewActive = true;
+    state.processing = true;
+    setQuizActive(true);
+    for (const edit of batch) {
+      holdPath(edit.filePath);
+    }
+    try {
+      const preferences = readPreferences();
+      const planned = await planForEdits(batch, preferences);
+      if (planned.chunks.length === 0) {
+        if (!planned.sawUnits) {
+          await runGeneralReview(context, batch);
+        }
+        return;
+      }
+      if (checkShapeFor(preferences) === "chunks") {
+        await runChunkReview(context, batch, planned.chunks);
+      } else {
+        await runGeneralReview(context, batch, planned.chunks);
+      }
+    } catch {
+      for (const edit of batch) {
+        await applyHeldEdit(edit);
+      }
+    } finally {
+      setQuizActive(false);
+      state.processing = false;
+      reviewActive = false;
+      for (const edit of batch) {
+        releasePath(edit.filePath);
+      }
+      await vscode.commands.executeCommand("setContext", "comprehensionGuard.holdingCode", false);
+      if (reviewQueue.length > 0) {
+        scheduleReview();
+      }
+    }
+  };
+
   const acceptHook = (body: unknown): void => {
+    if (!isEnabled() || !acceptIncoming(body)) {
+      return;
+    }
     if (!readAgentPause()) {
       onHook(body);
       return;
     }
-    pauseSessions.track(noteEditedFiles(home, body));
+    collectReview(body);
   };
 
-  const transport = startTransport(home, acceptHook, (body) =>
-    pauseSessions.onPause(body, {
-      enabled: readAgentPause() && isEnabled(),
-      preferences: readPreferences(),
-    }),
-  );
+  const transport = startTransport(home, acceptHook, async () => {
+    if (!readAgentPause() || !isEnabled()) {
+      return continueWire();
+    }
+    if (reviewActive || state.processing) {
+      return {
+        allow: false,
+        reason: "failed",
+        userMessage: "Comprehension Guard is checking the code the agent just wrote.",
+        agentMessage:
+          "Comprehension Guard is checking the code you already wrote. Wait until that check finishes, then continue.",
+      };
+    }
+    if (reviewQueue.length > 0) {
+      scheduleReview();
+    }
+    return {
+      allow: true,
+      reason: "continue",
+      userMessage: "",
+      agentMessage:
+        "Finish the whole change. Comprehension Guard checks it after you stop writing, not between files.",
+    };
+  });
   context.subscriptions.push(transport);
 
   const flushPending = (): void => {
@@ -197,12 +288,15 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
         continue;
       }
       if (readAgentPause()) {
-        pauseSessions.track(
-          pauseSessions.noteFile("disk", readPreferences(), item.fsPath, item.current, {
-            snippet: item.snippet,
-            hunks: [{ newText: item.snippet }],
-          }),
-        );
+        reviewQueue.push({
+          agent: "disk",
+          filePath: item.fsPath,
+          snippet: item.snippet,
+          hunks: [],
+          restore: { previous: item.previous, next: item.current },
+          next: item.current,
+        });
+        scheduleReview();
         continue;
       }
       enqueue({
@@ -248,6 +342,9 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     dispose: () => {
       if (flushTimer) {
         clearTimeout(flushTimer);
+      }
+      if (reviewTimer) {
+        clearTimeout(reviewTimer);
       }
     },
   });
@@ -344,6 +441,144 @@ function rememberOpen(doc: vscode.TextDocument, pending: Map<string, PendingDisk
   if (acceptedText(doc.uri.fsPath) === undefined) {
     noteAccepted(doc.uri.fsPath, doc.getText());
   }
+}
+
+async function runGeneralReview(
+  context: vscode.ExtensionContext,
+  edits: AgentEdit[],
+  chunks?: CodeChunk[],
+): Promise<void> {
+  const held: AgentEdit[] = [];
+  for (const edit of edits) {
+    held.push(prepareHeldEdit(edit, await readText(edit.filePath), acceptedText(edit.filePath)));
+  }
+  const questions = (chunks ?? []).map((chunk) =>
+    beginQuestion(
+      context,
+      chunk.code,
+      languageFromPath(chunk.filePath),
+      modelKindFor(chunk.questionType),
+      chunk.filePath,
+    ),
+  );
+  const snippet = held
+    .map((edit) => quizSnippet(edit.snippet))
+    .filter((text) => text.trim().length > 0)
+    .join("\n\n")
+    .slice(0, 8000);
+  if (questions.length === 0 && !snippet.trim()) {
+    return;
+  }
+  const first = held[0];
+  if (!first) {
+    return;
+  }
+  if (questions.length === 0) {
+    questions.push(beginQuestion(context, snippet, languageFromPath(first.filePath), undefined, first.filePath));
+  }
+  for (const edit of held) {
+    await revertEdit(edit);
+  }
+  const asked = chunks && chunks.length > 0 ? chunks : [{ code: snippet, filePath: first.filePath, unit: first.filePath }];
+  for (let index = 0; index < asked.length; index += 1) {
+    const item = asked[index];
+    void vscode.window.setStatusBarMessage(
+      `Comprehension Guard: question ${index + 1} of ${asked.length}.`,
+      4000,
+    );
+    const passed = await runComprehensionGate(item.code, context, languageFromPath(item.filePath), {
+      source: "agent",
+      filePath: item.filePath,
+      prepared: questions[index],
+    });
+    if (!passed) {
+      return;
+    }
+  }
+  for (const edit of held) {
+    markEditorGate(edit.filePath, edit.snippet);
+    const inserted = await applyHeldEdit(edit);
+    if (!inserted) {
+      void vscode.window.showWarningMessage(
+        "Comprehension Guard: the check was passed, but the generated code could not be written into the file.",
+      );
+    }
+  }
+}
+
+async function runChunkReview(
+  context: vscode.ExtensionContext,
+  edits: AgentEdit[],
+  chunks: CodeChunk[],
+): Promise<void> {
+  await vscode.commands.executeCommand("setContext", "comprehensionGuard.holdingCode", true);
+  const locks = new Map<string, ReturnType<typeof lockDocument>>();
+  const questions = chunks.map((chunk) =>
+    beginQuestion(
+      context,
+      chunk.code,
+      languageFromPath(chunk.filePath),
+      modelKindFor(chunk.questionType),
+      chunk.filePath,
+    ),
+  );
+  try {
+    for (const edit of edits) {
+      try {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(edit.filePath));
+        locks.set(normPath(edit.filePath), lockDocument(doc));
+      } catch {
+        // A missing file is still covered by the later revert.
+      }
+    }
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(chunk.filePath));
+      const editor = await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+      const range = lineRange(doc, chunk.startLine, chunk.endLine);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+      void vscode.window.setStatusBarMessage(
+        `Comprehension Guard: ${chunk.unit} (${index + 1} of ${chunks.length}).`,
+        4000,
+      );
+      const passed = await runComprehensionGate(chunk.code, context, languageFromPath(chunk.filePath), {
+        source: "agent",
+        filePath: chunk.filePath,
+        prepared: questions[index],
+        editor,
+        range,
+        lock: locks.get(normPath(chunk.filePath)),
+      });
+      if (!passed) {
+        for (const lock of locks.values()) {
+          lock.release();
+        }
+        locks.clear();
+        for (const edit of edits) {
+          await revertEdit(prepareHeldEdit(edit, await readText(edit.filePath), acceptedText(edit.filePath)));
+        }
+        return;
+      }
+    }
+    for (const edit of edits) {
+      const kept = edit.restore?.next ?? edit.next;
+      if (kept !== undefined) {
+        noteAccepted(edit.filePath, kept);
+      }
+      markEditorGate(edit.filePath, edit.snippet);
+    }
+    void vscode.window.showInformationMessage("Comprehension Guard: chunk checks passed. The generated code stays.");
+  } finally {
+    for (const lock of locks.values()) {
+      lock.release();
+    }
+  }
+}
+
+function lineRange(document: vscode.TextDocument, startLine: number, endLine: number): vscode.Range {
+  const start = Math.max(0, startLine - 1);
+  const end = Math.min(document.lineCount - 1, Math.max(start, endLine - 1));
+  return new vscode.Range(new vscode.Position(start, 0), document.lineAt(end).range.end);
 }
 
 async function runAgentQuiz(
@@ -798,93 +1033,6 @@ function readPreferences(): LearnerPreferences {
   };
 }
 
-async function noteEditedFiles(home: string, body: unknown): Promise<void> {
-  try {
-    if (!isEnabled() || !acceptIncoming(body)) {
-      return;
-    }
-    const edits = editsFromHookEnvelope(body, {
-      readFile: readOptional,
-      readSnapshot: (absPath) => readSnapshot(home, absPath),
-    });
-    const sessionId = pauseSessionId(body);
-    const preferences = readPreferences();
-    for (const edit of edits) {
-      const text = edit.next ?? (await readCurrentText(edit.filePath));
-      if (text === undefined) {
-        continue;
-      }
-      await pauseSessions.noteFile(sessionId, preferences, edit.filePath, text, {
-        snippet: edit.snippet,
-        hunks: edit.hunks,
-        created: edit.created,
-      });
-    }
-  } catch {
-    // Leave the agent unblocked if analysis cannot run.
-  }
-}
-
-type AskStep = "pass" | "fail" | "bypass";
-type PickResult = number | "bypass" | "dismiss";
-
-async function askCheckpoint(questions: LocalQuestion[]): Promise<boolean> {
-  if (questions.length === 0) {
-    return true;
-  }
-  setQuizActive(true);
-  try {
-    for (const question of questions) {
-      if (question.file) {
-        markEditorGate(question.file, question.code ?? question.prompt);
-      }
-      const result = await askOne(question);
-      if (result === "bypass") {
-        void vscode.window.setStatusBarMessage(
-          "Comprehension Guard: check bypassed. The agent can continue.",
-          4000,
-        );
-        return true;
-      }
-      if (result === "fail") {
-        return false;
-      }
-    }
-    void vscode.window.showInformationMessage("Comprehension Guard: check passed. The agent can continue.");
-    return true;
-  } finally {
-    setQuizActive(false);
-  }
-}
-
-async function askOne(question: LocalQuestion): Promise<AskStep> {
-  const context = activeContext;
-  if (context && question.code && question.requestedKind && question.requestedKind !== "multiple_choice") {
-    try {
-      const passed = await askWithEngine(context, question);
-      return passed ? "pass" : "fail";
-    } catch {
-      // Fall back to the local question when the model is unavailable.
-    }
-  }
-  const result = question.type === "ordering" ? await askOrdering(question) : await askChoice(question);
-  if (result !== "bypass") {
-    await recordLocalPause(question, result === "pass");
-  }
-  return result;
-}
-
-async function askWithEngine(context: vscode.ExtensionContext, question: LocalQuestion): Promise<boolean> {
-  const kind = engineKind(question.requestedKind ?? "multiple_choice");
-  const snippet = question.code ?? "";
-  return runComprehensionGate(snippet, context, languageFromPath(question.file ?? ""), {
-    source: "agent",
-    filePath: question.file,
-    kind,
-    prepared: beginQuestion(context, snippet, languageFromPath(question.file ?? ""), kind, question.file),
-  });
-}
-
 function languageFromPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   const names: Record<string, string> = {
@@ -904,125 +1052,6 @@ function languageFromPath(filePath: string): string {
     ".cc": "cpp",
   };
   return names[ext] ?? "";
-}
-
-function engineKind(kind: QuestionType): QuestionKind {
-  if (kind === "ordering") return "ordering";
-  if (kind === "change") return "debug";
-  if (kind === "explain") return "free-text";
-  return "multiple-choice";
-}
-
-async function recordLocalPause(question: LocalQuestion, passed: boolean): Promise<void> {
-  const context = activeContext;
-  if (!context || !question.concept) {
-    return;
-  }
-  const record: AttemptRecord = {
-    timestamp: Date.now(),
-    language: "",
-    charCount: question.code?.length ?? 0,
-    mode: "multiple-choice",
-    conceptTags: [question.concept],
-    passed,
-    outcome: passed ? "pass" : "fail",
-    followups: 0,
-    judgeConfigId: "local-pause",
-    score: passed ? 1 : 0,
-    source: "agent",
-    filePath: question.file,
-  };
-  await addAttempt(context, record);
-  const masteryAfter = await rememberCheck(context, record);
-  await logReview(context, {
-    concepts: record.conceptTags,
-    eventKind: "check",
-    source: "agent",
-    mode: "multiple-choice",
-    score: record.score,
-    passed,
-    followups: 0,
-    masteryAfter,
-    filePath: question.file,
-    question: question.prompt,
-    studentAnswer: "",
-    misconception: "",
-    askedForExplanation: false,
-    explanation: "",
-    judgeConfigId: "local-pause",
-  });
-}
-
-async function askChoice(question: LocalQuestion): Promise<AskStep> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const picked = await pickOption(question);
-    if (picked === "dismiss") {
-      return "fail";
-    }
-    if (picked === "bypass") {
-      return "bypass";
-    }
-    if (gradeLocal(question, { selectedIndex: picked })) {
-      return "pass";
-    }
-    if (attempt === 0) {
-      await vscode.window.showWarningMessage(question.hint);
-    }
-  }
-  return "fail";
-}
-
-async function askOrdering(question: LocalQuestion): Promise<AskStep> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const order: number[] = [];
-    const used = new Set<number>();
-    while (order.length < question.options.length) {
-      const picked = await pickOption(question, used);
-      if (picked === "dismiss") {
-        return "fail";
-      }
-      if (picked === "bypass") {
-        return "bypass";
-      }
-      order.push(picked);
-      used.add(picked);
-    }
-    if (gradeLocal(question, { order })) {
-      return "pass";
-    }
-    if (attempt === 0) {
-      await vscode.window.showWarningMessage(question.hint);
-    }
-  }
-  return "fail";
-}
-
-async function pickOption(question: LocalQuestion, hidden?: ReadonlySet<number>): Promise<PickResult> {
-  const items: Array<vscode.QuickPickItem & { pick: PickResult }> = [];
-  question.options.forEach((label, index) => {
-    if (hidden?.has(index)) {
-      return;
-    }
-    items.push({ label, pick: index });
-  });
-  items.push({ label: "Bypass this check", pick: "bypass" });
-  const picked = await vscode.window.showQuickPick(items, {
-    title: question.prompt,
-    placeHolder: question.prompt,
-    ignoreFocusOut: true,
-  });
-  if (!picked) {
-    return "dismiss";
-  }
-  return picked.pick;
-}
-
-async function readCurrentText(fsPath: string): Promise<string | undefined> {
-  const open = findOpen(fsPath);
-  if (open) {
-    return open.getText();
-  }
-  return readText(fsPath);
 }
 
 function acceptIncoming(body: unknown): boolean {

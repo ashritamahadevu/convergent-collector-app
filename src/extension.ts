@@ -69,6 +69,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.blockCopy", () => {
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: copying and cutting are locked while this code is being checked.",
+        2500,
+      );
+    }),
+  );
+
   // One-shot bypass (deadline escape hatch).
   context.subscriptions.push(
     vscode.commands.registerCommand("comprehensionGuard.bypassNext", () => {

@@ -49,7 +49,9 @@ export function beginQuestion(
   _filePath?: string,
 ): Promise<GeneratedQuestion> {
   const provider = getProvider();
-  const mode = kind === "multiple-choice" ? "multiple-choice" : getGradingMode();
+  // A requested kind is the question tree-sitter asked for. Ordering and debug
+  // still use a non-free-text mode so the free-text rubric retry cannot replace them.
+  const mode = kind === "free-text" ? "free-text" : kind ? "multiple-choice" : getGradingMode();
   return (async () => {
     const key = providerNeedsApiKey(provider) ? await getApiKey(context, provider) : "local";
     if (!key?.trim()) {

@@ -358,3 +358,34 @@ test("unavailable grading followed by a successful retry keeps distinct, consist
   assert.equal(attempts[0].outcome, "ungraded"); assert.equal(attempts[0].score, undefined);
   assert.equal(getStats(f.context as never).total, 1);
 });
+
+test("failed follow-up generation leaves the wrong answer unrecorded", async t => {
+  const f = await captureFixture(t, MCQ_QUESTION as GeneratedQuestion);
+  const gate = runComprehensionGate(original, f.context as never, "javascript", { source: "agent" });
+  await waitUntil(() => panels.length === 1); panels[0].fromWebview({ type: "ready" });
+  await waitUntil(() => panels[0].questions().length === 1);
+  panels[0].fromWebview({ type: "submit", selectedIndex: 0 });
+  await waitUntil(() => panels[0].feedback().length > 0);
+  const route = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("http://127.0.0.1:11434")) return new Response("bad request", { status: 400 });
+    return route(input, init);
+  };
+  panels[0].fromWebview({ type: "next_question" });
+  await waitUntil(() => panels[0].feedback().some(m => String((m as { message?: string }).message ?? "").includes("Could not generate")));
+  assert.equal(panels[0].questions().length, 1);
+  await f.sync();
+  assert.equal(f.backend.database.history().length, 0);
+  assert.equal((f.context.store.get("comprehensionGuard.attempts") as unknown[] | undefined)?.length ?? 0, 0);
+  globalThis.fetch = async (input, init) => {
+    if (!String(input).startsWith("http://127.0.0.1:11434")) return route(input, init);
+    return new Response(JSON.stringify({ message: { content: JSON.stringify(MCQ_QUESTION) } }), { headers: { "Content-Type": "application/json" } });
+  };
+  panels[0].fromWebview({ type: "next_question" });
+  await waitUntil(() => panels[0].questions().length === 2);
+  await f.sync();
+  assert.equal(f.backend.database.history().length, 1);
+  assert.equal(f.backend.database.history()[0].check.outcome, "fail");
+  panels[0].fromWebview({ type: "submit", selectedIndex: 1 });
+  assert.equal(await gate, true);
+});

@@ -336,22 +336,25 @@ async function runComprehensionGateBody(
           view.close();
           return false;
         }
+        let replacement: GeneratedQuestion;
         try {
-          const replacement = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
-          // Finalize before changing the question/ID. Generation failure leaves it open for retry.
-          if (assessed) await recordAttempt(false, "fail", lastCriterionResults, lastScoreOverride);
-          if (question.kind === "debug") {
-            await restoreDebug(debug);
-            meta?.lock?.resume();
-          }
-          question = replacement;
-          resetDashboardQuestion();
+          replacement = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
         } catch {
+          // Only a generation failure stays on this question. Recording or restoring
+          // the editor must not be reported as a failed follow-up, or the same event
+          // id would be finalized again on the next attempt.
           view.showFeedback({
             message: "Could not generate a follow-up question. Please try explaining the code or close the panel.",
           });
           continue;
         }
+        if (assessed) await recordAttempt(false, "fail", lastCriterionResults, lastScoreOverride);
+        if (question.kind === "debug") {
+          await restoreDebug(debug);
+          meta?.lock?.resume();
+        }
+        question = replacement;
+        resetDashboardQuestion();
         view.showQuestion(question);
         continue;
       }

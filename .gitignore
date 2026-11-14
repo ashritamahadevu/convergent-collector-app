@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-dist/
+# dist/ — now tracked so users don't need to compile
 out/
 
 # Packaged extension

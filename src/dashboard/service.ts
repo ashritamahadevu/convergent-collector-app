@@ -88,7 +88,9 @@ export function registerDashboardSync(context: vscode.ExtensionContext): void {
     const box = outbox(context);
     if (enabled()) await flush(context);
     const last = context.globalState.get<number>(LAST_SYNC);
-    void vscode.window.showInformationMessage(`Desktop sync: ${enabled() ? box.connected ? "connected" : "waiting for desktop" : "off"}. Pending: ${(await box.pending()).length}. Last synced: ${last ? new Date(last).toLocaleString() : "never"}.${box.lastError ? " " + box.lastError : ""}`);
+    const quarantined = await box.quarantined();
+    const rejected = quarantined.length ? ` Quarantined (${quarantined.length}) in ${path.join(box.directory, "quarantine")}: ${quarantined.slice(0, 5).map(q => q.file + " (" + q.reason + ")").join("; ")}${quarantined.length > 5 ? "; more files in that folder" : ""}.` : "";
+    void vscode.window.showInformationMessage(`Desktop sync: ${enabled() ? box.connected ? "connected" : "waiting for desktop" : "off"}. Pending: ${(await box.pending()).length}. Last synced: ${last ? new Date(last).toLocaleString() : "never"}.${box.lastError ? " " + box.lastError : ""}${rejected}`);
   }));
   retry();
 }

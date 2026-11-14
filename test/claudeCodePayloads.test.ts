@@ -197,7 +197,7 @@ test("real NotebookEdit payload is detected", () => {
   }
 });
 
-test("BUG-A1: a NotebookEdit should be revertible (fail -> original notebook)", { todo: "BUG-A1 .ipynb stores new_source JSON-escaped; hunk revert is a no-op and the snapshot/original_file are ignored" }, () => {
+test("a NotebookEdit is revertible to the original notebook", () => {
   const f = load("notebook");
   try {
     const env = f.delivered[0].envelope;
@@ -211,18 +211,17 @@ test("BUG-A1: a NotebookEdit should be revertible (fail -> original notebook)", 
   }
 });
 
-test("observed: NotebookEdit hunk revert is a no-op on the real notebook file (documents BUG-A1)", () => {
+test("NotebookEdit keeps old_source and the original file for a revert", () => {
   const f = load("notebook");
   try {
     const env = f.delivered[0].envelope;
     const [edit] = editsFromHookEnvelope(env);
     const updated = env.payload.tool_response.updated_file as string;
-    assert.equal(edit.hunks[0].oldText, "", "old_source lives in tool_response, which the parser ignores");
-    assert.equal(revertHunks(updated, edit.hunks), updated);
-    assert.equal(prepareHeldEdit(edit, updated, undefined).restore, undefined);
-    // Everything needed was in the payload:
-    assert.equal(typeof env.payload.tool_response.original_file, "string");
-    assert.equal(Object.keys(env.snapshots).length, 1);
+    assert.equal(edit.hunks[0].oldText, env.payload.tool_response.old_source);
+    assert.equal(edit.restore?.previous, env.payload.tool_response.original_file);
+    assert.equal(edit.restore?.next, updated);
+    const held = prepareHeldEdit(edit, updated, undefined);
+    assert.equal(held.restore?.previous, env.payload.tool_response.original_file);
   } finally {
     f.cleanup();
   }

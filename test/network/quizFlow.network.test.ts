@@ -99,7 +99,7 @@ describe("network down before the quiz starts", () => {
     const panel = await openPanel();
     const shownAfter = Date.now() - started;
     assert.match(String(panel.questions()[0].questionText), /What does this code do\?/);
-    assert.equal(vscodeStub.infoMessages.length + vscodeStub.warnMessages.length + vscodeStub.errorMessages.length, 0);
+    assert.ok(vscodeStub.warnMessages.length > 0, "the student is told generation failed");
     // Any 15+ character text passes the fallback.
     panel.fromWebview({ type: "submit", answer: "x".repeat(15) });
     assert.equal(await gate.promise, true);
@@ -120,23 +120,16 @@ describe("network down before the quiz starts", () => {
     setQuizActive(true); // what pasteGuard / editGuard do before calling the gate
     const gate = startGate(fakeContext());
     await new Promise((r) => setTimeout(r, 1500));
-    assert.equal(vscodeStub.panels.length, 0, "no quiz UI during generation");
+    assert.equal(vscodeStub.panels.length, 0, "the question panel waits until a question exists");
     assert.equal(requestQuizBypass(), true, "command reports success");
-    await new Promise((r) => setTimeout(r, 300));
-    assert.equal(gate.settled(), false, "BUG: bypass does not end the hold while generation is pending");
-    // Network comes back: the question arrives.
+    assert.equal(await gate.promise, true, "bypass during generation keeps the code");
     server.releaseHung(ollamaReply(FREE_TEXT_QUESTION));
-    const panel = await openPanel();
-    await new Promise((r) => setTimeout(r, 500));
-    assert.equal(gate.settled(), false, "BUG: quiz opens and waits even though Bypass was requested");
-    panel.dispose();
-    assert.equal(await gate.promise, true, "closing now counts as the earlier bypass");
     setQuizActive(false);
   });
 });
 
 describe("agent-edit quiz and the Bypass command", () => {
-  test("BUG: agent quizzes never set quizActive, so the Bypass command cannot reach them (it arms a bypass for the NEXT insertion instead)", async () => {
+  test("an open gate accepts the Bypass command", async () => {
     // agentGuard.runAgentQuiz sets state.processing = true but never calls setQuizActive(true).
     const { state, setBypassArmed } = await import("../../src/state");
     server.handler = () => ({ kind: "hang" });
@@ -145,42 +138,36 @@ describe("agent-edit quiz and the Bypass command", () => {
     await new Promise((r) => setTimeout(r, 300));
     // This is what extension.ts's comprehensionGuard.bypassNext does:
     const reached = requestQuizBypass();
-    if (!reached) {
-      setBypassArmed(true);
-    }
-    assert.equal(reached, false, "Bypass did not reach the open agent quiz");
-    assert.equal(state.bypassArmed, true, "a one-shot bypass is now armed for an unrelated future insertion");
+    assert.equal(reached, true, "Bypass reaches the open gate");
+    assert.equal(await gate.promise, true);
     server.releaseHung(ollamaReply(FREE_TEXT_QUESTION));
-    const panel = await openPanel();
-    await new Promise((r) => setTimeout(r, 300));
-    assert.equal(gate.settled(), false);
-    panel.dispose(); // closing = remove the agent's code
-    assert.equal(await gate.promise, false, "agent code discarded although the user ran Bypass");
     state.processing = false;
     setBypassArmed(false);
   });
 });
 
 describe("network drops mid-quiz (after the question is shown)", () => {
-  test("BUG: grading fails -> nonsense answer is passed and recorded as a real pass (mastery raised)", async () => {
+  test("grading fails -> answer is ungraded, mastery is unchanged, and the student can retry", async () => {
     const ctx = fakeContext();
     script(() => ({ kind: "reset" }));
     const gate = startGate(ctx);
     const panel = await openPanel();
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
-    assert.equal(await gate.promise, true);
+    await waitFor(() => panel.feedback().length > 0, 3000, "ungraded feedback");
+    assert.equal(gate.settled(), false, "the quiz stays open so the student can retry");
     const recorded = attempts(ctx);
     assert.equal(recorded.length, 1);
-    assert.equal(recorded[0].outcome, "pass");
-    assert.equal(recorded[0].passed, true);
-    const mastery = ctx.store.get("comprehensionGuard.conceptMastery") as { concept: string; mastery: number }[];
-    assert.ok(mastery?.length > 0, "mastery updated from an ungraded answer");
-    assert.equal(panel.feedback().length, 0, "user is not told grading was skipped");
+    assert.equal(recorded[0].outcome, "ungraded");
+    assert.equal(recorded[0].passed, false);
+    const mastery = ctx.store.get("comprehensionGuard.conceptMastery") as { concept: string; mastery: number }[] | undefined;
+    assert.equal(mastery, undefined);
+    assert.match(String(panel.feedback()[0].message), /not scored/);
     assert.ok(logs.some((l) => /no_decision reason=provider_error/.test(l)));
-    console.log("[observed] offline grading -> pass, mastery " + JSON.stringify(mastery));
+    panel.dispose();
+    assert.equal(await gate.promise, false);
   });
 
-  test("BUG: network drops during a follow-up -> second (nonsense) answer is passed", async () => {
+  test("network drops during a follow-up -> second answer is ungraded, not passed", async () => {
     const ctx = fakeContext();
     script((n) => (n === 0 ? ollamaReply(judgeJson(["fail", "fail"])) : { kind: "reset" }));
     const gate = startGate(ctx);
@@ -189,8 +176,11 @@ describe("network drops mid-quiz (after the question is shown)", () => {
     await waitFor(() => panel.feedback().length > 0, 3000, "follow-up feedback");
     assert.match(String(panel.feedback()[0].message), /Not quite/);
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER + " again" });
-    assert.equal(await gate.promise, true);
-    assert.equal(attempts(ctx).at(-1)!.outcome, "pass");
+    await waitFor(() => panel.feedback().length > 1, 3000, "ungraded feedback");
+    assert.equal(gate.settled(), false);
+    assert.equal(attempts(ctx).at(-1)!.outcome, "ungraded");
+    panel.dispose();
+    assert.equal(await gate.promise, false);
   });
 
   test("short blip (one dropped request, back within 0.6s) is absorbed by the judge retry", async () => {
@@ -205,43 +195,43 @@ describe("network drops mid-quiz (after the question is shown)", () => {
     assert.equal(await gate.promise, false);
   });
 
-  test("BUG: judge replies with upper-case FAIL verdicts -> student is passed", async () => {
+  test("judge replies with upper-case FAIL verdicts -> student is failed", async () => {
     const ctx = fakeContext();
     const raw = JSON.stringify(judgeJson(["fail", "fail"])).replace(/"fail"/g, '"FAIL"');
     script(() => ollamaReply(raw));
     const gate = startGate(ctx);
     const panel = await openPanel();
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
-    assert.equal(await gate.promise, true);
-    assert.equal(attempts(ctx)[0].outcome, "pass");
+    await waitFor(() => panel.feedback().length > 0, 3000, "fail feedback");
+    assert.match(String(panel.feedback()[0].message), /Not quite/);
+    assert.equal(gate.settled(), false);
+    panel.dispose();
+    assert.equal(await gate.promise, false);
+    assert.notEqual(attempts(ctx)[0].outcome, "pass");
   });
 
-  test("BUG: generator returned no criteria -> any 15+ char answer passes (judge never called)", async () => {
+  test("generator returned no criteria -> fallback quiz, not a graded pass", async () => {
     const ctx = fakeContext();
     const { criteria: _c, ...noCriteria } = FREE_TEXT_QUESTION;
     void _c;
     script(() => ollamaReply(judgeJson(["fail", "fail"])), noCriteria);
     const gate = startGate(ctx);
     const panel = await openPanel();
+    assert.match(String(panel.questions()[0].questionText), /What does this code do\?/);
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
     assert.equal(await gate.promise, true);
     assert.equal(server.requests.filter((r) => r.kind === "judge").length, 0);
-    assert.equal(attempts(ctx)[0].outcome, "pass");
+    assert.equal(attempts(ctx).length, 0, "fallback is not a graded pass");
   });
 
-  test("BUG: judge renames criterion ids -> a correct answer is failed every time and the code is removed", async () => {
+  test("judge renames criterion ids -> a correct answer still passes", async () => {
     const ctx = fakeContext();
     script(() => ollamaReply(judgeJson(["pass", "pass"], ["1", "2"])));
     const gate = startGate(ctx);
     const panel = await openPanel();
-    for (let i = 0; i < 3; i++) {
-      panel.fromWebview({ type: "submit", answer: GOOD_ANSWER });
-      if (i < 2) {
-        await waitFor(() => panel.feedback().length > i, 3000, "feedback " + i);
-      }
-    }
-    assert.equal(await gate.promise, false);
-    assert.equal(attempts(ctx).at(-1)!.outcome, "fail");
+    panel.fromWebview({ type: "submit", answer: GOOD_ANSWER });
+    assert.equal(await gate.promise, true);
+    assert.equal(attempts(ctx).at(-1)!.outcome, "pass");
   });
 });
 
@@ -250,29 +240,29 @@ describe("slow grading: what the user can do while it runs", () => {
     script(() => ({ ...ollamaReply(judgeJson(["pass", "pass"])), delayMs: 1500 }) as Behaviour);
     const gate = startGate(fakeContext());
     const panel = await openPanel();
-    const before = panel.toWebview.length;
     panel.fromWebview({ type: "submit", answer: GOOD_ANSWER });
-    await new Promise((r) => setTimeout(r, 1000));
-    assert.equal(panel.toWebview.length, before, "nothing posted to the webview during grading");
+    await new Promise((r) => setTimeout(r, 400));
+    assert.ok(panel.toWebview.some((message) => message.type === "grading"), "the panel is told grading is in progress");
     assert.equal(await gate.promise, true);
   });
 
   test("BUG: a second Submit click during slow grading is replayed and burns a follow-up", async () => {
-    vscodeStub.settings.set("comprehensionGuard.maxFollowups", 2);
+    vscodeStub.settings.set("comprehensionGuard.maxFollowups", 1);
     const ctx = fakeContext();
     script(() => ({ ...ollamaReply(judgeJson(["fail", "fail"])), delayMs: 800 }) as Behaviour);
     const gate = startGate(ctx);
     const panel = await openPanel();
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
     await new Promise((r) => setTimeout(r, 200));
-    panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER }); // impatient second click
-    const result = await gate.promise;
-    assert.equal(result, false, "failed after one deliberate answer");
-    assert.equal(server.requests.filter((r) => r.kind === "judge").length, 2);
-    assert.equal(panel.feedback().length, 1, "the follow-up was shown but never answered by the user");
+    panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
+    await waitFor(() => panel.feedback().length > 0, 3000, "first grade");
+    assert.equal(server.requests.filter((r) => r.kind === "judge").length, 1, "the second click is not graded");
+    assert.equal(gate.settled(), false);
+    panel.dispose();
+    assert.equal(await gate.promise, false);
   });
 
-  test("BUG: Bypass button clicked during the last grading is ignored when that grade is a fail -> code removed", async () => {
+  test("Bypass button clicked during the last grading keeps the code", async () => {
     vscodeStub.settings.set("comprehensionGuard.maxFollowups", 1);
     const ctx = fakeContext();
     script(() => ({ ...ollamaReply(judgeJson(["fail", "fail"])), delayMs: 800 }) as Behaviour);
@@ -281,8 +271,8 @@ describe("slow grading: what the user can do while it runs", () => {
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
     await new Promise((r) => setTimeout(r, 200));
     panel.fromWebview({ type: "bypass" });
-    assert.equal(await gate.promise, false, "Bypass was clicked but the gate returned false");
-    assert.equal(attempts(ctx).at(-1)!.outcome, "fail");
+    assert.equal(await gate.promise, true);
+    assert.equal(attempts(ctx).at(-1)!.outcome, "bypass");
   });
 
   test("Bypass COMMAND during slow grading is honoured (contrast with the button)", async () => {
@@ -293,18 +283,19 @@ describe("slow grading: what the user can do while it runs", () => {
     const panel = await openPanel();
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
     await new Promise((r) => setTimeout(r, 200));
+    setQuizActive(true);
     requestQuizBypass();
     assert.equal(await gate.promise, true);
     setQuizActive(false);
   });
 
-  test("closing the quiz tab during grading still keeps the code if grading then fails over (no_decision)", async () => {
+  test("closing the quiz tab during grading removes the code, including when grading cannot finish", async () => {
     script(() => ({ kind: "reset" }));
     const gate = startGate(fakeContext());
     const panel = await openPanel();
     panel.fromWebview({ type: "submit", answer: NONSENSE_ANSWER });
-    panel.dispose(); // user closes the tab, which is documented to remove the code
-    assert.equal(await gate.promise, true, "code kept although the tab was closed");
+    panel.dispose();
+    assert.equal(await gate.promise, false);
   });
 });
 
@@ -336,11 +327,8 @@ describe("misgrade report while offline", () => {
     const { gate, panel } = await reachDispute(ctx);
     server.handler = () => ({ kind: "hang" });
     panel.fromWebview({ type: "dispute", answer: GOOD_ANSWER });
-    await new Promise((r) => setTimeout(r, 3000));
-    assert.equal(gate.settled(), false, "still waiting on the report POST after 3s");
-    assert.equal(panel.disposed, false, "quiz still open, file still locked");
-    server.releaseHung({ kind: "json", body: {} });
     assert.equal(await gate.promise, true);
+    assert.equal(panel.disposed, true);
     assert.equal((ctx.store.get("comprehensionGuard.misgradeReports") as unknown[]).length, 1, "local copy kept");
   });
 });

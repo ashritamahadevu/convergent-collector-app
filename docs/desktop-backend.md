@@ -8,11 +8,11 @@ This version supports History, Growth, and connection status. It records one que
 
 Deferred: mastery/Elo synchronization, recall cards, exam dates, prep sets, file maps, AI-written percentages, code profiles, multi-question test grouping, accounts, and cloud/cross-device sync. Existing Supabase code is unchanged and separately configured. The dashboard cannot automatically access VS Code's internal state. Only newly captured, opted-in checks are sent; no historical backfill.
 
-After merging the newer agent-pause flow, locally scored pause questions also emit check records. That local picker currently returns only pass/fail/bypass, so its selected-answer text is empty and its retry count is unavailable (zero). Model-backed pause questions use the ordinary session recorder. Follow-up questions in the newer quiz UI get separate event IDs.
+After merging the newer agent-pause flow, locally scored pause questions also emit check records. That local picker currently returns only pass/fail/bypass, so its selected-answer text is empty and its retry count is unavailable (zero). Its ordering score is binary (0 or 1); partial ordering credit is not preserved on that local-picker path. Model-backed pause questions use the ordinary session recorder. Follow-up questions get separate event IDs. A failed question is recorded before a successfully generated replacement is installed; a generation failure leaves the current question open rather than finalizing it twice.
 
 ## First local run
 
-Prerequisite: Node.js 22.13 or newer with `node:sqlite` support (verified on Node 22.22). Node 22 prints an experimental SQLite warning. The extension itself does not import SQLite.
+Prerequisite: Node.js 22.13 or newer with `node:sqlite` support (verified on Node 22.22). `npm run start:dashboard` checks the Node version before building/importing SQLite and gives a readable error on older versions. The compiled standalone backend also has that guard. Node 22 prints an experimental SQLite warning. The extension itself does not import SQLite; the repository's VS Code engine requirement is independent of this desktop-only prerequisite.
 
 From the repository root:
 
@@ -39,7 +39,7 @@ Launch the extension using the repository's VS Code Extension Development Host c
 4. Finish a normal comprehension quiz.
 5. Run **Comprehension Guard: Desktop Sync Status** to see connectivity, pending records, and last successful sync.
 
-Desktop sync is off by default. Disable **Comprehension Guard: Desktop Sync Enabled** in user settings to stop new capture and pause pending delivery. Pending files are retained; re-enabling sends them. A request already in flight may finish. Quiz text and student answers are included, but complete source snippets, API keys, prompts, account credentials, and absolute file paths are not included as separate payload fields. User-written answers may themselves contain sensitive text. No source-code scrubber runs on answers.
+Desktop sync is off by default. Disable **Comprehension Guard: Desktop Sync Enabled** in user settings to stop new capture and pause pending delivery. Pending files are retained; re-enabling sends them. A request already in flight may finish. Quiz text and student answers are included, but complete source snippets, API keys, prompts, account credentials, and absolute file paths are not included as separate payload fields. Explanation events send the generic feedback "Explanation requested." rather than copying the answer key. This change does not remove keys already stored by older versions or change the extension's separate learning log. Questions and user-written answers may themselves contain code or sensitive text; no source-code scrubber runs on those fields.
 
 Supported: local VS Code and backend on the same computer. Remote SSH, WSL, containers, and Codespaces are not supported. The Electron window and preload bridge are not implemented in this change.
 
@@ -63,7 +63,9 @@ node -e 'const fs = require("node:fs"); const path = require("node:path"); const
 
 ## Reliability and storage
 
-The extension writes one atomic JSON file per event under its `globalStorageUri/dashboard-outbox` before attempting HTTP delivery. Different VS Code windows use unique event IDs. Failed deliveries retain their files and retry every 15 seconds while opted in. Requests time out after 3 seconds and redirects are rejected. The queue is not silently capped or discarded. Corrupt records stop the flush and remain on disk for inspection; the status command shows the error. Delivery is background work; local storage failures show a warning without changing the gate result.
+The extension writes one atomic JSON file per event under its `globalStorageUri/dashboard-outbox` before attempting HTTP delivery. Different VS Code windows use unique event IDs. Temporary network/auth/server failures retain pending files and retry every 15 seconds while opted in. Requests time out after 3 seconds and redirects are rejected. The queue is not silently capped or discarded.
+
+Corrupt JSON, invalid schemas, permanent per-event HTTP rejections (400/409/413/415/422), and mismatching acknowledgements are moved to `dashboard-outbox/quarantine` with a reason sidecar; the flush continues with later records. Original event bytes are retained and unique quarantine filenames prevent overwriting rejected versions. The **Desktop Sync Status** command lists the quarantine directory, filenames (up to five), reasons, and total count, including after a restart. Quarantined files are not retried automatically. After diagnosing the reason, manually repair/requeue a copy with a fresh event ID when appropriate; leave the quarantined original for inspection. Delivery is background work; local storage failures show a warning without changing the gate result.
 
 SQLite uses `event_id` as its primary key. Re-delivering an identical event is acknowledged without duplication; reusing the ID with different content returns 409. Acknowledgement happens only after the insert commits. Receiver history survives restarts. A heartbeat marks an extension as connected for 45 seconds; it is distinct from successfully syncing a check. Last-sync time is persisted separately.
 
@@ -74,8 +76,11 @@ The extension stores the pairing token in VS Code SecretStorage. Do not expose i
 - `check.score` is an assessment result from 0 to 1, not the Bayesian/mastery-discounted `AttemptRecord.score`. Ordinary rubric questions use passed/applicable criterion count; ordering uses its existing partial score; MCQ/debug use 0 or 1. Walkthrough free-text currently retains its existing binary pass/fail score.
 - Growth displays `check.score * 5` and averages scored checks equally. It uses rolling 7/30-day windows and UTC millisecond timestamps; the UI can format dates locally.
 - Bypass, explanation-only, disputed, and undecided results are unscored. They do not increase the completed/scored count or lower the average. Closing an unassessed check is ungraded. These transport rules do not change existing extension mastery calculations.
+- Walkthrough cancellation, bypass, and explanation exits (including during a debug edit) also create local attempt/review records. They do not update mastery/recall. Local statistics exclude the ungraded cancellation outcome as well as bypass/explanation.
 - A bypass count is observed quiz bypasses, not every possible skipped insertion. Failed questions can still be scored/completed. No denominator-based bypass rate or pass-rate chart is supplied yet.
 - File paths are workspace-relative or null if the workspace is unavailable. Projects are identified by a hash of their workspace URI. Moving a project changes its identity in this MVP.
+
+Known scaling limit: Growth currently loads the matching events and computes its average/points in JavaScript. In particular, `days=all` has no point limit. SQL aggregation plus paginated or bucketed chart points is deferred; use bounded periods for large histories.
 
 ## Development checks
 

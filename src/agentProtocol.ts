@@ -211,10 +211,7 @@ export function shouldUseDiskFallback(input: {
   if (input.totalInserted < input.threshold) {
     return false;
   }
-  if (input.isActive && input.bigSingle) {
-    return false;
-  }
-  if (input.isActive && input.isDirty) {
+  if (input.isActive) {
     return false;
   }
   return true;
@@ -723,9 +720,12 @@ function normalizePayload(
     return editsFromWrite(agent, filePath, input, payload, readSnapshot, readFile);
   }
 
+  if (toolName === "NotebookEdit") {
+    return editsFromNotebook(agent, cwd, input, payload, readSnapshot, readFile);
+  }
+
   if (
     toolName === "Edit" ||
-    toolName === "NotebookEdit" ||
     typeof input.new_string === "string" ||
     typeof input.new_source === "string"
   ) {
@@ -755,6 +755,39 @@ function normalizePayload(
   }
 
   return [];
+}
+
+function editsFromNotebook(
+  agent: string,
+  cwd: string,
+  input: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  readSnapshot: (absPath: string) => string | undefined,
+  readFile: ((absPath: string) => string | undefined) | undefined,
+): AgentEdit[] {
+  const filePath = resolveFilePath(filePathFrom(input, payload), cwd);
+  if (!filePath) {
+    return [];
+  }
+  const response = asRecord(payload.tool_response) ?? asRecord(payload.toolResponse) ?? {};
+  const newText = stringField(input, "new_source") || stringField(response, "new_source") || stringField(input, "new_string");
+  if (!newText) {
+    return [];
+  }
+  const original = stringField(response, "original_file") || readSnapshot(filePath);
+  const updated = stringField(response, "updated_file") || readFile?.(filePath);
+  const oldText = stringField(input, "old_source") || stringField(response, "old_source");
+  const next = updated || undefined;
+  return [
+    {
+      agent,
+      filePath,
+      snippet: newText,
+      hunks: [{ oldText, newText }],
+      restore: original && next ? { previous: original, next } : undefined,
+      next,
+    },
+  ];
 }
 
 function editsFromWrite(

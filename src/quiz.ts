@@ -9,6 +9,7 @@ import {
   getNonCriticalPassFraction,
   getProvider,
   insertedRange,
+  setQuizActive,
   state,
   subscribeQuizBypass,
   takeQuizBypass,
@@ -52,6 +53,25 @@ export async function runComprehensionGate(
   language?: string,
   meta?: GateMeta,
 ): Promise<boolean> {
+  const owned = !state.quizActive;
+  if (owned) {
+    setQuizActive(true);
+  }
+  try {
+    return await runComprehensionGateBody(snippet, context, language, meta);
+  } finally {
+    if (owned) {
+      setQuizActive(false);
+    }
+  }
+}
+
+async function runComprehensionGateBody(
+  snippet: string,
+  context?: vscode.ExtensionContext,
+  language?: string,
+  meta?: GateMeta,
+): Promise<boolean> {
   if (!context) {
     return fallbackGate(snippet, language);
   }
@@ -71,17 +91,50 @@ export async function runComprehensionGate(
   const mode = getGradingMode();
   const lang = language ?? "";
 
+  void vscode.window.setStatusBarMessage("Comprehension Guard: preparing a question. Bypass keeps the code.", 4000);
+  let stopped: "bypass" | "cancel" | undefined;
+  const stopBypass = subscribeQuizBypass(() => {
+    stopped = "bypass";
+  });
   let question: GeneratedQuestion;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let cap: ReturnType<typeof setTimeout> | undefined;
   try {
-    question = await generateQuestion({
-      context,
-      snippet,
-      language: lang,
-      mode,
-    });
-  } catch {
+    question = await Promise.race([
+      generateQuestion({
+        context,
+        snippet,
+        language: lang,
+        mode,
+      }),
+      new Promise<GeneratedQuestion>((_, reject) => {
+        timer = setInterval(() => {
+          if (stopped) {
+            reject(new Error(stopped));
+          }
+        }, 50);
+        cap = setTimeout(() => reject(new Error("timeout")), 45_000);
+      }),
+    ]);
+  } catch (err) {
+    if (timer) clearInterval(timer);
+    if (cap) clearTimeout(cap);
+    stopBypass();
+    const reason = err instanceof Error ? err.message : "";
+    if (reason === "bypass" || stopped === "bypass") {
+      return true;
+    }
+    if (reason === "cancel" || stopped === "cancel") {
+      return false;
+    }
+    void vscode.window.showWarningMessage(
+      "Comprehension Guard: could not generate a question (" + reason.slice(0, 120) + "). A short explanation check is open instead.",
+    );
     return fallbackGate(snippet, language, context.extensionUri);
   }
+  if (timer) clearInterval(timer);
+  if (cap) clearTimeout(cap);
+  stopBypass();
 
   const view = createQuizPanel(snippet, lang, context.extensionUri);
   view.showQuestion(question);
@@ -112,12 +165,13 @@ export async function runComprehensionGate(
   let lastCriterionResults: AttemptRecord["criterionResults"];
   let dashboardCheckId = newDashboardCheckId();
   let assessed = false;
-  let ungraded = false;
+  let lastScoreOverride: number | undefined;
   const resetDashboardQuestion = () => {
     dashboardCheckId = newDashboardCheckId();
-    assessed = false; ungraded = false;
+    assessed = false;
     lastStudentAnswer = ""; lastFeedback = ""; lastMisconception = "";
     lastCriterionResults = undefined;
+    lastScoreOverride = undefined;
   };
 
   const recordAttempt = async (
@@ -142,19 +196,20 @@ export async function runComprehensionGate(
       filePath: meta?.filePath,
       misconceptions: misconceptionsFor({ mode, passed, criterionResults }),
     };
-    draft.score = scoreOverride ?? gradedScore(draft);
+    draft.score = outcome === "ungraded" ? undefined : scoreOverride ?? gradedScore(draft);
     await addAttempt(context, draft);
     let masteryAfter: number | undefined;
     if (outcome === "pass" || outcome === "fail" || outcome === "disputed") {
       masteryAfter = await rememberCheck(context, draft);
     }
+    const ungraded = outcome === "ungraded";
     await logReview(context, {
       concepts: draft.conceptTags,
       eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : meta?.recall ? "recall" : "check",
       source: draft.source,
       mode: draft.mode,
-      score: outcome === "bypass" ? undefined : draft.score,
-      passed: outcome === "bypass" || outcome === "explained" ? undefined : draft.passed,
+      score: outcome === "bypass" || ungraded ? undefined : draft.score,
+      passed: outcome === "bypass" || outcome === "explained" || ungraded ? undefined : draft.passed,
       followups: draft.followups,
       masteryAfter,
       filePath: draft.filePath,
@@ -172,12 +227,16 @@ export async function runComprehensionGate(
       eventId: dashboardCheckId, timestamp: draft.timestamp, filePath: meta?.filePath,
       check: {
         concepts: question.conceptTags, question: question.question, answer: lastStudentAnswer,
-        feedback: ungraded ? "Grader could not decide." : outcome === "explained" ? question.referenceAnswer : outcome === "pass" ? "Correct." : lastFeedback,
+        feedback: ungraded ? "Grader could not decide." : outcome === "explained" ? "Explanation requested." : outcome === "pass" ? "Correct." : lastFeedback,
         misconception: outcome === "fail" ? lastMisconception : "",
         outcome: ungraded || (!assessed && outcome === "fail") ? "ungraded" : outcome, score: displayScore,
         source: meta?.source ?? "unknown", mode: question.kind, filePath: null, retries: followups,
       },
     });
+    if (ungraded) {
+      dashboardCheckId = newDashboardCheckId();
+      assessed = false; lastScoreOverride = undefined; lastCriterionResults = undefined;
+    }
   };
 
   if (question.kind === "debug" && !debug) {
@@ -278,7 +337,14 @@ export async function runComprehensionGate(
           return false;
         }
         try {
-          question = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
+          const replacement = await generateQuestion({ context, snippet, language: lang, mode, kind: "multiple-choice" });
+          // Finalize before changing the question/ID. Generation failure leaves it open for retry.
+          if (assessed) await recordAttempt(false, "fail", lastCriterionResults, lastScoreOverride);
+          if (question.kind === "debug") {
+            await restoreDebug(debug);
+            meta?.lock?.resume();
+          }
+          question = replacement;
           resetDashboardQuestion();
         } catch {
           view.showFeedback({
@@ -295,6 +361,7 @@ export async function runComprehensionGate(
       if (question.kind === "debug" && debug) {
         assessed = true;
         const actual = debug.editor.document.getText(debug.range);
+        lastScoreOverride = sameCode(actual, snippet) ? 1 : 0;
         if (sameCode(actual, snippet)) {
           debug.dispose();
           meta?.lock?.resume();
@@ -357,6 +424,7 @@ export async function runComprehensionGate(
       if (question.kind === "ordering") {
         const order = payload.order ?? [];
         const score = gradeOrdering(question, order);
+        lastScoreOverride = score;
         assessed = true;
         lastStudentAnswer = order.map(i => question.items?.[i] ?? String(i)).join(" → ");
         const ok = score >= 0.999;
@@ -386,6 +454,7 @@ export async function runComprehensionGate(
         continue;
       }
 
+      view.beginGrade();
       const res = await judge({
         context,
         snippet,
@@ -393,8 +462,10 @@ export async function runComprehensionGate(
         question,
         studentAnswer: payload.answer ?? "",
       });
+      view.endGrade();
 
-      if (takeQuizBypass()) {
+      const interrupt = takeQuizBypass() ? "bypass" : view.pollInterrupt();
+      if (interrupt === "bypass") {
         await recordAttempt(false, "bypass");
         view.close();
         vscode.window.setStatusBarMessage(
@@ -403,18 +474,29 @@ export async function runComprehensionGate(
         );
         return true;
       }
+      if (interrupt === "cancel") {
+        await recordAttempt(false, "fail");
+        view.close();
+        vscode.window.setStatusBarMessage(
+          "Comprehension Guard: quiz closed. The code was removed.",
+          4000,
+        );
+        return false;
+      }
 
       if (res.kind === "decided") {
         lastMisconception = res.misconception ?? "";
       }
 
       if (res.kind === "no_decision") {
-        ungraded = true;
-        await recordAttempt(true, "pass");
-        view.showFeedback({ message: "Correct! The code has been accepted.", passed: true });
-        await new Promise<void>((resolve) => setTimeout(resolve, 1200));
-        view.close();
-        return true;
+        await recordAttempt(false, "ungraded");
+        view.showFeedback({
+          message: "Grading failed, so this answer was not scored. Try again, or bypass.",
+          passed: false,
+          allowDispute: false,
+          allowNextQuestion: false,
+        });
+        continue;
       }
 
       const agg = aggregate(
@@ -491,9 +573,10 @@ export async function runSession(
   },
 ): Promise<boolean> {
   if (input.questions.length === 0) {
-    return true;
+    return false;
   }
   const view = createQuizPanel(input.snippet, input.language ?? "", context.extensionUri);
+  let failed = false;
   for (const question of input.questions) {
     const checkId = newDashboardCheckId();
     const saveDashboard = (outcome: import("./dashboard/protocol").CheckOutcome, score: number | null,
@@ -502,15 +585,31 @@ export async function runSession(
         check: { concepts: question.conceptTags, question: question.question, answer, feedback, misconception,
           outcome, score, source: input.source ?? "walkthrough", mode: question.kind, filePath: null, retries: 0 },
       });
+    const saveUnscored = async (outcome: "bypass" | "explained" | "ungraded", feedback = "") => {
+      const record: AttemptRecord = {
+        timestamp: Date.now(), language: input.language ?? "", charCount: input.snippet.length,
+        mode: question.kind === "multiple-choice" ? "multiple-choice" : "free-text",
+        conceptTags: question.conceptTags, passed: false, outcome, followups: 0,
+        judgeConfigId: getJudgeConfigId(), source: input.source ?? "walkthrough", filePath: input.filePath,
+      };
+      await addAttempt(context, record);
+      await logReview(context, {
+        concepts: record.conceptTags, eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : "check",
+        source: record.source, mode: record.mode, followups: 0, filePath: record.filePath,
+        question: question.question, askedForExplanation: outcome === "explained", judgeConfigId: record.judgeConfigId,
+      });
+      // Unscored exits are history, not evidence for updating mastery/recall.
+      await saveDashboard(outcome, null, "", feedback);
+    };
     view.showQuestion(question);
     const action = await waitForQuizAction(view);
     if (action.type === "cancel") {
-      await saveDashboard("ungraded", null, "", "Check closed before grading.");
+      await saveUnscored("ungraded", "Check closed before grading.");
       view.close();
       return false;
     }
     if (action.type === "bypass" || action.type === "explain") {
-      await saveDashboard(action.type === "bypass" ? "bypass" : "explained", null);
+      await saveUnscored(action.type === "bypass" ? "bypass" : "explained");
       view.close();
       return true;
     }
@@ -518,9 +617,9 @@ export async function runSession(
       continue;
     }
     let passed = false;
+    let ungraded = false;
     let score = 0;
     let misconception = "";
-    let ungraded = false;
     if (question.kind === "multiple-choice") {
       passed = gradeMcq(question, action.selectedIndex ?? -1);
       score = passed ? 1 : 0;
@@ -535,7 +634,7 @@ export async function runSession(
         view.showFeedback({ message: "Edit the code in the editor, then submit again." });
         const retry = await waitForQuizAction(view);
         if (retry.type === "cancel" || retry.type === "bypass" || retry.type === "explain") {
-          await saveDashboard(retry.type === "bypass" ? "bypass" : retry.type === "explain" ? "explained" : "ungraded", null);
+          await saveUnscored(retry.type === "bypass" ? "bypass" : retry.type === "explain" ? "explained" : "ungraded");
           await restoreDebug(plant);
           view.close();
           return retry.type !== "cancel";
@@ -561,7 +660,7 @@ export async function runSession(
         misconception = res.misconception ?? "";
       } else {
         ungraded = true;
-        passed = true;
+        passed = false;
       }
       score = passed ? 1 : 0;
     }
@@ -572,29 +671,29 @@ export async function runSession(
       mode: question.kind === "multiple-choice" ? "multiple-choice" : "free-text",
       conceptTags: question.conceptTags,
       passed,
-      outcome: passed ? "pass" : "fail",
+      outcome: ungraded ? "ungraded" : passed ? "pass" : "fail",
       followups: 0,
       judgeConfigId: getJudgeConfigId(),
-      score,
+      score: ungraded ? undefined : score,
       source: input.source ?? "walkthrough",
       filePath: input.filePath,
       misconceptions: misconception ? [misconception] : [],
     };
     await addAttempt(context, record);
-    const masteryAfter = await rememberCheck(context, record);
+    const masteryAfter = ungraded ? undefined : await rememberCheck(context, record);
     await logReview(context, {
       concepts: record.conceptTags,
       eventKind: "check",
       source: record.source,
       mode: record.mode,
-      score,
-      passed,
+      score: ungraded ? undefined : score,
+      passed: ungraded ? undefined : passed,
       followups: 0,
       masteryAfter,
       filePath: record.filePath,
       question: question.question,
       studentAnswer: action.answer,
-      misconception: passed ? "" : misconception,
+      misconception: passed || ungraded ? "" : misconception,
       askedForExplanation: false,
       explanation: "",
       judgeConfigId: record.judgeConfigId,
@@ -605,11 +704,17 @@ export async function runSession(
     await saveDashboard(ungraded ? "ungraded" : passed ? "pass" : "fail", ungraded ? null : score,
       answer, ungraded ? "Grader could not decide." : passed ? "Correct." : "Not quite.", misconception);
     if (!passed) {
-      view.showFeedback({ message: "Not quite. The next question is coming, or try to remember this one.", passed: false });
+      failed = true;
+      view.showFeedback({
+        message: ungraded
+          ? "Grading failed, so this answer was not scored."
+          : "Not quite. The next question is coming, or try to remember this one.",
+        passed: false,
+      });
     }
   }
   view.close();
-  return true;
+  return !failed;
 }
 
 async function beginDebug(

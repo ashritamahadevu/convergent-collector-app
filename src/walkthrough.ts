@@ -11,17 +11,29 @@ import type { GeneratedQuestion } from "./types";
 const WALK_KEY = "comprehensionGuard.walkthrough";
 const MASTERY_OK = 0.75;
 
+type WalkFile = { path: string; snippet: string; core: boolean; complexity: number; centrality: number };
+
 type SavedWalk = {
   project: string;
-  files: { path: string; snippet: string; core: boolean; complexity: number; centrality: number }[];
+  files: WalkFile[];
+  groups?: WalkFile[][];
   session: number;
   snoozeUntil?: number;
 };
+
+export function walkPathKey(filePath: string): string {
+  const slashed = filePath.replace(/\\/g, "/");
+  return /^[A-Za-z]:\//.test(slashed) ? slashed.toLowerCase() : slashed;
+}
 
 export async function offerWalkthrough(
   context: vscode.ExtensionContext,
   edits: AgentEdit[],
 ): Promise<void> {
+  const existing = context.globalState.get<SavedWalk>(WALK_KEY);
+  if (existing && existing.session < (existing.groups?.length ?? sessionsFor(existing, getMastery(context)).length)) {
+    return;
+  }
   const files = collapse(edits);
   const mapped = buildProjectMap(files.map((file) => ({ path: file.path, text: file.snippet })));
   const saved: SavedWalk = {
@@ -38,6 +50,7 @@ export async function offerWalkthrough(
     }),
     session: 0,
   };
+  saved.groups = sessionsFor(saved, getMastery(context));
   const choice = await vscode.window.showInformationMessage(
     `${saved.project}: ${saved.files.length} files changed. Walk through the important parts in short sessions?`,
     "Start session 1",
@@ -78,7 +91,7 @@ export async function resumeWalkthrough(context: vscode.ExtensionContext): Promi
 }
 
 async function runWalkSession(context: vscode.ExtensionContext, saved: SavedWalk): Promise<void> {
-  const plan = sessionsFor(saved, getMastery(context));
+  const plan = saved.groups ?? sessionsFor(saved, getMastery(context));
   const group = plan[saved.session];
   if (!group || group.length === 0) {
     await context.globalState.update(WALK_KEY, undefined);
@@ -140,16 +153,22 @@ function sessionsFor(
   for (let i = 0; i < pool.length; i += size) {
     groups.push(pool.slice(i, i + size));
   }
-  return groups.slice(0, 6);
+  return groups;
 }
 
 function collapse(edits: AgentEdit[]): { path: string; snippet: string }[] {
-  const byPath = new Map<string, string>();
+  const byPath = new Map<string, { path: string; snippet: string }>();
   for (const edit of edits) {
-    const path = edit.filePath.replace(/\\/g, "/");
-    byPath.set(path, (byPath.get(path) ?? "") + "\n" + edit.snippet);
+    const key = walkPathKey(edit.filePath);
+    const display = edit.filePath.replace(/\\/g, "/");
+    const prev = byPath.get(key);
+    if (prev) {
+      prev.snippet += "\n" + edit.snippet;
+    } else {
+      byPath.set(key, { path: display, snippet: edit.snippet });
+    }
   }
-  return [...byPath.entries()].map(([path, snippet]) => ({ path, snippet }));
+  return [...byPath.values()];
 }
 
 function projectName(): string {

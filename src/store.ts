@@ -34,7 +34,7 @@ export type Stats = {
 
 export function getStats(context: vscode.ExtensionContext): Stats {
   const attempts = getAttempts(context).filter(
-    (a) => a.outcome !== "bypass" && a.outcome !== "explained",
+    (a) => a.outcome !== "bypass" && a.outcome !== "explained" && a.outcome !== "ungraded",
   );
   const total = attempts.length;
   const passed = attempts.filter((a) => a.passed).length;
@@ -99,6 +99,7 @@ export async function saveMisgradeReport(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(report),
+      signal: AbortSignal.timeout(1500),
     });
     if (!response.ok) {
       return { sent: false, detail: "Saved locally. The report URL returned " + response.status + "." };

@@ -90,7 +90,7 @@ describe("runCliPrompt with a fake CLI", { skip: process.platform !== "win32" &&
     const r = await timed(() => runCliPrompt("claude-cli", "hello", "", 20_000));
     assert.ok(r.error, "should reject");
     console.log("[observed] missing CLI -> " + r.error!.message);
-    assert.match(r.error!.message, /empty response/);
+    assert.match(r.error!.message, /not installed/);
   });
 
   test("CLI prints garbage with exit 0 -> resolves with the garbage text", async () => {

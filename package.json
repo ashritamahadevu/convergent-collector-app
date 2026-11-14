@@ -261,7 +261,7 @@
     "test:e2e:network": "node test/network/e2e/run.mjs",
     "capture:claude": "npx -y tsx test/claude-live/run-scenario.ts",
     "build:dashboard": "node scripts/build-dashboard.cjs",
-    "start:dashboard": "npm run build:dashboard && node dist/dashboard-backend.cjs",
+    "start:dashboard": "node scripts/check-dashboard-runtime.cjs && npm run build:dashboard && node dist/dashboard-backend.cjs",
     "test:dashboard": "node scripts/test-dashboard.cjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.dashboard.json"
   },

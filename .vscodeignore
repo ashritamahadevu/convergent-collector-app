@@ -17,5 +17,6 @@ ISSUES.md
 desktop/**
 scripts/build-dashboard.cjs
 scripts/test-dashboard.cjs
+scripts/check-dashboard-runtime.cjs
 dist/dashboard*
 tsconfig.dashboard.json

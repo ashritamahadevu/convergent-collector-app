@@ -11,6 +11,7 @@ import {
   withoutEditGuard,
 } from "./state";
 import { runComprehensionGate } from "./quiz";
+import { rememberAcceptedSnippet } from "./acceptedSnippets";
 
 const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
 
@@ -68,17 +69,31 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         return;
       }
 
-      state.suppressEditGuard = true;
-      state.processing = true;
-      setQuizActive(true);
-      const placed = await insertSnippet(editor, selection, clipboardText);
-      state.suppressEditGuard = false;
-      if (!placed) {
+      const before = editor.document.getText();
+      let placed: vscode.Range | undefined;
+      try {
+        state.suppressEditGuard = true;
+        state.processing = true;
+        setQuizActive(true);
+        placed = await insertSnippet(editor, clipboardText);
+        state.suppressEditGuard = false;
+        if (!placed) {
+          state.processing = false;
+          setQuizActive(false);
+          return;
+        }
+        if (vscode.workspace.getConfiguration("editor").get<boolean>("formatOnPaste", false)) {
+          state.suppressEditGuard = true;
+          await vscode.commands.executeCommand("editor.action.formatDocument");
+          state.suppressEditGuard = false;
+        }
+      } catch {
+        state.suppressEditGuard = false;
         state.processing = false;
         setQuizActive(false);
         return;
       }
-      const lock = lockDocument(editor.document);
+      const lock = lockDocument(editor.document, before);
       try {
         const passed = await runComprehensionGate(
           clipboardText,
@@ -92,6 +107,10 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
             lock,
           },
         );
+        if (passed) {
+          lock.accept();
+          rememberAcceptedSnippet(clipboardText);
+        }
         lock.release();
         if (!passed && editor.document.getText(placed) === clipboardText) {
           state.suppressEditGuard = true;
@@ -122,24 +141,27 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
 /** Inserts the clipboard text and returns the range it occupies. */
 async function insertSnippet(
   editor: vscode.TextEditor,
-  selection: vscode.Selection,
   text: string,
 ): Promise<vscode.Range | undefined> {
-  await vscode.window.showTextDocument(editor.document, {
-    viewColumn: editor.viewColumn,
-    preserveFocus: false,
-    selection,
+  const selections = editor.selections.length > 0 ? [...editor.selections] : [editor.selection];
+  const ordered = selections.slice().sort((a, b) => {
+    if (a.start.line !== b.start.line) {
+      return b.start.line - a.start.line;
+    }
+    return b.start.character - a.start.character;
   });
-  const applied = await editor.edit((builder) => {
-    builder.replace(selection, text);
-  });
+  const work = new vscode.WorkspaceEdit();
+  for (const selection of ordered) {
+    work.replace(editor.document.uri, selection, text);
+  }
+  const applied = await vscode.workspace.applyEdit(work);
   if (!applied) {
     vscode.window.showWarningMessage(
       "Comprehension Guard: could not paste into the editor.",
     );
     return undefined;
   }
-  return insertedRange(selection.start, text);
+  return insertedRange(selections[0].start, text);
 }
 
 /** Runs the built-in paste while suppressing the edit guard. */

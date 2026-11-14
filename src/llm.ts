@@ -100,7 +100,7 @@ Evidence-gated decision policy:
 8. Interpret each criterion literally; do not import extra expectations.
 Restating code line by line or listing identifiers without explaining behavior or purpose does not satisfy a criterion.`;
 
-const VERDICT_REGEX = /"verdict"\s*:\s*"(pass|fail|n\/a)"/g;
+const VERDICT_REGEX = /"verdict"\s*:\s*"(pass|fail|n\/a)"/gi;
 const EVIDENCE_REGEX = /"evidence"\s*:\s*"((?:\\.|[^"\\])*)"/g;
 
 const RUBRIC_LEAKAGE_REGEX =
@@ -184,7 +184,7 @@ function extractJsonBlock(text: string): string {
 }
 
 function rubricLintFailed(criteria: Criterion[]): boolean {
-  if (criteria.length < 2) {
+  if (criteria.length < 1) {
     return true;
   }
   return criteria.some((c) => RUBRIC_LEAKAGE_REGEX.test(c.text));
@@ -472,10 +472,34 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const body = await res.text();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  } catch (err) {
+    throw describeFetchError(err);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function describeFetchError(err: unknown): Error {
+  const error = err instanceof Error ? err : new Error(String(err));
+  const cause = (error as { cause?: { code?: string } }).cause;
+  const code = (error as { code?: string }).code || cause?.code || "";
+  if (code === "ENOTFOUND") {
+    return new Error("DNS lookup failed: " + error.message);
+  }
+  if (code === "ECONNREFUSED") {
+    return new Error("Connection refused: " + error.message);
+  }
+  if (/certificate|UNABLE_TO_VERIFY|TLS|SSL/i.test(error.message + code)) {
+    return new Error("TLS error: " + error.message);
+  }
+  return error;
+}
+
+export class RetryableError extends Error {
+  retryAfterMs?: number;
 }
 
 function isAbortError(err: unknown): boolean {
@@ -488,13 +512,36 @@ function delay(ms: number): Promise<void> {
 
 /** Transient, worth-retrying API conditions (rate limit / overloaded / unavailable). */
 function isTransientError(err: unknown): boolean {
-  if (isAbortError(err)) {
+  if (err instanceof RetryableError || isAbortError(err)) {
     return true;
   }
   const msg = err instanceof Error ? err.message : String(err);
   return /\(429\)|\(503\)|\(502\)|\(500\)|high demand|overloaded|unavailable|try again/i.test(
     msg,
   );
+}
+
+function retryDelay(err: unknown, attempt: number): number {
+  if (err instanceof RetryableError && err.retryAfterMs !== undefined) {
+    return err.retryAfterMs;
+  }
+  return 600 * 2 ** attempt;
+}
+
+function throwStatus(provider: string, res: Response, detail: string): never {
+  const message = `${provider} API error (${res.status}): ${detail.slice(0, 200)}`;
+  if (res.status === 429 || res.status === 503 || res.status === 502 || res.status === 500) {
+    const error = new RetryableError(message);
+    if (res.status === 429 || res.status === 503) {
+      const raw = res.headers.get("retry-after");
+      const seconds = raw ? Number(raw) : NaN;
+      if (Number.isFinite(seconds)) {
+        error.retryAfterMs = Math.min(Math.max(0, seconds * 1000), 20_000);
+      }
+    }
+    throw error;
+  }
+  throw new Error(message);
 }
 
 async function callOpenAI(
@@ -524,7 +571,7 @@ async function callOpenAI(
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`OpenAI API error (${res.status}): ${detail.slice(0, 200)}`);
+    throwStatus("OpenAI", res, detail);
   }
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
@@ -559,7 +606,7 @@ async function callAnthropic(
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`Anthropic API error (${res.status}): ${detail.slice(0, 200)}`);
+    throwStatus("Anthropic", res, detail);
   }
   const data = (await res.json()) as {
     content?: { type: string; text?: string }[];
@@ -594,7 +641,7 @@ async function callGemini(
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${detail.slice(0, 200)}`);
+    throwStatus("Gemini", res, detail);
   }
   const data = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -642,7 +689,7 @@ async function callOllama(
   }
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`Ollama API error (${res.status}): ${detail.slice(0, 200)}`);
+    throwStatus("Ollama", res, detail);
   }
   const data = (await res.json()) as { message?: { content?: string } };
   const content = data.message?.content;
@@ -734,7 +781,7 @@ function parseJudgeVerdicts(
           break;
         }
         verdicts.push({
-          id: typeof row?.id === "string" ? row.id : ids[i],
+          id: ids[i],
           verdict,
           evidence:
             typeof row?.evidence === "string" ? row.evidence.slice(0, 500) : "",
@@ -783,8 +830,12 @@ function readMisconception(raw: string): string {
 }
 
 function normalizeVerdict(value: unknown): "pass" | "fail" | "n/a" | null {
-  if (value === "pass" || value === "fail" || value === "n/a") {
-    return value;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "pass" || normalized === "fail" || normalized === "n/a") {
+    return normalized;
   }
   return null;
 }
@@ -846,7 +897,7 @@ async function runGenerateWithRetry(
       if (!isTransientError(err) || attempt === maxAttempts - 1) {
         throw err;
       }
-      await delay(600 * 2 ** attempt);
+      await delay(retryDelay(err, attempt));
     }
   }
   throw lastErr;
@@ -856,9 +907,12 @@ export async function generateQuestion(params: GenerateParams): Promise<Generate
   const start = Date.now();
   try {
     let result = await runGenerateWithRetry(params.context, params);
-    if (params.mode === "free-text" && rubricLintFailed(result.criteria)) {
+    if (result.kind === "free-text" && rubricLintFailed(result.criteria)) {
       const retry = await runGenerateWithRetry(params.context, params);
-      if (rubricLintFailed(retry.criteria)) {
+      if (retry.kind === "free-text" && retry.criteria.length === 0) {
+        throw new Error("Free-text question needs at least two criteria.");
+      }
+      if (retry.kind === "free-text" && rubricLintFailed(retry.criteria)) {
         result = { ...retry, flagged: true };
         logCall("generate", Date.now() - start, "outcome=flagged_rubric");
         return result;
@@ -894,9 +948,9 @@ export async function judge(params: JudgeParams): Promise<JudgeResult> {
     return { kind: "no_decision", reason: "missing_api_key" };
   }
 
-  if (params.question.criteria.length === 0) {
-    logCall("judge", Date.now() - start, "outcome=decided empty_criteria");
-    return { kind: "decided", verdicts: [] };
+  if (params.question.kind === "free-text" && params.question.criteria.length === 0) {
+    logCall("judge", Date.now() - start, "outcome=no_decision reason=empty_criteria");
+    return { kind: "no_decision", reason: "empty_criteria" };
   }
 
   const prompt = buildJudgePrompt(

@@ -180,7 +180,7 @@ test("closing the quiz mid-session does not advance the session", async () => {
   assert.equal(saved(ctx)?.snoozeUntil, undefined, "re-offered on the next activation");
 });
 
-test("BUG-W1: answering every walkthrough question wrong should not pass the session", { todo: "BUG-W1 runSession returns true unless the panel is closed" }, async () => {
+test("answering every walkthrough question wrong does not pass the session", async () => {
   const ctx = makeContext();
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
   fake.onQuestion = answer(false);
@@ -188,15 +188,7 @@ test("BUG-W1: answering every walkthrough question wrong should not pass the ses
   assert.equal(saved(ctx)?.session, 0, "a session where every answer was wrong must not advance");
 });
 
-test("observed: answering every question wrong still advances the session (documents BUG-W1)", async () => {
-  const ctx = makeContext();
-  fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
-  fake.onQuestion = answer(false);
-  await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
-  assert.equal(saved(ctx)?.session, 1);
-});
-
-test("BUG-W2: if no question can be generated the session should not count as passed", { todo: "BUG-W2 runSession returns true for an empty question list" }, async () => {
+test("if no question can be generated the session does not count as passed", async () => {
   const ctx = makeContext();
   llm.setFailGenerate(true);
   fake.onInfo = (_m: string, items: string[]) => (items.includes("Start session 1") ? "Start session 1" : undefined);
@@ -206,17 +198,14 @@ test("BUG-W2: if no question can be generated the session should not count as pa
 });
 
 test("group size: low or no mastery gives 1 file per session, mastery >= 0.75 gives 2", async () => {
-  // No mastery, and wrong answers keep it low: 3 files -> 3 sessions of 1.
+  // No mastery: the first session is one file. Wrong answers do not advance it.
   const ctx = makeContext();
   fake.onInfo = (m: string, items: string[]) =>
     items.includes("Start session 1") ? "Start session 1" : m.includes("is ready") ? "Start" : undefined;
   fake.onQuestion = answer(false);
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js"), edit("/ws/c.js")]);
-  await wt.resumeWalkthrough(ctx);
-  await wt.resumeWalkthrough(ctx);
-  assert.deepEqual(filesInPrompts(), [["a_js"], ["b_js"], ["c_js"]]);
-  assert.equal(saved(ctx), undefined, "finished");
-  assert.ok(fake.infoMessages.some((m: { message: string }) => /walkthrough finished/.test(m.message)));
+  assert.deepEqual(filesInPrompts(), [["a_js"]]);
+  assert.equal(saved(ctx)?.session, 0);
 
   // High mastery: 3 files -> 2 sessions (2 + 1).
   llm.reset();
@@ -236,7 +225,7 @@ test("BUG-W3: more than 6 sessions of files - files after the 6th group are neve
   const ctx = makeContext();
   fake.onInfo = (m: string, items: string[]) =>
     items.includes("Start session 1") ? "Start session 1" : m.includes("is ready") ? "Start" : undefined;
-  fake.onQuestion = answer(false); // keeps group size at 1
+  fake.onQuestion = answer(false);
   const files = ["a", "b", "c", "d", "e", "f", "g", "h"].map((n) => edit(`/ws/${n}.js`));
   await wt.offerWalkthrough(ctx, files);
   for (let i = 0; i < 10; i++) {
@@ -246,19 +235,15 @@ test("BUG-W3: more than 6 sessions of files - files after the 6th group are neve
   assert.ok(covered.includes("g_js") && covered.includes("h_js"), "covered: " + covered.join(","));
 });
 
-test("observed: with 7 files (the auto threshold) and mastery kept low, the 7th file is dropped (BUG-W3)", async () => {
-  // Wrong answers keep mastery low (group size 1) and still advance (BUG-W1).
+test("a failed walkthrough session stays on the first file", async () => {
   const ctx = makeContext();
   fake.onInfo = (m: string, items: string[]) =>
     items.includes("Start session 1") ? "Start session 1" : m.includes("is ready") ? "Start" : undefined;
   fake.onQuestion = answer(false);
   await wt.offerWalkthrough(ctx, ["a", "b", "c", "d", "e", "f", "g"].map((n) => edit(`/ws/${n}.js`)));
-  for (let i = 0; i < 10; i++) {
-    await wt.resumeWalkthrough(ctx);
-  }
-  assert.deepEqual(filesInPrompts(), [["a_js"], ["b_js"], ["c_js"], ["d_js"], ["e_js"], ["f_js"]]);
-  assert.equal(saved(ctx), undefined, "walkthrough reports finished");
-  assert.ok(fake.infoMessages.some((m: { message: string }) => /walkthrough finished/.test(m.message)));
+  assert.deepEqual(filesInPrompts(), [["a_js"]]);
+  assert.equal(saved(ctx)?.session, 0);
+  assert.equal(fake.infoMessages.some((m: { message: string }) => /walkthrough finished/.test(m.message)), false);
 });
 
 test("observed: with 7 files and correct answers, mastery rises mid-walkthrough and a file is skipped (BUG-W4)", async () => {
@@ -272,7 +257,7 @@ test("observed: with 7 files and correct answers, mastery rises mid-walkthrough 
   }
   const groups = filesInPrompts();
   const covered = new Set(groups.flat());
-  assert.ok(!covered.has("b_js"), "groups: " + JSON.stringify(groups));
+  assert.ok(covered.has("b_js"), "groups stay as first planned: " + JSON.stringify(groups));
 });
 
 test("BUG-W4: mastery rising mid-walkthrough should not skip a file", { todo: "BUG-W4 groups are recomputed from live mastery but session index is reused" }, async () => {
@@ -289,7 +274,7 @@ test("BUG-W4: mastery rising mid-walkthrough should not skip a file", { todo: "B
   assert.deepEqual([...new Set(covered)].sort(), ["a_js", "b_js", "c_js", "d_js"], "covered: " + covered.join(","));
 });
 
-test("BUG-W5: a second large change should not overwrite a walkthrough in progress", { todo: "BUG-W5 single globalState slot" }, async () => {
+test("a second large change does not overwrite a walkthrough in progress", async () => {
   const ctx = makeContext();
   fake.onInfo = () => "Snooze";
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
@@ -315,7 +300,7 @@ test("collapse: duplicate paths merge, backslash and forward slash merge", async
   assert.match(a.snippet, /third edit/);
 });
 
-test("BUG-W6: collapse should treat drive-letter / case variants of one Windows file as one file", { todo: "BUG-W6 collapse() only swaps slashes; it does not use normPath" }, async () => {
+test("collapse treats drive-letter and case variants of one Windows file as one file", async () => {
   const ctx = makeContext();
   fake.onInfo = () => "Snooze";
   await wt.offerWalkthrough(ctx, [edit("C:\\ws\\src\\a.js"), edit("c:\\ws\\SRC\\a.js")]);
@@ -346,5 +331,5 @@ test("observed: an ordering question costs two generate calls (rubric lint runs 
   fake.onQuestion = answer(true);
   await wt.offerWalkthrough(ctx, [edit("/ws/a.js"), edit("/ws/b.js")]);
   const kinds = (llm.calls as { kind: string }[]).map((c) => c.kind);
-  assert.equal(kinds.filter((k) => k === "ordering").length, 2);
+  assert.equal(kinds.filter((k) => k === "ordering").length, 1);
 });

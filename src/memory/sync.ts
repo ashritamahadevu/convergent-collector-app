@@ -91,34 +91,102 @@ async function authHeader(context: vscode.ExtensionContext): Promise<{ anon: str
   if (!syncConfigured()) {
     return undefined;
   }
-  const session = await readSession(context);
+  let session = await readSession(context);
   if (!session) {
     return undefined;
+  }
+  if (session.expiresAt <= Date.now() + 30_000) {
+    const refreshed = await refreshSession(context);
+    if (refreshed) {
+      session = {
+        accessToken: refreshed.token,
+        refreshToken: session.refreshToken,
+        userId: refreshed.userId,
+        expiresAt: Date.now() + 3600_000,
+      };
+    }
   }
   return { anon: supabaseAnonKey(), token: session.accessToken, userId: session.userId };
 }
 
+async function refreshSession(
+  context: vscode.ExtensionContext,
+): Promise<{ anon: string; token: string; userId: string } | undefined> {
+  const session = await readSession(context);
+  if (!session?.refreshToken || !syncConfigured()) {
+    return undefined;
+  }
+  try {
+    const response = await fetch(supabaseUrl().replace(/\/$/, "") + "/auth/v1/token?grant_type=refresh_token", {
+      method: "POST",
+      headers: { apikey: supabaseAnonKey(), "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refreshToken }),
+    });
+    const body = (await response.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (!response.ok || !body.access_token) {
+      return undefined;
+    }
+    await writeSession(context, {
+      accessToken: body.access_token,
+      refreshToken: body.refresh_token || session.refreshToken,
+      userId: session.userId,
+      expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000,
+    });
+    return { anon: supabaseAnonKey(), token: body.access_token, userId: session.userId };
+  } catch {
+    return undefined;
+  }
+}
+
+const QUEUE_CAP = 5000;
+let chain: Promise<void> = Promise.resolve();
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
 function enqueue(context: vscode.ExtensionContext, op: SyncOp): SyncOp[] {
   const prev = context.globalState.get<SyncOp[]>(QUEUE_KEY, []);
-  const next = [...(Array.isArray(prev) ? prev : []), op].slice(-200);
+  const next = [...(Array.isArray(prev) ? prev : []), op].slice(-QUEUE_CAP);
   void context.globalState.update(QUEUE_KEY, next);
   return next;
 }
 
-export async function flushSync(context: vscode.ExtensionContext): Promise<void> {
-  const auth = await authHeader(context);
+export function flushSync(context: vscode.ExtensionContext): Promise<void> {
+  const run = chain.then(() => doFlush(context));
+  chain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function doFlush(context: vscode.ExtensionContext): Promise<void> {
+  let auth = await authHeader(context);
   const queued = context.globalState.get<SyncOp[]>(QUEUE_KEY, []);
   if (!auth || !Array.isArray(queued) || queued.length === 0) {
     return;
   }
   const remaining: SyncOp[] = [];
   for (const op of queued) {
-    const ok = await upsert(auth, op);
+    let ok = await upsert(auth, op);
+    if (!ok) {
+      const refreshed = await refreshSession(context);
+      if (refreshed) {
+        auth = refreshed;
+        ok = await upsert(auth, op);
+      }
+    }
     if (!ok) {
       remaining.push(op);
     }
   }
-  await context.globalState.update(QUEUE_KEY, remaining);
+  const latest = context.globalState.get<SyncOp[]>(QUEUE_KEY, []);
+  const added = Array.isArray(latest) ? latest.slice(queued.length) : [];
+  await context.globalState.update(QUEUE_KEY, [...remaining, ...added].slice(-QUEUE_CAP));
+  if (remaining.length > 0) {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+    }
+    retryTimer = setTimeout(() => {
+      void flushSync(context);
+    }, 1000);
+    retryTimer.unref?.();
+  }
 }
 
 async function upsert(

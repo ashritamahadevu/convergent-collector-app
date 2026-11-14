@@ -61,6 +61,11 @@ interface MediaUris {
   dotFull3:      string;
   logo:          string;
   goblinWalk:    string;
+  dot1:          string;
+  dot2a:         string;
+  dot2b:         string;
+  dot3:          string;
+  dotEmpty:      string;
 }
 
 function getWebviewHtml(
@@ -137,15 +142,7 @@ function getWebviewHtml(
       letter-spacing: 0.02em;
       color: #74ab7b;
     }
-    .progress-dots { display: flex; gap: 7px; align-items: center; }
-    .dot {
-      width: 11px; height: 11px;
-      border-radius: 50%; flex-shrink: 0;
-      transition: background-color 300ms ease, opacity 300ms ease;
-    }
-    .dot-done     { background: #74ab7b; opacity: 0.72; }
-    .dot-active   { background: #74ab7b; opacity: 1; animation: q2-dot-pop 320ms cubic-bezier(0.34,1.56,0.64,1) both; }
-    .dot-inactive { background: rgba(116,171,123,0.22); opacity: 1; }
+    .progress-dots { display: flex; gap: 10px; align-items: center; }
 
     /* Goblin / explain button */
     .goblin-area {
@@ -373,90 +370,124 @@ function getWebviewHtml(
       align-items: center;
     }
 
-    .result-goblin-img {
-      width: 100px; height: 100px;
+    /* Result stack layout */
+    .result-stack {
+      display: flex;
+      width: 200px;
+      flex-direction: column;
+      align-items: center;
+      margin-inline: auto;
+    }
+    .result-upper-arrow, .result-lower-arrow {
+      display: grid;
+      width: 72px;
+      height: 27px;
+      place-items: center;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    .result-bypass-control {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    .result-bypass-control:disabled { cursor: default; opacity: 1; }
+    .result-upper-arrow img {
+      transform: rotate(180deg);
+      transition: transform 220ms cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .result-hint {
+      display: grid;
+      width: 200px;
+      height: 30px;
+      margin-top: 16px;
+      place-items: center;
+      border-radius: 30px;
+      background: #74ab7b;
+      color: #2b2b2b;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      transition: color 180ms ease, background-color 180ms ease, transform 220ms cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .result-bypass-control:not(:disabled):hover .result-upper-arrow img {
+      transform: translateY(-4px) rotate(180deg);
+    }
+    .result-bypass-control:not(:disabled):hover .result-hint {
+      background: #cbe6cf;
+      transform: translateY(-2px);
+    }
+    .drawgoblin-troll.result-troll {
+      display: block;
+      margin-top: 16px;
+      margin-inline: auto;
       object-fit: contain;
       image-rendering: pixelated;
+      transform-origin: center bottom;
     }
-    .correct-reveal  { animation: correct-troll-reveal 500ms cubic-bezier(0.22,1,0.36,1) both; }
-    .wrong-reveal    { animation: incorrect-troll-reveal 480ms cubic-bezier(0.22,1,0.36,1) both; }
-
-    /* Speech bubbles */
-    .speech-bubble {
-      border-radius: 20px;
-      padding: 14px 18px;
-      margin-top: 14px;
-      width: 100%;
-      max-width: 340px;
+    .result-message {
+      display: grid;
+      width: 200px;
+      min-height: 75px;
+      margin-top: 16px;
+      place-content: center;
+      border-radius: 30px;
+      background: #74ab7b;
+      padding: 9px 20px;
+      color: #2b2b2b;
+      font-size: 12px;
       line-height: 1.5;
-      font-size: 0.93em;
+      letter-spacing: 0.02em;
+      text-align: center;
     }
-    .bubble-correct {
-      background: rgba(116,171,123,0.12);
-      border: 1.5px solid rgba(116,171,123,0.45);
-      color: #74ab7b;
-      animation: correct-pulse 380ms 160ms ease-out both;
+    .result-message.bubble-incorrect {
+      background: #976263;
+      color: #fff;
+      animation: incorrect-message-impact 420ms ease-out both;
     }
-    .bubble-incorrect {
-      background: rgba(151,98,99,0.12);
-      border: 1.5px solid rgba(151,98,99,0.45);
-      color: rgba(255,200,200,0.9);
-      animation: incorrect-message-impact 360ms 180ms ease-out both;
+    .result-lower-arrow {
+      margin-top: 16px;
     }
+    .result-lower-arrow:not(:disabled):hover { transform: translateY(4px); }
+    .result-lower-arrow img {
+      animation: result-arrow-reveal 460ms 280ms cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    /* result-stack correct state: goblin shifted up, no bypass */
+    #screen-result-correct .result-stack {
+      transform: translateY(65px);
+    }
+    #screen-result-correct .result-troll {
+      margin-top: 0;
+      animation: correct-troll-reveal 460ms cubic-bezier(0.2,0.8,0.2,1) both;
+    }
+    #screen-result-incorrect .result-troll {
+      animation: incorrect-troll-reveal 460ms cubic-bezier(0.2,0.8,0.2,1) both;
+    }
+    .correct-reveal  { animation: correct-troll-reveal 460ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    .wrong-reveal    { animation: incorrect-troll-reveal 460ms cubic-bezier(0.2,0.8,0.2,1) both; }
+
+    /* Speech bubbles (keep for explanation screen compat) */
     .bubble-missed {
       margin-top: 8px;
       padding-left: 16px;
-      color: rgba(255,200,200,0.7);
+      color: rgba(255,255,255,0.8);
     }
     .bubble-missed li { margin-bottom: 4px; }
     .bubble-evidence {
       display: block;
       margin-top: 2px;
       font-size: 0.88em;
-      color: rgba(151,98,99,0.65);
+      color: rgba(255,255,255,0.55);
       font-style: italic;
     }
     .bubble-correct-option {
       margin-top: 8px;
       font-weight: 600;
-      color: rgba(255,200,200,0.9);
+      color: rgba(255,255,255,0.9);
     }
-
-    /* Bypass button (above goblin on incorrect screen) */
-    .bypass-btn {
-      display: flex; align-items: center; gap: 8px;
-      background: transparent;
-      border: 1.5px solid rgba(116,171,123,0.35);
-      border-radius: 100px;
-      padding: 8px 18px;
-      color: #74ab7b;
-      font-family: var(--vscode-font-family);
-      font-size: 0.9em;
-      cursor: pointer;
-      margin-bottom: 20px;
-      transition: background-color 180ms ease, border-color 180ms ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .bypass-btn:hover  { background: rgba(116,171,123,0.1); border-color: #74ab7b; }
-    .bypass-btn:active { transform: scale(0.96); }
-    .bypass-icon { width: 18px; height: 18px; }
-
-    /* Chevron try-again button */
-    .chevron-btn {
-      display: flex; align-items: center; justify-content: center;
-      background: transparent;
-      border: 1.5px solid rgba(151,98,99,0.4);
-      border-radius: 50%;
-      width: 48px; height: 48px;
-      cursor: pointer;
-      margin-top: 16px;
-      transition: background-color 180ms ease, border-color 180ms ease, transform 220ms ease;
-      -webkit-tap-highlight-color: transparent;
-      animation: result-arrow-reveal 320ms 300ms ease-out both;
-    }
-    .chevron-btn:hover  { background: rgba(151,98,99,0.1); border-color: #976263; transform: scale(1.08); }
-    .chevron-btn:active { transform: scale(0.96); }
-    .chevron-btn img { width: 24px; height: 24px; }
 
     /* Next question button on incorrect result */
     .result-next-q-btn {
@@ -486,6 +517,15 @@ function getWebviewHtml(
     }
     .dispute-btn-result:hover  { background: rgba(116,171,123,0.16); border-color: #74ab7b; }
     .dispute-btn-result:active { transform: scale(0.95); }
+
+    /* Brand logo above question */
+    .brand-logo-img {
+      display: block;
+      width: clamp(220px, 34cqw, 280px);
+      height: auto;
+      image-rendering: pixelated;
+      margin: 0 auto 20px;
+    }
 
     /* ── Screen: Explanation ──────────────────────────────────────────────── */
     #screen-explanation { align-items: stretch; }
@@ -629,8 +669,9 @@ function getWebviewHtml(
       to   { opacity: 1; transform: translateX(0)     scale(1);    }
     }
     @keyframes result-arrow-reveal {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0);   }
+      from { opacity: 0; transform: translateY(-12px) scale(0.82); }
+      70%  { opacity: 1; transform: translateY(3px) scale(1.08); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
     }
     @keyframes explanation-troll-wobble {
       0%, 100% { transform: rotate(0deg) translateY(0); }
@@ -841,6 +882,8 @@ function getWebviewHtml(
   <!-- ── Screen 1: Question ────────────────────────────────────────────── -->
   <div class="screen hidden" id="screen-question">
 
+    <img src="${uris.logo}" class="brand-logo-img" alt="" aria-hidden="true">
+
     <header class="q-meta">
       <span class="q-label" id="q-label">Question 1</span>
       <div class="progress-dots" id="progress-dots" aria-hidden="true"></div>
@@ -867,37 +910,45 @@ function getWebviewHtml(
 
   <!-- ── Screen 2: Loading ──────────────────────────────────────────────── -->
   <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
-    <img src="${uris.logo}" class="loading-logo" alt="DrawBridge" aria-hidden="true">
     <img src="${uris.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
   </div>
 
   <!-- ── Screen 3: Result — Correct ────────────────────────────────────── -->
   <div class="screen hidden" id="screen-result-correct">
-    <img src="${uris.goblinCorrect}" class="result-goblin-img correct-reveal"
-         id="goblin-correct-img" alt="" aria-hidden="true">
-    <div class="speech-bubble bubble-correct" id="bubble-correct" aria-live="polite">
-      <p id="bubble-correct-text"></p>
+    <div class="result-stack" id="result-correct-stack">
+      <img class="drawgoblin-troll result-troll correct-reveal" id="goblin-correct-img"
+           src="${uris.goblinCorrect}" width="140" height="114" alt="" aria-hidden="true">
+      <div class="result-message bubble-correct" id="bubble-correct" aria-live="polite">
+        <p id="bubble-correct-text"></p>
+      </div>
+      <button type="button" class="result-lower-arrow hidden" id="result-continue-btn">
+        <img src="${uris.arrowDown}" width="55" height="27" alt="" aria-hidden="true">
+      </button>
     </div>
   </div>
 
   <!-- ── Screen 4: Result — Incorrect ──────────────────────────────────── -->
   <div class="screen hidden" id="screen-result-incorrect">
-    <button type="button" class="bypass-btn" id="bypass-btn">
-      <img src="${uris.arrowUp}" class="bypass-icon" alt="" aria-hidden="true">
-      Bypass
-    </button>
-    <img src="${uris.goblinWrong}" class="result-goblin-img wrong-reveal"
-         id="goblin-wrong-img" alt="" aria-hidden="true">
-    <div class="speech-bubble bubble-incorrect" id="bubble-incorrect" aria-live="polite">
-      <p id="bubble-incorrect-text"></p>
-      <ul id="bubble-missed" class="bubble-missed hidden"></ul>
-      <p id="bubble-correct-option" class="bubble-correct-option hidden"></p>
+    <div class="result-stack" id="result-incorrect-stack" style="transform: translateY(17px)">
+      <button type="button" class="result-bypass-control" id="bypass-btn">
+        <span class="result-upper-arrow">
+          <img src="${uris.arrowUp}" width="55" height="27" alt="" aria-hidden="true">
+        </span>
+        <span class="result-hint">Drop the bridge</span>
+      </button>
+      <img class="drawgoblin-troll result-troll wrong-reveal" id="goblin-wrong-img"
+           src="${uris.goblinWrong}" width="140" height="114" alt="" aria-hidden="true">
+      <div class="result-message bubble-incorrect" id="bubble-incorrect" aria-live="polite">
+        <p id="bubble-incorrect-text"></p>
+        <ul id="bubble-missed" class="bubble-missed hidden"></ul>
+        <p id="bubble-correct-option" class="bubble-correct-option hidden"></p>
+      </div>
+      <button type="button" class="result-lower-arrow" id="try-again-btn">
+        <img src="${uris.arrowDownRed}" width="55" height="27" alt="" aria-hidden="true">
+      </button>
+      <button type="button" class="result-next-q-btn hidden" id="result-next-q-btn">Next Question</button>
+      <button type="button" class="dispute-btn-result hidden" id="dispute-btn">My answer was right</button>
     </div>
-    <button type="button" class="chevron-btn" id="try-again-btn" aria-label="Try again">
-      <img src="${uris.arrowDownRed}" alt="" aria-hidden="true">
-    </button>
-    <button type="button" class="result-next-q-btn hidden" id="result-next-q-btn">Next Question</button>
-    <button type="button" class="dispute-btn-result hidden" id="dispute-btn">My answer was right</button>
   </div>
 
   <!-- ── Screen 5: Explanation ─────────────────────────────────────────── -->
@@ -917,10 +968,15 @@ function getWebviewHtml(
   const vscode = acquireVsCodeApi();
 
   /* ── URI constants ────────────────────────────────────────────────────── */
-  var URI_SLEEP   = ${JSON.stringify(uris.goblinSleep)};
-  var URI_IDLE    = ${JSON.stringify(uris.goblinIdle)};
-  var URI_CORRECT = ${JSON.stringify(uris.goblinCorrect)};
-  var URI_WRONG   = ${JSON.stringify(uris.goblinWrong)};
+  var URI_SLEEP     = ${JSON.stringify(uris.goblinSleep)};
+  var URI_IDLE      = ${JSON.stringify(uris.goblinIdle)};
+  var URI_CORRECT   = ${JSON.stringify(uris.goblinCorrect)};
+  var URI_WRONG     = ${JSON.stringify(uris.goblinWrong)};
+  var URI_DOT1      = ${JSON.stringify(uris.dot1)};
+  var URI_DOT2A     = ${JSON.stringify(uris.dot2a)};
+  var URI_DOT2B     = ${JSON.stringify(uris.dot2b)};
+  var URI_DOT3      = ${JSON.stringify(uris.dot3)};
+  var URI_DOT_EMPTY = ${JSON.stringify(uris.dotEmpty)};
 
   /* ── Element refs ─────────────────────────────────────────────────────── */
   var qLabelEl          = document.getElementById("q-label");
@@ -935,6 +991,7 @@ function getWebviewHtml(
   var bypassBtn         = document.getElementById("bypass-btn");
   var tryAgainBtn       = document.getElementById("try-again-btn");
   var resultNextQBtn    = document.getElementById("result-next-q-btn");
+  var resultContinueBtn = document.getElementById("result-continue-btn");
   var disputeBtn        = document.getElementById("dispute-btn");
 
   var bubbleCorrectText = document.getElementById("bubble-correct-text");
@@ -979,10 +1036,19 @@ function getWebviewHtml(
   /* ── Progress dots ────────────────────────────────────────────────────── */
   function renderDots(current) {
     progressEl.innerHTML = "";
-    for (var i = 1; i <= TOTAL_DOTS; i++) {
-      var d = document.createElement("span");
-      d.className = "dot " + (i < current ? "dot-done" : i === current ? "dot-active" : "dot-inactive");
-      progressEl.appendChild(d);
+    var dotSets = [
+      [URI_DOT1, URI_DOT2A, URI_DOT_EMPTY, URI_DOT_EMPTY, URI_DOT_EMPTY],
+      [URI_DOT1, URI_DOT2B, URI_DOT_EMPTY, URI_DOT_EMPTY, URI_DOT_EMPTY],
+      [URI_DOT1, URI_DOT2B, URI_DOT3, URI_DOT_EMPTY, URI_DOT_EMPTY],
+    ];
+    var setIdx = Math.min(current - 1, 2);
+    var dots = dotSets[setIdx];
+    for (var i = 0; i < dots.length; i++) {
+      var img = document.createElement("img");
+      img.src = dots[i];
+      img.width = 22; img.height = 22;
+      img.setAttribute("aria-hidden", "true");
+      progressEl.appendChild(img);
     }
   }
 
@@ -1106,6 +1172,11 @@ function getWebviewHtml(
     /* Correct result screen */
     if (payload.passed === true) {
       bubbleCorrectText.textContent = payload.message || "";
+      if (payload.allowNextQuestion) {
+        resultContinueBtn.classList.remove("hidden");
+      } else {
+        resultContinueBtn.classList.add("hidden");
+      }
       retriggerAnimation(document.getElementById("goblin-correct-img"), "correct-reveal");
       showScreen("screen-result-correct");
       return;
@@ -1221,6 +1292,10 @@ function getWebviewHtml(
   });
 
   resultNextQBtn.addEventListener("click", function () {
+    vscode.postMessage({ type: "next_question" });
+  });
+
+  resultContinueBtn.addEventListener("click", function () {
     vscode.postMessage({ type: "next_question" });
   });
 
@@ -1350,6 +1425,11 @@ export function createQuizPanel(
     dotFull3:      makeUri("a365e.svg"),
     logo:          makeUri("drawbridge-logo.png"),
     goblinWalk:    makeUri("goblin_walk_circle.gif"),
+    dot1:          makeUri("e0bf4.svg"),
+    dot2a:         makeUri("12289.svg"),
+    dot2b:         makeUri("9e436.svg"),
+    dot3:          makeUri("a365e.svg"),
+    dotEmpty:      makeUri("a822a.svg"),
   };
 
   let disposed = false;

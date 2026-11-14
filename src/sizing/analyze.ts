@@ -521,10 +521,34 @@ async function inspect(file: string, source: string, options?: AnalyzeOptions): 
   };
 }
 
+const analysisCache = new Map<string, FileAnalysis>();
+const ANALYSIS_CACHE_MAX = 24;
+
+function sourceKey(file: string, source: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${file}\0${source.length}\0${hash >>> 0}`;
+}
+
 export async function analyzeFile(file: string, source: string, options?: AnalyzeOptions): Promise<FileAnalysis> {
+  const key = sourceKey(file, source);
+  const cached = analysisCache.get(key);
+  if (cached) {
+    return cached;
+  }
   const inspected = await inspect(file, source, options);
   linkAndScore(inspected.drafts);
   inspected.analysis.units.sort(compareUnits);
+  analysisCache.set(key, inspected.analysis);
+  if (analysisCache.size > ANALYSIS_CACHE_MAX) {
+    const oldest = analysisCache.keys().next().value;
+    if (oldest) {
+      analysisCache.delete(oldest);
+    }
+  }
   return inspected.analysis;
 }
 

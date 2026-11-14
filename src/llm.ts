@@ -852,12 +852,13 @@ async function runGenerateOnce(
     throw new Error("Missing API key for configured provider.");
   }
   const prompt = buildGeneratePrompt(params.snippet, params.language, params.kind ?? params.mode);
+  const tokenCap = params.kind === "debug" ? GENERATE_MAX_TOKENS[provider] : Math.min(1024, GENERATE_MAX_TOKENS[provider]);
   const raw = await completeChat(
     provider,
     apiKey,
     model,
     [{ role: "user", content: prompt }],
-    GENERATE_MAX_TOKENS[provider],
+    tokenCap,
     0.2,
     true,
   );
@@ -903,8 +904,27 @@ async function runGenerateWithRetry(
   throw lastErr;
 }
 
+const questionCache = new Map<string, { at: number; question: GeneratedQuestion }>();
+const QUESTION_CACHE_MS = 10 * 60 * 1000;
+const QUESTION_CACHE_MAX = 24;
+
+export function clearQuestionCache(): void {
+  questionCache.clear();
+}
+
+function questionCacheKey(params: GenerateParams): string {
+  return createHash("sha256")
+    .update(`${params.mode}|${params.kind ?? ""}|${params.language}|${params.snippet}`)
+    .digest("hex");
+}
+
 export async function generateQuestion(params: GenerateParams): Promise<GeneratedQuestion> {
   const start = Date.now();
+  const cached = questionCache.get(questionCacheKey(params));
+  if (cached && Date.now() - cached.at < QUESTION_CACHE_MS) {
+    logCall("generate", Date.now() - start, "outcome=cache");
+    return structuredClone(cached.question);
+  }
   try {
     let result = await runGenerateWithRetry(params.context, params);
     if (result.kind === "free-text" && rubricLintFailed(result.criteria)) {
@@ -924,7 +944,14 @@ export async function generateQuestion(params: GenerateParams): Promise<Generate
       Date.now() - start,
       result.flagged ? "outcome=flagged" : "outcome=ok",
     );
-    return result;
+    questionCache.set(questionCacheKey(params), { at: Date.now(), question: result });
+    if (questionCache.size > QUESTION_CACHE_MAX) {
+      const oldest = questionCache.keys().next().value;
+      if (oldest) {
+        questionCache.delete(oldest);
+      }
+    }
+    return structuredClone(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logCall("generate", Date.now() - start, `outcome=error reason=${msg.slice(0, 120)}`);

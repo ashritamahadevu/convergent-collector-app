@@ -146,6 +146,11 @@ function masteryFor(unit: UnitFact, prefs: LearnerPreferences): number {
   return clamp(unit.mastery, 0, 1);
 }
 
+/** Preset passed to the tree-sitter planner. An exam or interview within 14 days steps it up. */
+export function planPreset(prefs: LearnerPreferences): CheckPreset {
+  return effectivePreset(prefs);
+}
+
 function effectivePreset(prefs: LearnerPreferences): CheckPreset {
   if (examSoon(prefs) || interviewSoon(prefs)) {
     return prefs.preset === "quick" ? "standard" : "deep";

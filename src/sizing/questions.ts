@@ -1,4 +1,6 @@
-import type { ChunkChoice, LearnerPreferences } from "./chunkPolicy";
+import type { GeneratedQuestion } from "../types";
+import { analyzeFile } from "./analyze";
+import { chooseChunk, type ChunkChoice, type LearnerPreferences } from "./chunkPolicy";
 import type { DraftPlan, LocalQuestion, PlanSlot, QuestionType, UnitFact } from "./types";
 
 /**
@@ -106,6 +108,51 @@ function orderingQuestion(slot: PlanSlot, unit: UnitFact): LocalQuestion {
     answer: shuffled.answer,
     hint: "Read the function from top to bottom.",
     explanation: source.join(" then "),
+  };
+}
+
+const INSTANT_PREFS: LearnerPreferences = { preset: "standard", strictness: "standard" };
+const ORDER_PREFS: LearnerPreferences = { preset: "quick", strictness: "standard" };
+
+/**
+ * A question graded on this machine. Parsing the snippet is the whole wait;
+ * nothing is sent to a model.
+ */
+export async function localGeneratedQuestion(
+  snippet: string,
+  filePath: string,
+  style: "auto" | "ordering" = "auto",
+): Promise<GeneratedQuestion | null> {
+  const analysis = await analyzeFile(filePath, snippet);
+  const prefs = style === "ordering" ? ORDER_PREFS : INSTANT_PREFS;
+  const choice = chooseChunk(analysis.units, prefs);
+  if (!choice) {
+    return null;
+  }
+  return generatedFromLocal(questionForChunk(choice, prefs));
+}
+
+/** The quiz panel's question shape for a question that is already graded locally. */
+export function generatedFromLocal(local: LocalQuestion): GeneratedQuestion {
+  if (local.type === "ordering" && Array.isArray(local.answer)) {
+    return {
+      kind: "ordering",
+      question: local.prompt,
+      referenceAnswer: local.explanation,
+      criteria: [],
+      items: local.options,
+      correctOrder: local.answer,
+      conceptTags: local.concept ? [local.concept] : [],
+    };
+  }
+  return {
+    kind: "multiple-choice",
+    question: local.prompt,
+    referenceAnswer: local.explanation,
+    criteria: [],
+    options: local.options,
+    correctIndex: typeof local.answer === "number" ? local.answer : 0,
+    conceptTags: local.concept ? [local.concept] : [],
   };
 }
 

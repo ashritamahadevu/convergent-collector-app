@@ -370,6 +370,10 @@ function getWebviewHtml(
       opacity: 0.7;
       margin-bottom: 20px;
     }
+    .loading-caption {
+      margin: 16px 0 0;
+      color: var(--vscode-descriptionForeground);
+    }
 
     /* ── Screens: Result (shared) ─────────────────────────────────────────── */
     #screen-result-correct,
@@ -874,6 +878,7 @@ function getWebviewHtml(
   <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
     <img src="${uris.logo}" class="loading-logo" alt="DrawBridge" aria-hidden="true">
     <img src="${uris.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
+    <p id="loading-caption" class="loading-caption">Writing a question…</p>
   </div>
 
   <!-- ── Screen 3: Result — Correct ────────────────────────────────────── -->
@@ -1171,6 +1176,8 @@ function getWebviewHtml(
       });
       setGoblinState(URI_SLEEP, false);
       showScreen("screen-loading");
+      var loadingCaption = document.getElementById("loading-caption");
+      if (loadingCaption) loadingCaption.textContent = "Checking your answer…";
       vscode.postMessage({ type: "submit", order: order });
       return;
     }
@@ -1183,6 +1190,8 @@ function getWebviewHtml(
       lastAnswer = sel.parentElement ? sel.parentElement.textContent.trim() : "";
       setGoblinState(URI_SLEEP, false);
       showScreen("screen-loading");
+      var loadingCaption = document.getElementById("loading-caption");
+      if (loadingCaption) loadingCaption.textContent = "Checking your answer…";
       vscode.postMessage({ type: "submit", selectedIndex: parseInt(sel.value, 10) });
       return;
     }
@@ -1191,6 +1200,8 @@ function getWebviewHtml(
     lastAnswer = answer;
     setGoblinState(URI_SLEEP, false);
     showScreen("screen-loading");
+    var loadingCaption = document.getElementById("loading-caption");
+    if (loadingCaption) loadingCaption.textContent = "Checking your answer…";
     vscode.postMessage({ type: "submit", answer: answer });
   }
 
@@ -1299,8 +1310,11 @@ function getWebviewHtml(
   }
   updateChatBubble();
 
-  // Start on difficulty screen
-  showScreenById("screen-difficulty");
+  // Open on the loading screen and tell the host immediately. The question
+  // replaces this screen as soon as it is ready, instead of waiting through
+  // the difficulty tour and the chat.
+  showScreenById("screen-loading");
+  vscode.postMessage({ type: "ready" });
 
   /* ── Host message handler ─────────────────────────────────────────────── */
   window.addEventListener("message", function (event) {

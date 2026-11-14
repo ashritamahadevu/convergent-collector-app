@@ -3,6 +3,7 @@ import { registerPasteGuard } from "./pasteGuard";
 import { registerAgentGuard } from "./agentGuard";
 import { registerEditGuard } from "./editGuard";
 import { setLogSink } from "./llm";
+import { warmParsers } from "./sizing/parser";
 import { clearApiKey, setApiKey } from "./secrets";
 import { dueConcepts, getMastery, getProfile, saveProfile } from "./memory/remember";
 import { showUnderstandingMapFor } from "./mapPanel";
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerPasteGuard(context);
   registerAgentGuard(context);
   registerEditGuard(context);
+  warmParsers();
   void resumeWalkthrough(context);
   void offerLoginRecall(context);
 
@@ -63,6 +65,15 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.setStatusBarMessage(
         `Comprehension Guard ${next ? "enabled" : "disabled"}.`,
         3000,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comprehensionGuard.blockCopy", () => {
+      vscode.window.setStatusBarMessage(
+        "Comprehension Guard: copying and cutting are locked while this code is being checked.",
+        2500,
       );
     }),
   );

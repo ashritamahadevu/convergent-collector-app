@@ -17,7 +17,7 @@ import {
   startMockServer,
   type MockServer,
 } from "./harness";
-import { generateQuestion, judge, setLogSink } from "../../src/llm";
+import { clearQuestionCache, generateQuestion, judge, setLogSink } from "../../src/llm";
 import type { GeneratedQuestion } from "../../src/types";
 
 /**
@@ -70,6 +70,7 @@ after(async () => {
 });
 
 beforeEach(() => {
+  clearQuestionCache();
   vscodeStub.resetStub();
   server.requests.length = 0;
   logs.length = 0;

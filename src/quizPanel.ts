@@ -347,20 +347,15 @@ function getWebviewHtml(
 
     /* ── Screen: Loading ──────────────────────────────────────────────────── */
     #screen-loading {
-      justify-content: center;
-      align-items: center;
+      display: grid;
+      min-height: 100%;
+      place-items: center;
+      background: #0a0c0b;
     }
-    .loading-goblin-img {
-      width: 90px; height: 90px;
-      object-fit: contain;
+    #screen-loading img {
+      width: 340px;
+      height: auto;
       image-rendering: pixelated;
-      animation: answer-check 1.2s ease-in-out infinite;
-    }
-    .loading-logo {
-      width: 160px;
-      image-rendering: pixelated;
-      opacity: 0.7;
-      margin-bottom: 20px;
     }
 
     /* ── Screens: Result (shared) ─────────────────────────────────────────── */
@@ -910,7 +905,7 @@ function getWebviewHtml(
 
   <!-- ── Screen 2: Loading ──────────────────────────────────────────────── -->
   <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
-    <img src="${uris.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
+    <img src="${uris.goblinWalk}" width="612" height="384" alt="" aria-hidden="true">
   </div>
 
   <!-- ── Screen 3: Result — Correct ────────────────────────────────────── -->

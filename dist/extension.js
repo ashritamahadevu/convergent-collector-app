@@ -415,20 +415,15 @@ Edit the code in the editor. Make the smallest change that restores the original
 
     /* \u2500\u2500 Screen: Loading \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
     #screen-loading {
-      justify-content: center;
-      align-items: center;
+      display: grid;
+      min-height: 100%;
+      place-items: center;
+      background: #0a0c0b;
     }
-    .loading-goblin-img {
-      width: 90px; height: 90px;
-      object-fit: contain;
+    #screen-loading img {
+      width: 340px;
+      height: auto;
       image-rendering: pixelated;
-      animation: answer-check 1.2s ease-in-out infinite;
-    }
-    .loading-logo {
-      width: 160px;
-      image-rendering: pixelated;
-      opacity: 0.7;
-      margin-bottom: 20px;
     }
 
     /* \u2500\u2500 Screens: Result (shared) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
@@ -978,7 +973,7 @@ Edit the code in the editor. Make the smallest change that restores the original
 
   <!-- \u2500\u2500 Screen 2: Loading \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->
   <div class="screen hidden" id="screen-loading" role="status" aria-label="Checking your answer">
-    <img src="${o.goblinSleep}" class="loading-goblin-img" alt="" aria-hidden="true">
+    <img src="${o.goblinWalk}" width="612" height="384" alt="" aria-hidden="true">
   </div>
 
   <!-- \u2500\u2500 Screen 3: Result \u2014 Correct \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->

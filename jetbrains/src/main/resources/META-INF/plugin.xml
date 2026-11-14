@@ -1,0 +1,22 @@
+<idea-plugin>
+    <id>com.comprehensionguard.jetbrains</id>
+    <name>Comprehension Guard</name>
+    <vendor>comprehension-guard</vendor>
+    <description><![CDATA[
+        Pauses a large paste or insertion until you show you understand it.
+        Pass keeps the code. Closing the quiz or failing the last try removes it.
+    ]]></description>
+    <depends>com.intellij.modules.platform</depends>
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+                serviceImplementation="com.comprehensionguard.GuardSettings"/>
+        <postStartupActivity
+                implementation="com.comprehensionguard.GuardStartup"/>
+    </extensions>
+    <actions>
+        <action id="ComprehensionGuard.SetApiKey"
+                class="com.comprehensionguard.SetApiKeyAction"
+                text="Comprehension Guard: Set API Key"
+                description="Store an OpenAI or Gemini key for quiz generation"/>
+    </actions>
+</idea-plugin>

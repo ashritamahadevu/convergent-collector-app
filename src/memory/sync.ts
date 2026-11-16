@@ -155,6 +155,15 @@ export function flushSync(context: vscode.ExtensionContext): Promise<void> {
   return run;
 }
 
+/** Drops a retry left over from an earlier test so the next case starts clean. */
+export function resetSyncForTests(): void {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+  }
+  retryTimer = undefined;
+  chain = Promise.resolve();
+}
+
 async function doFlush(context: vscode.ExtensionContext): Promise<void> {
   let auth = await authHeader(context);
   const queued = context.globalState.get<SyncOp[]>(QUEUE_KEY, []);

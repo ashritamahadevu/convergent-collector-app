@@ -260,7 +260,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "node esbuild.js --production",
+    "compile": "node scripts/copy-tree-sitter.mjs && node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
     "install:cursor": "npm run package && node scripts/install-cursor.mjs",

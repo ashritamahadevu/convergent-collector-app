@@ -1,11 +1,47 @@
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { Language as TreeSitterLanguage, Node } from "web-tree-sitter";
 
 const require = createRequire(__filename);
-const { Parser, Language } = require("web-tree-sitter") as typeof import("web-tree-sitter");
 
-export { Parser, Language };
+type ParserCtor = typeof import("web-tree-sitter").Parser;
+type LanguageCtor = typeof import("web-tree-sitter").Language;
+
+let binding: { Parser: ParserCtor; Language: LanguageCtor } | null | undefined;
+
+function runtimeRoot(): string | null {
+  let dir = __dirname;
+  for (let i = 0; i < 6; i++) {
+    const marker = path.join(dir, "runtime", "web-tree-sitter", "tree-sitter.cjs");
+    if (fs.existsSync(marker)) {
+      return path.join(dir, "runtime");
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
+  return null;
+}
+
+function loadBinding(): { Parser: ParserCtor; Language: LanguageCtor } | null {
+  if (binding !== undefined) {
+    return binding;
+  }
+  try {
+    const root = runtimeRoot();
+    const file = root
+      ? path.join(root, "web-tree-sitter", "tree-sitter.cjs")
+      : require.resolve("web-tree-sitter");
+    binding = require(file) as { Parser: ParserCtor; Language: LanguageCtor };
+    return binding;
+  } catch {
+    binding = null;
+    return null;
+  }
+}
 
 type LanguageSpec = { language: string; wasm: string };
 
@@ -41,9 +77,21 @@ const languageCache = new Map<string, TreeSitterLanguage>();
 let initPromise: Promise<boolean> | null = null;
 let wasmDirectory: string | null = null;
 
-function wasmDir(): string {
+function wasmDir(): string | null {
   if (!wasmDirectory) {
-    wasmDirectory = path.join(path.dirname(require.resolve("tree-sitter-wasms/package.json")), "out");
+    const root = runtimeRoot();
+    if (root) {
+      wasmDirectory = path.join(root, "tree-sitter-wasms", "out");
+    } else {
+      try {
+        wasmDirectory = path.join(
+          path.dirname(require.resolve("tree-sitter-wasms/package.json")),
+          "out",
+        );
+      } catch {
+        return null;
+      }
+    }
   }
   return wasmDirectory;
 }
@@ -54,15 +102,33 @@ function extensionOf(filePath: string): string {
   return dot >= 0 ? base.slice(dot).toLowerCase() : "";
 }
 
+function wasmFile(): string | null {
+  const root = runtimeRoot();
+  if (root) {
+    return path.join(root, "web-tree-sitter", "tree-sitter.wasm");
+  }
+  try {
+    return require.resolve("web-tree-sitter/tree-sitter.wasm");
+  } catch {
+    return null;
+  }
+}
+
 function ensureInit(): Promise<boolean> {
   if (!initPromise) {
-    const init = Parser.init as (options?: {
+    const loaded = loadBinding();
+    if (!loaded) {
+      return Promise.resolve(false);
+    }
+    const init = loaded.Parser.init as (options?: {
       locateFile?: (file: string, scriptDirectory: string) => string;
     }) => Promise<void>;
     initPromise = (async () => {
       try {
-        // package.json is not an exported subpath; the wasm file is.
-        const wasm = require.resolve("web-tree-sitter/tree-sitter.wasm");
+        const wasm = wasmFile();
+        if (!wasm) {
+          return false;
+        }
         const dir = path.dirname(wasm);
         await init({
           locateFile(file) {
@@ -84,8 +150,9 @@ export async function languageForPath(
 ): Promise<{ language: string; wasm: string } | null> {
   try {
     const spec = EXTENSIONS[extensionOf(filePath)];
-    if (!spec) return null;
-    return { language: spec.language, wasm: path.join(wasmDir(), spec.wasm) };
+    const dir = wasmDir();
+    if (!spec || !dir) return null;
+    return { language: spec.language, wasm: path.join(dir, spec.wasm) };
   } catch {
     return null;
   }
@@ -96,8 +163,9 @@ async function loadLanguage(wasmPath: string): Promise<TreeSitterLanguage | null
   if (cached) return cached;
   try {
     const ready = await ensureInit();
-    if (!ready) return null;
-    const loaded = await Language.load(wasmPath);
+    const api = loadBinding();
+    if (!ready || !api) return null;
+    const loaded = await api.Language.load(wasmPath);
     languageCache.set(wasmPath, loaded);
     return loaded;
   } catch {
@@ -118,7 +186,11 @@ export function warmParsers(): void {
     if (!ready) {
       return;
     }
-    await Promise.all(common.map((file) => loadLanguage(path.join(wasmDir(), file))));
+    const dir = wasmDir();
+    if (!dir) {
+      return;
+    }
+    await Promise.all(common.map((file) => loadLanguage(path.join(dir, file))));
   })();
 }
 
@@ -131,7 +203,9 @@ export async function parseSource(
     if (!spec) return null;
     const loaded = await loadLanguage(spec.wasm);
     if (!loaded) return null;
-    const parser = new Parser();
+    const api = loadBinding();
+    if (!api) return null;
+    const parser = new api.Parser();
     try {
       parser.setLanguage(loaded);
       const tree = parser.parse(source);

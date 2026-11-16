@@ -97,22 +97,22 @@ async function runWalkSession(context: vscode.ExtensionContext, saved: SavedWalk
     await context.globalState.update(WALK_KEY, undefined);
     return;
   }
-  const questions: GeneratedQuestion[] = [];
   const snippet = group.map((file) => file.snippet).join("\n\n").slice(0, 8000);
   const kinds = ["multiple-choice", "free-text", "ordering", "debug"] as const;
-  for (const kind of kinds) {
+  const built = await Promise.all(kinds.map(async (kind) => {
     try {
-      questions.push(await generateQuestion({
+      return await generateQuestion({
         context,
         snippet,
         language: "",
         mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
         kind,
-      }));
+      });
     } catch {
-      // Skip a question the model could not build.
+      return null;
     }
-  }
+  }));
+  const questions: GeneratedQuestion[] = built.filter((question): question is GeneratedQuestion => question !== null);
   const passed = await runSession(context, {
     snippet,
     filePath: group[0]?.path,

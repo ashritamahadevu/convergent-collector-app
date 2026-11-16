@@ -11,7 +11,7 @@ import {
   setQuizActive,
   state,
 } from "./state";
-import { runComprehensionGate } from "./quiz";
+import { beginQuestion, runComprehensionGate } from "./quiz";
 import { InsertWindow, insertedSpans } from "./insertWindow";
 import { rememberAcceptedSnippet, wasJustAccepted } from "./acceptedSnippets";
 
@@ -42,7 +42,6 @@ async function deleteSpan(
     state.suppressEditGuard = false;
   }
 }
-
 /**
  * Registers the inline-insertion guard.
  *
@@ -151,6 +150,13 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
     windows.clear(windowKey);
     setQuizActive(true);
     state.processing = true;
+    const prepared = beginQuestion(
+      context,
+      snippet,
+      editor.document.languageId,
+      undefined,
+      editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+    );
     const current = editor.document.getText();
     const startOffset = editor.document.offsetAt(placed.start);
     const endOffset = editor.document.offsetAt(placed.end);
@@ -164,6 +170,7 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         {
           source: "inline",
           filePath: editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
+          prepared,
           editor,
           range: placed,
           lock,

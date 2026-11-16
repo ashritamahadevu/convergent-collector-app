@@ -20,6 +20,7 @@ const llm = req("./walkthrough/mock-llm.cjs");
 llm.install();
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const wt = req("../src/walkthrough.ts") as typeof import("../src/walkthrough");
+const llmModule = req("../src/llm.ts") as typeof import("../src/llm");
 
 const fake = vscode.__fake;
 const WALK_KEY = "comprehensionGuard.walkthrough";
@@ -105,6 +106,7 @@ beforeEach(() => {
   fake.reset();
   fake.config = { provider: "ollama", model: "mock" };
   llm.reset();
+  llmModule.clearQuestionCache();
 });
 
 test("Start runs session 1 with MC, free-text and ordering questions and advances on pass", async () => {
@@ -209,6 +211,7 @@ test("group size: low or no mastery gives 1 file per session, mastery >= 0.75 gi
 
   // High mastery: 3 files -> 2 sessions (2 + 1).
   llm.reset();
+  llmModule.clearQuestionCache();
   fake.infoMessages = [];
   fake.onQuestion = answer(true);
   const ctx2 = makeContext();

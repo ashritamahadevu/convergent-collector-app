@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gradeLocal, questionsFor } from "../../src/sizing/questions";
+import { gradeMcq, gradeOrdering } from "../../src/decision";
+import { generatedFromLocal, gradeLocal, localGeneratedQuestion, questionsFor } from "../../src/sizing/questions";
 import type { DraftPlan, LocalQuestion, PlanSlot, QuestionType, UnitFact } from "../../src/sizing/types";
 
 function fact(overrides: Partial<UnitFact> = {}): UnitFact {
@@ -221,4 +222,50 @@ test("two calls with the same file and unit produce the same answer index", () =
     first.map((question) => question.answer),
     second.map((question) => question.answer),
   );
+});
+
+test("localGeneratedQuestion is ready without a model call", async () => {
+  const source = [
+    "function total(items) {",
+    "  let acc = 0;",
+    "  for (const item of items) {",
+    "    acc += item;",
+    "  }",
+    "  return acc;",
+    "}",
+  ].join("\n");
+  const started = Date.now();
+  const question = await localGeneratedQuestion(source, "a.js");
+  const elapsed = Date.now() - started;
+  assert.ok(question, "a function snippet has a local question");
+  assert.ok(elapsed < 3000, "local question took " + elapsed + "ms");
+  assert.equal(question.criteria.length, 0);
+  assert.equal(question.kind, "multiple-choice");
+  assert.equal(gradeMcq(question, question.correctIndex ?? -1), true);
+  assert.equal(gradeMcq(question, (question.correctIndex ?? 0) ^ 1), false);
+  assert.equal(await localGeneratedQuestion("not code, just a note", "notes.txt"), null);
+
+  const ordering = await localGeneratedQuestion(source, "a.js", "ordering");
+  assert.ok(ordering);
+  if (ordering.kind === "ordering") {
+    assert.equal(gradeOrdering(ordering, ordering.correctOrder ?? []), 1);
+    const shifted = [...(ordering.correctOrder ?? [])];
+    const first = shifted.shift();
+    if (first !== undefined) {
+      shifted.push(first);
+    }
+    assert.ok(gradeOrdering(ordering, shifted) < 1);
+  }
+});
+
+test("generatedFromLocal keeps the local answer", () => {
+  const local = questionsFor(
+    plan([slot("multiple_choice", "sum", "src/math.ts", "control-flow")]),
+    [fact()],
+  )[0];
+  assert.ok(local);
+  const generated = generatedFromLocal(local);
+  assert.equal(generated.kind, "multiple-choice");
+  assert.equal(generated.correctIndex, local.answer);
+  assert.equal(generated.referenceAnswer, local.explanation);
 });

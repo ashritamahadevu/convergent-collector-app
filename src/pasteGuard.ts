@@ -10,7 +10,7 @@ import {
   state,
   withoutEditGuard,
 } from "./state";
-import { runComprehensionGate } from "./quiz";
+import { beginQuestion, runComprehensionGate } from "./quiz";
 import { rememberAcceptedSnippet } from "./acceptedSnippets";
 
 const BUILTIN_PASTE = "editor.action.clipboardPasteAction";
@@ -56,12 +56,20 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
         return;
       }
 
+      const prepared = beginQuestion(
+        context,
+        clipboardText,
+        editor?.document.languageId ?? "",
+        undefined,
+        editor?.document.uri.fsPath,
+      );
+
       if (!editor || !selection) {
         const passed = await runComprehensionGate(
           clipboardText,
           context,
           editor?.document.languageId,
-          { source: "paste", filePath: editor?.document.uri.fsPath },
+          { source: "paste", filePath: editor?.document.uri.fsPath, prepared },
         );
         if (passed) {
           await performPaste();
@@ -102,6 +110,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           {
             source: "paste",
             filePath: editor.document.uri.fsPath,
+            prepared,
             editor,
             range: placed,
             lock,

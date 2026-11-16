@@ -93,6 +93,10 @@
       {
         "command": "comprehensionGuard.desktopStatus",
         "title": "Comprehension Guard: Desktop Sync Status"
+      },
+      {
+        "command": "comprehensionGuard.blockCopy",
+        "title": "Comprehension Guard: Copying is locked during a check"
       }
     ],
     "keybindings": [
@@ -101,6 +105,18 @@
         "key": "ctrl+v",
         "mac": "cmd+v",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "comprehensionGuard.blockCopy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "editorTextFocus && comprehensionGuard.holdingCode"
+      },
+      {
+        "command": "comprehensionGuard.blockCopy",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "editorTextFocus && comprehensionGuard.holdingCode"
       }
     ],
     "configuration": {
@@ -206,7 +222,7 @@
         "comprehensionGuard.agentPause": {
           "type": "boolean",
           "default": true,
-          "description": "Pause an AI agent after each chunk until that chunk's question is answered correctly."
+          "description": "Let an AI agent finish writing, then hold that code for a check. A general check pastes the code in after you pass. An in-depth check asks one question per chunk, with that chunk highlighted and locked against edits and copying."
         },
         "comprehensionGuard.checkPreset": {
           "type": "string",
@@ -216,7 +232,7 @@
             "deep"
           ],
           "default": "standard",
-          "description": "Which question types a chunk can use. Quick stays on multiple choice and ordering. Standard adds predict and explain. Deep can ask for a change."
+          "description": "How the check is shown after the agent finishes. Tree-sitter scores the generated code and decides how many questions to ask and which type each one is. Quick keeps that code out of the editor until the questions pass, then pastes it in. Standard and Deep highlight each planned chunk and lock it against edits and copying."
         },
         "comprehensionGuard.preferredLanguage": {
           "type": "string",

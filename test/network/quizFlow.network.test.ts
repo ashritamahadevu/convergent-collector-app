@@ -5,6 +5,7 @@ import * as vscodeStub from "./vscodeStub";
 import {
   FREE_TEXT_QUESTION,
   GOOD_ANSWER,
+  MCQ_QUESTION,
   NONSENSE_ANSWER,
   OLLAMA,
   SNIPPET,
@@ -18,7 +19,7 @@ import {
   type Behaviour,
   type MockServer,
 } from "./harness";
-import { setLogSink } from "../../src/llm";
+import { clearQuestionCache, setLogSink } from "../../src/llm";
 import { runComprehensionGate } from "../../src/quiz";
 import { requestQuizBypass, setQuizActive } from "../../src/state";
 
@@ -50,6 +51,7 @@ function routeOllamaTo(target: string): void {
 }
 
 beforeEach(() => {
+  clearQuestionCache();
   vscodeStub.resetStub();
   vscodeStub.settings.set("comprehensionGuard.provider", "ollama");
   server.requests.length = 0;
@@ -90,6 +92,40 @@ function script(judgeBehaviour: (n: number) => Behaviour, question: unknown = FR
 const attempts = (ctx: ReturnType<typeof fakeContext>) =>
   (ctx.store.get("comprehensionGuard.attempts") as { outcome: string; passed: boolean }[] | undefined) ?? [];
 
+function generateRequests(): { body: string }[] {
+  return server.requests.filter((request) => request.kind === "generate");
+}
+
+describe("the model writes the question", () => {
+  test("the panel shows the question the model returned", async () => {
+    server.handler = () => ollamaReply(FREE_TEXT_QUESTION);
+    const gate = startGate(fakeContext());
+    const panel = await openPanel();
+    const shown = panel.questions()[0];
+    assert.equal(shown.questionText, FREE_TEXT_QUESTION.question);
+    assert.ok(generateRequests().length >= 1, "the check never asked the model for a question");
+    assert.match(generateRequests()[0].body, /Generate ONE/);
+    assert.match(generateRequests()[0].body, /function total/);
+    panel.dispose();
+    assert.equal(await gate.promise, false);
+  });
+
+  test("a follow-up asks the model for another question", async () => {
+    server.handler = () => ollamaReply(MCQ_QUESTION);
+    const gate = startGate(fakeContext());
+    const panel = await openPanel();
+    assert.equal(panel.questions()[0].questionText, MCQ_QUESTION.question);
+    panel.fromWebview({ type: "submit", selectedIndex: 0 });
+    await waitFor(() => panel.feedback().length > 0, 1000, "wrong-answer feedback");
+    panel.fromWebview({ type: "next_question" });
+    await waitFor(() => panel.questions().length > 1, 3000, "follow-up question");
+    assert.ok(generateRequests().length >= 2, "the follow-up did not ask the model");
+    assert.match(generateRequests().at(-1)!.body, /Generate ONE multiple-choice/);
+    panel.fromWebview({ type: "submit", selectedIndex: MCQ_QUESTION.correctIndex });
+    assert.equal(await gate.promise, true);
+  });
+});
+
 describe("network down before the quiz starts", () => {
   test("generation fails -> min-length fallback quiz opens fast, with no hint that grading is offline", async () => {
     routeOllamaTo("http://127.0.0.1:" + (await closedPort()));
@@ -115,16 +151,14 @@ describe("network down before the quiz starts", () => {
     assert.equal(await gate.promise, true);
   });
 
-  test("generation hangs: no panel exists, so nothing can be clicked; Bypass command is deferred until the panel opens AND the user acts", async () => {
+  test("the panel is open while the model is still writing, and Bypass ends the hold", async () => {
     server.handler = () => ({ kind: "hang" });
-    setQuizActive(true); // what pasteGuard / editGuard do before calling the gate
     const gate = startGate(fakeContext());
-    await new Promise((r) => setTimeout(r, 1500));
-    assert.equal(vscodeStub.panels.length, 0, "the question panel waits until a question exists");
-    assert.equal(requestQuizBypass(), true, "command reports success");
-    assert.equal(await gate.promise, true, "bypass during generation keeps the code");
+    await waitFor(() => vscodeStub.panels.length > 0, 1000, "panel during generation");
+    assert.equal(gate.settled(), false);
+    assert.equal(requestQuizBypass(), true);
+    assert.equal(await gate.promise, true);
     server.releaseHung(ollamaReply(FREE_TEXT_QUESTION));
-    setQuizActive(false);
   });
 });
 

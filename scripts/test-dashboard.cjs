@@ -6,5 +6,5 @@ esbuild.buildSync({
   outfile: "dist/dashboard.test.cjs",
   alias: { vscode: path.resolve("test/network/vscodeStub.ts") },
 });
-const result = spawnSync(process.execPath, ["--test", "dist/dashboard.test.cjs"], { stdio: "inherit" });
+const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-force-exit", "dist/dashboard.test.cjs"], { stdio: "inherit" });
 process.exitCode = result.status ?? 1;

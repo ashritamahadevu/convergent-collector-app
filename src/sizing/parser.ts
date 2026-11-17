@@ -194,26 +194,53 @@ export function warmParsers(): void {
   })();
 }
 
+type LiveParse = { root: Node; dispose: () => void };
+
+async function parseOnce(wasmPath: string, source: string): Promise<LiveParse | null> {
+  const loaded = await loadLanguage(wasmPath);
+  const api = loadBinding();
+  if (!loaded || !api) return null;
+  const parser = new api.Parser();
+  parser.setLanguage(loaded);
+  const tree = parser.parse(source);
+  if (!tree) {
+    parser.delete();
+    return null;
+  }
+  return {
+    root: tree.rootNode,
+    dispose: () => {
+      try {
+        tree.delete();
+      } catch {
+        // Already deleted.
+      }
+      try {
+        parser.delete();
+      } catch {
+        // Already deleted.
+      }
+    },
+  };
+}
+
 export async function parseSource(
   filePath: string,
   source: string,
-): Promise<{ language: string; root: Node } | null> {
+): Promise<{ language: string; root: Node; dispose: () => void } | null> {
   try {
     const spec = await languageForPath(filePath);
     if (!spec) return null;
-    const loaded = await loadLanguage(spec.wasm);
-    if (!loaded) return null;
-    const api = loadBinding();
-    if (!api) return null;
-    const parser = new api.Parser();
-    try {
-      parser.setLanguage(loaded);
-      const tree = parser.parse(source);
-      if (!tree) return null;
-      return { language: spec.language, root: tree.rootNode };
-    } finally {
-      parser.delete();
+    let parsed = await parseOnce(spec.wasm, source);
+    // Lua's scanner stays dirty after one parse, so the next file comes back as a
+    // single ERROR node. Drop that grammar and parse once more with a fresh copy.
+    if (parsed?.root.hasError) {
+      parsed.dispose();
+      languageCache.delete(spec.wasm);
+      parsed = await parseOnce(spec.wasm, source);
     }
+    if (!parsed) return null;
+    return { language: spec.language, root: parsed.root, dispose: parsed.dispose };
   } catch {
     return null;
   }

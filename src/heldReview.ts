@@ -110,6 +110,43 @@ export async function planForEdits(
   return { chunks, sawUnits };
 }
 
+export type ReviewTarget = {
+  code: string;
+  filePath: string;
+  unit: string;
+  startLine?: number;
+  endLine?: number;
+};
+
+/**
+ * The code each question is about.
+ * Planned units are asked one at a time, and the code is only that unit.
+ * A general check with nothing scored asks about the joined change instead.
+ */
+export function reviewTargets(
+  chunks: readonly CodeChunk[] | undefined,
+  whole: { code: string; filePath: string },
+): ReviewTarget[] {
+  if (chunks && chunks.length > 0) {
+    return chunks.map((chunk) => ({
+      code: chunk.code,
+      filePath: chunk.filePath,
+      unit: chunk.unit,
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+    }));
+  }
+  const code = whole.code.trim();
+  if (!code) {
+    return [];
+  }
+  return [{
+    code: whole.code.slice(0, 8000),
+    filePath: whole.filePath,
+    unit: whole.filePath,
+  }];
+}
+
 /** The model kind that asks for the type the plan selected. */
 export function modelKindFor(type: QuestionType): QuestionKind {
   if (type === "multiple_choice") {

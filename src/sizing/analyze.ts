@@ -44,14 +44,20 @@ const SKIP_SEGMENTS = new Set([
 
 const LOCK_NAMES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "cargo.lock"]);
 
-const FUNCTION_TYPES = new Set(["function_declaration", "function_definition", "function_item"]);
-const METHOD_TYPES = new Set(["method_definition", "method_declaration"]);
+const FUNCTION_TYPES = new Set([
+  "function_declaration",
+  "function_definition",
+  "function_definition_statement",
+  "function_item",
+]);
+const METHOD_TYPES = new Set(["method_definition", "method_declaration", "method"]);
 const CLASS_TYPES = new Set(["class_declaration", "class_definition", "class_specifier", "impl_item"]);
 const DECLARATOR_TYPES = new Set(["variable_declarator", "lexical_declarator"]);
 const FUNCTION_VALUES = new Set(["arrow_function", "function", "function_expression"]);
 
 const BRANCH_TYPES = new Set([
   "if_statement",
+  "if",
   "if_expression",
   "elif_clause",
   "switch_statement",
@@ -77,6 +83,8 @@ const CALL_TYPES = new Set([
   // C# and PHP name the same construct differently.
   "invocation_expression",
   "function_call_expression",
+  // Bash names a call `command`.
+  "command",
 ]);
 
 const STATE_TYPES = new Set([
@@ -391,7 +399,8 @@ function measure(unit: RawUnit, units: RawUnit[], source: string): { calls: stri
 
   const visit = (node: Node, isRoot: boolean) => {
     if (!isRoot && nested.has(node.id)) return;
-    if (BRANCH_TYPES.has(node.type)) branches += 1;
+    // Ruby's branch is a named `if` node. Other grammars also have an anonymous `if` keyword inside `if_statement`.
+    if (BRANCH_TYPES.has(node.type) && node.isNamed) branches += 1;
     if (LOOP_TYPES.has(node.type)) loops += 1;
     if (STATE_TYPES.has(node.type) && !isLoopUpdate(node)) stateChanges += 1;
     if (CALL_TYPES.has(node.type)) {
@@ -511,7 +520,7 @@ async function inspect(file: string, source: string, options?: AnalyzeOptions): 
   const drafts = raw.map((unit) => buildDraft(file, parsed.language, unit, raw, source, options));
   const units = drafts.map((draft) => draft.fact);
   try {
-    parsed.root.tree.delete();
+    parsed.dispose();
   } catch {
     // The fact sheet already holds its own copies of the source slices.
   }
@@ -562,4 +571,29 @@ export async function analyzeFiles(
   linkAndScore(inspected.flatMap((item) => item.drafts));
   for (const item of inspected) item.analysis.units.sort(compareUnits);
   return inspected.map((item) => item.analysis);
+}
+
+/** File-to-file links from a batch. A call only counts when both files were analyzed together. */
+export function fileEdges(files: FileAnalysis[]): { from: string; to: string; kind: "call" }[] {
+  const owner = new Map<string, string>();
+  for (const file of files) {
+    for (const unit of file.units) {
+      if (!owner.has(unit.unit)) owner.set(unit.unit, file.file);
+    }
+  }
+  const edges: { from: string; to: string; kind: "call" }[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    for (const unit of file.units) {
+      for (const call of unit.calls) {
+        const target = owner.get(call);
+        if (!target || target === file.file) continue;
+        const key = file.file + "\0" + target;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({ from: file.file, to: target, kind: "call" });
+      }
+    }
+  }
+  return edges;
 }

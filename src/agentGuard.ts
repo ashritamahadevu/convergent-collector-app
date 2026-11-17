@@ -38,9 +38,11 @@ import {
   markEditorGate,
   releasePath,
 } from "./gateLock";
-import { checkShapeFor, collapseEdits, modelKindFor, planForEdits, type CodeChunk } from "./heldReview";
+import { recordFileEdges } from "./dashboard/service";
+import { checkShapeFor, collapseEdits, modelKindFor, planForEdits, reviewTargets, type CodeChunk } from "./heldReview";
 import { beginQuestion, runComprehensionGate } from "./quiz";
 import { getMastery, getProfile } from "./memory/remember";
+import { analyzeFiles, fileEdges } from "./sizing/analyze";
 import type { LearnerPreferences } from "./sizing/chunkPolicy";
 import { pauseSessionId, type PauseWire } from "./sizing/pauseSession";
 import type { CheckPreset } from "./sizing/types";
@@ -231,6 +233,19 @@ export function registerAgentGuard(context: vscode.ExtensionContext): void {
     try {
       const preferences = readPreferences();
       const planned = await planForEdits(batch, preferences);
+      const linked = await analyzeFiles(batch.map((edit) => ({
+        file: edit.filePath,
+        source: edit.next ?? edit.restore?.next ?? edit.snippet,
+      })));
+      const grouped = new Map<string, { toPath: string; kind: "call" }[]>();
+      for (const edge of fileEdges(linked)) {
+        const list = grouped.get(edge.from) ?? [];
+        list.push({ toPath: edge.to, kind: edge.kind });
+        grouped.set(edge.from, list);
+      }
+      for (const [from, edges] of grouped) {
+        void recordFileEdges(context, from, edges);
+      }
       if (planned.chunks.length === 0) {
         if (!planned.sawUnits) {
           await runGeneralReview(context, batch);
@@ -578,34 +593,32 @@ async function runGeneralReview(
   for (const edit of edits) {
     held.push(prepareHeldEdit(edit, await readText(edit.filePath), acceptedText(edit.filePath)));
   }
-  const questions = (chunks ?? []).map((chunk) =>
-    beginQuestion(
-      context,
-      chunk.code,
-      languageFromPath(chunk.filePath),
-      modelKindFor(chunk.questionType),
-      chunk.filePath,
-    ),
-  );
   const snippet = held
     .map((edit) => quizSnippet(edit.snippet))
     .filter((text) => text.trim().length > 0)
     .join("\n\n")
     .slice(0, 8000);
-  if (questions.length === 0 && !snippet.trim()) {
-    return;
-  }
   const first = held[0];
   if (!first) {
     return;
   }
-  if (questions.length === 0) {
-    questions.push(beginQuestion(context, snippet, languageFromPath(first.filePath), undefined, first.filePath));
+  const groupId = crypto.randomUUID();
+  const asked = reviewTargets(chunks, { code: snippet, filePath: first.filePath });
+  if (asked.length === 0) {
+    return;
   }
+  const questions = asked.map((item, index) =>
+    beginQuestion(
+      context,
+      item.code,
+      languageFromPath(item.filePath),
+      chunks && chunks.length > 0 ? modelKindFor(chunks[index].questionType) : undefined,
+      item.filePath,
+    ),
+  );
   for (const edit of held) {
     await revertEdit(edit);
   }
-  const asked = chunks && chunks.length > 0 ? chunks : [{ code: snippet, filePath: first.filePath, unit: first.filePath }];
   for (let index = 0; index < asked.length; index += 1) {
     const item = asked[index];
     void vscode.window.setStatusBarMessage(
@@ -616,6 +629,9 @@ async function runGeneralReview(
       source: "agent",
       filePath: item.filePath,
       prepared: questions[index],
+      shape: "general",
+      groupId,
+      topic: chunks && chunks.length > 0 ? chunks[index]?.unit : undefined,
     });
     if (!passed) {
       return;
@@ -639,13 +655,15 @@ async function runChunkReview(
 ): Promise<void> {
   await vscode.commands.executeCommand("setContext", "comprehensionGuard.holdingCode", true);
   const locks = new Map<string, ReturnType<typeof lockDocument>>();
-  const questions = chunks.map((chunk) =>
+  const groupId = crypto.randomUUID();
+  const targets = reviewTargets(chunks, { code: "", filePath: chunks[0]?.filePath ?? "" });
+  const questions = targets.map((target, index) =>
     beginQuestion(
       context,
-      chunk.code,
-      languageFromPath(chunk.filePath),
-      modelKindFor(chunk.questionType),
-      chunk.filePath,
+      target.code,
+      languageFromPath(target.filePath),
+      modelKindFor(chunks[index].questionType),
+      target.filePath,
     ),
   );
   try {
@@ -657,23 +675,26 @@ async function runChunkReview(
         // A missing file is still covered by the later revert.
       }
     }
-    for (let index = 0; index < chunks.length; index += 1) {
-      const chunk = chunks[index];
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(chunk.filePath));
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(target.filePath));
       const editor = await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
-      const range = lineRange(doc, chunk.startLine, chunk.endLine);
+      const range = lineRange(doc, target.startLine ?? 1, target.endLine ?? target.startLine ?? 1);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
       void vscode.window.setStatusBarMessage(
-        `Comprehension Guard: ${chunk.unit} (${index + 1} of ${chunks.length}).`,
+        `Comprehension Guard: ${target.unit} (${index + 1} of ${targets.length}).`,
         4000,
       );
-      const passed = await runComprehensionGate(chunk.code, context, languageFromPath(chunk.filePath), {
+      const passed = await runComprehensionGate(target.code, context, languageFromPath(target.filePath), {
         source: "agent",
-        filePath: chunk.filePath,
+        filePath: target.filePath,
         prepared: questions[index],
         editor,
         range,
-        lock: locks.get(normPath(chunk.filePath)),
+        lock: locks.get(normPath(target.filePath)),
+        shape: "chunk",
+        groupId,
+        topic: chunks[index]?.unit,
       });
       if (!passed) {
         for (const lock of locks.values()) {
@@ -796,6 +817,8 @@ async function runAgentQuiz(
       source: "agent",
       filePath: edit.filePath,
       prepared: questionPromise,
+      shape: "general",
+      groupId: crypto.randomUUID(),
     });
     unlock();
     if (passed) {

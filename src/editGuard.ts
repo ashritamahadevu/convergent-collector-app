@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { looksLikeAgentInvocation } from "./agentProtocol";
 import { lockDocument } from "./documentLock";
@@ -169,6 +170,8 @@ export function registerEditGuard(context: vscode.ExtensionContext): void {
         editor.document.languageId,
         {
           source: "inline",
+          shape: "general",
+          groupId: randomUUID(),
           filePath: editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined,
           prepared,
           editor,
@@ -221,6 +224,8 @@ async function quizDeferred(context: vscode.ExtensionContext): Promise<void> {
       next.document.languageId,
       {
         source: "inline",
+        shape: "general",
+        groupId: randomUUID(),
         filePath: next.document.uri.scheme === "file" ? next.document.uri.fsPath : undefined,
       },
     );

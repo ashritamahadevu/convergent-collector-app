@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import { isCheckEvent, localEndpoint, type CheckEvent } from "./protocol";
+import { isDashboardEvent, localEndpoint, type DashboardEvent } from "./protocol";
 
 class RejectedEvent extends Error {}
 
@@ -13,8 +13,8 @@ export class DashboardOutbox {
   connected = false;
   constructor(readonly directory: string) {}
 
-  async enqueue(event: CheckEvent): Promise<void> {
-    if (!isCheckEvent(event) || !/^[a-zA-Z0-9-]+$/.test(event.eventId)) throw new Error("Invalid dashboard event");
+  async enqueue(event: DashboardEvent): Promise<void> {
+    if (!isDashboardEvent(event) || !/^[a-zA-Z0-9-]+$/.test(event.eventId)) throw new Error("Invalid dashboard event");
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
     const target = path.join(this.directory, event.eventId + ".json");
     const temporary = target + ".tmp";
@@ -81,7 +81,7 @@ export class DashboardOutbox {
           let event: unknown;
           try { event = JSON.parse(await fs.readFile(file, "utf8")); }
           catch (e) { if (e instanceof SyntaxError) throw new RejectedEvent("Invalid queued JSON"); throw e; }
-          if (!isCheckEvent(event)) throw new RejectedEvent("Invalid queued dashboard event");
+          if (!isDashboardEvent(event)) throw new RejectedEvent("Invalid queued dashboard event");
           const ack = await send("/v1/events", event, settings);
           if (!ack || typeof ack !== "object" || !("eventId" in ack) || ack.eventId !== event.eventId) throw new RejectedEvent("Dashboard did not acknowledge this event");
           await fs.unlink(file).catch(e => { if (e.code !== "ENOENT") throw e; });

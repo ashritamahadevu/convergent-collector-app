@@ -7,25 +7,39 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { startDashboardBackend } from "../desktop/backend/server";
 import { DashboardOutbox } from "../src/dashboard/outbox";
-import { isCheckEvent, localEndpoint, type CheckEvent } from "../src/dashboard/protocol";
-import { recordDashboardCheck } from "../src/dashboard/service";
+import { isReviewEvent, localEndpoint, type ReviewEvent } from "../src/dashboard/protocol";
+import { recordMastery, recordReview } from "../src/dashboard/service";
 import { settings, panels, resetStub, window as vscodeWindow, Position } from "./network/vscodeStub";
 import { fakeContext, MCQ_QUESTION, FREE_TEXT_QUESTION, judgeJson } from "./network/harness";
+import { clearQuestionCache } from "../src/llm";
 import { runComprehensionGate, runSession } from "../src/quiz";
 import { getStats } from "../src/store";
 import type { GeneratedQuestion } from "../src/types";
 
 const token = "a".repeat(64);
 const headers = { Authorization: "Bearer " + token, "Content-Type": "application/json" };
-function event(outcome: CheckEvent["check"]["outcome"] = "pass", score: number | null = 1): CheckEvent {
-  return { schemaVersion: 1, type: "check.recorded", eventId: randomUUID(), installationId: "test-install",
+function event(outcome: ReviewEvent["outcome"] = "pass", score: number | null = 1): ReviewEvent {
+  return {
+    schemaVersion: 1, type: "review.recorded", eventId: randomUUID(), installationId: "test-install",
     occurredAt: Date.now(), project: { id: "project-1", name: "Example" },
-    check: { concepts: ["control-flow"], question: "What returns?", answer: "One", feedback: "Correct.",
-      misconception: "", outcome, score, source: "agent", mode: "free-text", filePath: "src/app.ts", retries: 0 } };
+    concepts: ["control-flow"], topic: "", question: "What returns?", answer: "One", feedback: "Correct.",
+    misconception: "", outcome, score, source: "agent", mode: "free-text", shape: "general",
+    groupId: randomUUID(), filePath: "src/app.ts", retries: 0, masteryAfter: score,
+  };
 }
 async function fixture(t: import("node:test").TestContext) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "drawbridge-test-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        await fs.rm(directory, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+    }
+  });
   const databasePath = path.join(directory, "dashboard.sqlite");
   const backend = await startDashboardBackend({ databasePath, token, port: 0 });
   let closed = false;
@@ -44,7 +58,7 @@ test("local receiver commits before acknowledgement; duplicate retry survives re
   assert.equal(response.status, 200); assert.deepEqual(await response.json(), { eventId: e.eventId });
   assert.equal((await f.request("/v1/events", e)).status, 200);
   assert.equal(f.backend.database.history().length, 1);
-  const conflicting = structuredClone(e); conflicting.check.answer = "Different";
+  const conflicting = structuredClone(e); conflicting.answer = "Different";
   assert.equal((await f.request("/v1/events", conflicting)).status, 409);
   await f.close();
   const restarted = await startDashboardBackend({ databasePath: f.databasePath, token, port: 0 });
@@ -57,7 +71,7 @@ test("receiver rejects unauthenticated, browser, malformed, oversized, unsupport
   assert.equal((await f.request("/v1/events", event(), { Authorization: "Bearer wrong" })).status, 401);
   assert.equal((await f.request("/v1/history", undefined, { Origin: "https://example.com" })).status, 403);
   assert.equal((await f.request("/v1/events", { schemaVersion: 2 })).status, 400);
-  const e = event(); e.check.score = 6;
+  const e = event(); e.score = 6;
   assert.equal((await f.request("/v1/events", e)).status, 400);
   assert.equal((await f.request("/v1/events", { huge: "x".repeat(140000) })).status, 413);
   assert.equal((await f.request("/v1/history?limit=201")).status, 400);
@@ -141,7 +155,7 @@ test("corrupt JSON, invalid schemas, and HTTP 409 never block later events and r
   const box = new DashboardOutbox(directory);
   const original = event(); original.eventId = "ccc-conflict";
   f.backend.database.insert(original);
-  await box.enqueue({ ...original, check: { ...original.check, answer: "different answer" } });
+  await box.enqueue({ ...original, answer: "different answer" });
   await fs.writeFile(path.join(directory, "aaa-corrupt.json"), "{broken");
   await fs.writeFile(path.join(directory, "bbb-schema.json"), JSON.stringify({ schemaVersion: 99 }));
   const good = event(); good.eventId = "zzz-valid"; await box.enqueue(good);
@@ -167,9 +181,9 @@ test("authentication errors retain events for re-pairing instead of quarantining
 
 test("protocol refuses external endpoints, absolute paths, and scores on bypasses", () => {
   for (const url of ["https://example.com", "http://localhost:80", "http://127.0.0.1/path", "http://user:pass@127.0.0.1"]) assert.throws(() => localEndpoint(url));
-  assert.equal(isCheckEvent(event("bypass", 1)), false);
-  const e = event(); e.check.filePath = "/Users/example/project/file.ts"; assert.equal(isCheckEvent(e), false);
-  e.check.filePath = "../outside.ts"; assert.equal(isCheckEvent(e), false);
+  assert.equal(isReviewEvent(event("bypass", 1)), false);
+  const e = event(); e.filePath = "/Users/example/project/file.ts"; assert.equal(isReviewEvent(e), false);
+  e.filePath = "../outside.ts"; assert.equal(isReviewEvent(e), false);
 });
 
 test("extension capture is opt-in and persists question details without source code or absolute paths", async t => {
@@ -178,17 +192,22 @@ test("extension capture is opt-in and persists question details without source c
   const context = { globalStorageUri: { fsPath: storage, toString: () => storage },
     globalState: { get: (k: string) => store.get(k), update: async (k: string, v: unknown) => { store.set(k, v); } },
     secrets: { get: async () => undefined } } as any;
-  const e = event(); const input = { eventId: e.eventId, timestamp: e.occurredAt, filePath: "/private/project/app.ts", check: e.check };
+  const e = event();
+  const input = {
+    eventId: e.eventId, timestamp: e.occurredAt, concepts: e.concepts, question: e.question, answer: e.answer,
+    feedback: e.feedback, misconception: "", outcome: e.outcome, score: e.score, source: e.source, mode: e.mode,
+    filePath: "/private/project/app.ts", retries: 0,
+  };
   settings.set("comprehensionGuard.desktopSyncEnabled", false);
-  await recordDashboardCheck(context, input);
+  await recordReview(context, input);
   await assert.rejects(fs.readdir(storage));
   settings.set("comprehensionGuard.desktopSyncEnabled", true);
   t.after(() => settings.delete("comprehensionGuard.desktopSyncEnabled"));
-  await recordDashboardCheck(context, input);
+  await recordReview(context, input);
   const files = await fs.readdir(path.join(storage, "dashboard-outbox"));
   const saved = JSON.parse(await fs.readFile(path.join(storage, "dashboard-outbox", files[0]), "utf8"));
-  assert.equal(saved.check.filePath, null); assert.equal(saved.check.question, e.check.question);
-  assert.equal(saved.project.name, "Unassigned"); assert.equal(saved.check.score, 1);
+  assert.equal(saved.filePath, null); assert.equal(saved.question, e.question);
+  assert.equal(saved.project.name, "Unassigned"); assert.equal(saved.score, 1);
 });
 
 test("ordinary quiz captures scores, walkthrough bypass is unscored, and new questions get distinct IDs", async t => {
@@ -215,11 +234,19 @@ test("ordinary quiz captures scores, walkthrough bypass is unscored, and new que
   await wait(() => panels[1].questions().length === 1); panels[1].fromWebview({ type: "bypass" });
   assert.equal(await session, true);
   const box = new DashboardOutbox(path.join(context.globalStorageUri.fsPath, "dashboard-outbox"));
+  const reviewCount = async () => {
+    let count = 0;
+    for (const name of await box.pending()) {
+      const saved = JSON.parse(await fs.readFile(path.join(box.directory, name), "utf8")) as { type?: string };
+      if (saved.type === "review.recorded") count += 1;
+    }
+    return count;
+  };
   const followupGate = runComprehensionGate("function total() { return 6; }", context as never, "javascript", { source: "agent" });
   await wait(() => panels.length === 3); panels[2].fromWebview({ type: "ready" });
   await wait(() => panels[2].questions().length === 1); panels[2].fromWebview({ type: "explain" });
   const start = Date.now();
-  while ((await box.pending()).length !== 3) {
+  while (await reviewCount() !== 3) {
     if (Date.now() - start > 2000) throw new Error("Explanation record was not queued");
     await new Promise(r => setTimeout(r, 5));
   }
@@ -231,11 +258,11 @@ test("ordinary quiz captures scores, walkthrough bypass is unscored, and new que
   await box.flush(async () => ({ endpoint: f.backend.endpoint, token }));
   const history = f.backend.database.history(); assert.equal(history.length, 4);
   assert.equal(new Set(history.map(e => e.eventId)).size, 4);
-  const graded = history.find(e => e.check.outcome === "pass")!;
-  assert.equal(graded.check.score, 1); assert.equal(graded.check.answer, "6");
-  assert.equal(history.find(e => e.check.outcome === "bypass")!.check.score, null);
-  assert.equal(history.find(e => e.check.outcome === "explained")!.check.score, null);
-  assert.equal(history.find(e => e.check.outcome === "explained")!.check.feedback, "Explanation requested.");
+  const graded = history.find(e => e.outcome === "pass")!;
+  assert.equal(graded.score, 1); assert.equal(graded.answer, "6");
+  assert.equal(history.find(e => e.outcome === "bypass")!.score, null);
+  assert.equal(history.find(e => e.outcome === "explained")!.score, null);
+  assert.equal(history.find(e => e.outcome === "explained")!.feedback, "Explanation requested.");
   assert.equal(f.backend.database.growth(null).completedChecks, 2);
 });
 
@@ -245,7 +272,7 @@ async function waitUntil(predicate: () => boolean) {
 }
 
 async function captureFixture(t: import("node:test").TestContext, first: GeneratedQuestion) {
-  const f = await fixture(t); resetStub();
+  const f = await fixture(t); resetStub(); clearQuestionCache();
   settings.set("comprehensionGuard.desktopSyncEnabled", true);
   settings.set("comprehensionGuard.provider", "ollama");
   settings.set("comprehensionGuard.gradingMode", "multiple-choice");
@@ -295,7 +322,7 @@ for (const [question, submit, expectedScore] of [
     // Flush before the next answer: the failed question must already be durable.
     await f.sync();
     const failed = f.backend.database.history(); assert.equal(failed.length, 1);
-    assert.equal(failed[0].check.outcome, "fail"); assert.equal(failed[0].check.score, expectedScore);
+    assert.equal(failed[0].outcome, "fail"); assert.equal(failed[0].score, expectedScore);
     if (editor) assert.equal(editor.document.getText(), original);
     panels[0].fromWebview({ type: "submit", selectedIndex: 1 }); assert.equal(await gate, true);
     await f.sync(); const history = f.backend.database.history(); assert.equal(history.length, 2);
@@ -315,7 +342,7 @@ for (const action of ["cancel", "bypass", "explain"] as const) {
     assert.equal(await session, action !== "cancel"); assert.equal(editor.document.getText(), original);
     await f.sync(); const [received] = f.backend.database.history();
     const expected = action === "cancel" ? "ungraded" : action === "explain" ? "explained" : "bypass";
-    assert.equal(received.check.outcome, expected); assert.equal(received.check.score, null);
+    assert.equal(received.outcome, expected); assert.equal(received.score, null);
     const attempts = f.context.store.get("comprehensionGuard.attempts") as any[];
     assert.equal(attempts.length, 1); assert.equal(attempts[0].outcome, expected);
     assert.equal(f.context.store.get("comprehensionGuard.conceptMastery"), undefined);
@@ -348,11 +375,11 @@ test("unavailable grading followed by a successful retry keeps distinct, consist
   await waitUntil(() => panels[0].feedback().length > 0);
   await f.sync();
   const [ungraded] = f.backend.database.history();
-  assert.equal(ungraded.check.outcome, "ungraded"); assert.equal(ungraded.check.score, null);
+  assert.equal(ungraded.outcome, "ungraded"); assert.equal(ungraded.score, null);
   assert.equal(f.context.store.get("comprehensionGuard.conceptMastery"), undefined);
   gradingAvailable = true; panels[0].fromWebview(submit); assert.equal(await gate, true);
   await f.sync(); const history = f.backend.database.history(); assert.equal(history.length, 2);
-  assert.equal(history[0].check.outcome, "pass"); assert.notEqual(history[0].eventId, ungraded.eventId);
+  assert.equal(history[0].outcome, "pass"); assert.notEqual(history[0].eventId, ungraded.eventId);
   assert.equal((await f.box.quarantined()).length, 0);
   const attempts = f.context.store.get("comprehensionGuard.attempts") as any[];
   assert.equal(attempts[0].outcome, "ungraded"); assert.equal(attempts[0].score, undefined);
@@ -385,7 +412,36 @@ test("failed follow-up generation leaves the wrong answer unrecorded", async t =
   await waitUntil(() => panels[0].questions().length === 2);
   await f.sync();
   assert.equal(f.backend.database.history().length, 1);
-  assert.equal(f.backend.database.history()[0].check.outcome, "fail");
+  assert.equal(f.backend.database.history()[0].outcome, "fail");
   panels[0].fromWebview({ type: "submit", selectedIndex: 1 });
   assert.equal(await gate, true);
+});
+
+test("mastery keeps the newer row, edges replace a file, and a group reports coverage", async t => {
+  const f = await fixture(t);
+  const older = {
+    schemaVersion: 1 as const, type: "mastery.updated" as const, eventId: "mastery-one", installationId: "test-install",
+    occurredAt: 10, concept: "recursion", mastery: 0.2, elo: 1000, attempts: 1, lastSeen: 10,
+  };
+  const newer = { ...older, eventId: "mastery-two", occurredAt: 20, mastery: 0.6, elo: 1040, attempts: 2, lastSeen: 20 };
+  assert.equal((await f.request("/v1/events", older)).status, 200);
+  assert.equal((await f.request("/v1/events", newer)).status, 200);
+  assert.equal((await f.request("/v1/events", older)).status, 200);
+  const concepts = (await (await f.request("/v1/mastery")).json() as { concepts: { mastery: number }[] }).concepts;
+  assert.equal(concepts.length, 1);
+  assert.equal(concepts[0].mastery, 0.6);
+  const edges = {
+    schemaVersion: 1 as const, type: "file.edges" as const, eventId: "edges-one", installationId: "test-install",
+    occurredAt: 30, fromPath: "src/a.ts", edges: [{ toPath: "src/b.ts", kind: "call" as const }],
+  };
+  assert.equal((await f.request("/v1/events", edges)).status, 200);
+  assert.equal((await f.request("/v1/events", { ...edges, eventId: "edges-two", occurredAt: 31, edges: [] })).status, 200);
+  assert.deepEqual((await (await f.request("/v1/files/edges")).json() as { edges: unknown[] }).edges, []);
+  const group = randomUUID();
+  const pass = event("pass", 1); pass.groupId = group;
+  const fail = event("fail", 0); fail.groupId = group;
+  await f.request("/v1/events", pass); await f.request("/v1/events", fail);
+  const grouped = (await (await f.request("/v1/checks")).json() as { checks: { groupId: string; asked: number; passed: number }[] }).checks;
+  const row = grouped.find(item => item.groupId === group);
+  assert.equal(row?.asked, 2); assert.equal(row?.passed, 1);
 });

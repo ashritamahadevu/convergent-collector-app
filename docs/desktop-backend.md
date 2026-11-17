@@ -4,9 +4,11 @@
 
 The extension produces records; the desktop backend receives and stores them. Being in the same Git repository shares source code, not running application memory.
 
-This version supports History, Growth, and connection status. It records one question/check per history row, not an entire agent prompt or a multi-question test. Each row contains its question, final answer, feedback, concepts, outcome, assessment score, timestamp, source, project label, workspace-relative file path when available, and retry count. Ordinary quizzes and walkthroughs both produce records, including bypasses. Existing fallback gates and pre-armed bypasses that never open a quiz are not recorded.
+This version supports History, Growth, connection status, concept mastery, recall cards, file knowledge, related-file edges, profiles, and prep sets. History is one `review.recorded` row per question. Questions from the same edit share a `groupId`; `GET /v1/checks` reports how many graded questions in that group passed. A check is `general` (one question about the whole change) or `chunk` (one question per planned unit). The separate `checks` table is gone.
 
-Deferred: mastery/Elo synchronization, recall cards, exam dates, prep sets, file maps, AI-written percentages, code profiles, multi-question test grouping, accounts, and cloud/cross-device sync. Existing Supabase code is unchanged and separately configured. The dashboard cannot automatically access VS Code's internal state. Only newly captured, opted-in checks are sent; no historical backfill.
+File edges are best-effort. A link is stored only when both files were analyzed in the same batch, and it means "related," not a precise call graph.
+
+Deferred: accounts and cloud sync. Existing Supabase code stays in the extension but is not required; the same payloads are also written to this local backend. The dashboard cannot automatically access VS Code's internal state. Only newly captured, opted-in records are sent; no historical backfill.
 
 After merging the newer agent-pause flow, locally scored pause questions also emit check records. That local picker currently returns only pass/fail/bypass, so its selected-answer text is empty and its retry count is unavailable (zero). Its ordering score is binary (0 or 1); partial ordering credit is not preserved on that local-picker path. Model-backed pause questions use the ordinary session recorder. Follow-up questions get separate event IDs. A failed question is recorded before a successfully generated replacement is installed; a generation failure leaves the current question open rather than finalizing it twice.
 
@@ -49,11 +51,18 @@ Every endpoint requires `Authorization: Bearer <pairing-token>`. Browser-origin 
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/events` | Validate and commit one `check.recorded` v1 event, then acknowledge its `eventId` |
+| `POST /v1/events` | Validate and commit one dashboard v1 event (`review.recorded`, `mastery.updated`, `recall.updated`, `file.updated`, `file.edges`, `profile.updated`, `prepset.created`), then acknowledge its `eventId` |
 | `POST /v1/heartbeat` | Update extension last-seen time |
-| `GET /v1/history?limit=50&offset=0` | Newest checks first; page size 1–200 |
-| `GET /v1/growth?days=7` | Raw score points, average out of five, counts; accepts `7`, `30`, `all` |
-| `GET /v1/status` | Extension recently seen, last seen, last received check |
+| `GET /v1/history?limit=50&offset=0` | Newest review rows first; page size 1–200 |
+| `GET /v1/growth?days=7` | Raw score points, average out of five, counts, plus a first-try (`retries = 0`) average; accepts `7`, `30`, `all` |
+| `GET /v1/checks` | Review rows folded by `groupId`, with graded questions asked and passed |
+| `GET /v1/mastery` | Latest mastery row per concept |
+| `GET /v1/recall?due=now` | Recall cards; `due=now` keeps cards whose due time has passed |
+| `GET /v1/files` | Latest file-knowledge rows |
+| `GET /v1/files/edges` | Best-effort related-file links |
+| `GET /v1/profile` | Latest learner profile |
+| `GET /v1/prepsets` | Saved interview and exam question sets |
+| `GET /v1/status` | Extension recently seen, last seen, last received review |
 
 Example read without printing the token:
 
@@ -67,14 +76,15 @@ The extension writes one atomic JSON file per event under its `globalStorageUri/
 
 Corrupt JSON, invalid schemas, permanent per-event HTTP rejections (400/409/413/415/422), and mismatching acknowledgements are moved to `dashboard-outbox/quarantine` with a reason sidecar; the flush continues with later records. Original event bytes are retained and unique quarantine filenames prevent overwriting rejected versions. The **Desktop Sync Status** command lists the quarantine directory, filenames (up to five), reasons, and total count, including after a restart. Quarantined files are not retried automatically. After diagnosing the reason, manually repair/requeue a copy with a fresh event ID when appropriate; leave the quarantined original for inspection. Delivery is background work; local storage failures show a warning without changing the gate result.
 
-SQLite uses `event_id` as its primary key. Re-delivering an identical event is acknowledged without duplication; reusing the ID with different content returns 409. Acknowledgement happens only after the insert commits. Receiver history survives restarts. A heartbeat marks an extension as connected for 45 seconds; it is distinct from successfully syncing a check. Last-sync time is persisted separately.
+Review rows and prep sets use `event_id` as their primary key. Re-delivering an identical event is acknowledged without duplication; reusing the ID with different content returns 409. Mastery, recall, file knowledge, and profile rows keep the newest timestamp for that concept, path, or installation. A file-edge event replaces that file's previous links. Acknowledgement happens only after the write commits. Receiver history survives restarts. A heartbeat marks an extension as connected for 45 seconds; it is distinct from successfully syncing a review. Last-sync time is persisted separately.
 
 The extension stores the pairing token in VS Code SecretStorage. Do not expose it to the renderer or commit it. When adding Electron, run the backend in the main process with an explicit `databasePath` under `app.getPath("userData")`, after verifying the selected Electron runtime supports `node:sqlite`. Alternatively keep this as a Node backend process. Expose narrow history/growth/status methods through a preload bridge; the UI should not receive filesystem or token access. Choose one backend owner so Electron and the standalone development server do not compete for the same port.
 
 ## Score and count definitions
 
-- `check.score` is an assessment result from 0 to 1, not the Bayesian/mastery-discounted `AttemptRecord.score`. Ordinary rubric questions use passed/applicable criterion count; ordering uses its existing partial score; MCQ/debug use 0 or 1. Walkthrough free-text currently retains its existing binary pass/fail score.
-- Growth displays `check.score * 5` and averages scored checks equally. It uses rolling 7/30-day windows and UTC millisecond timestamps; the UI can format dates locally.
+- `score` on a review row is an assessment result from 0 to 1, not the Bayesian/mastery-discounted `AttemptRecord.score`. Ordinary rubric questions use passed/applicable criterion count; ordering uses its existing partial score; MCQ/debug use 0 or 1.
+- Growth displays `score * 5` and averages scored reviews equally. It also reports the same average for first tries (`retries = 0`). It uses rolling 7/30-day windows and UTC millisecond timestamps; the UI can format dates locally.
+- `GET /v1/checks` groups reviews that share a `groupId`. Coverage is graded passes divided by graded questions, so the denominator changes with the edit.
 - Bypass, explanation-only, disputed, and undecided results are unscored. They do not increase the completed/scored count or lower the average. Closing an unassessed check is ungraded. These transport rules do not change existing extension mastery calculations.
 - Walkthrough cancellation, bypass, and explanation exits (including during a debug edit) also create local attempt/review records. They do not update mastery/recall. Local statistics exclude the ungraded cancellation outcome as well as bypass/explanation.
 - A bypass count is observed quiz bypasses, not every possible skipped insertion. Failed questions can still be scored/completed. No denominator-based bypass rate or pass-rate chart is supplied yet.

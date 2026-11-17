@@ -84,6 +84,8 @@ export type ProfileFacts = {
 export type FileKnowledge = {
   path: string;
   concepts: string[];
+  /** Display label from the planned unit, not a mastery concept. */
+  topic?: string;
   passed: boolean;
   aiWritten: boolean;
   core?: boolean;

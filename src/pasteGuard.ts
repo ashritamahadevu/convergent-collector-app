@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { lockDocument } from "./documentLock";
 import { noteAccepted } from "./editorBaseline";
@@ -69,7 +70,7 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           clipboardText,
           context,
           editor?.document.languageId,
-          { source: "paste", filePath: editor?.document.uri.fsPath, prepared },
+          { source: "paste", filePath: editor?.document.uri.fsPath, prepared, shape: "general", groupId: randomUUID() },
         );
         if (passed) {
           await performPaste();
@@ -109,6 +110,8 @@ export function registerPasteGuard(context: vscode.ExtensionContext): void {
           editor.document.languageId,
           {
             source: "paste",
+            shape: "general",
+            groupId: randomUUID(),
             filePath: editor.document.uri.fsPath,
             prepared,
             editor,

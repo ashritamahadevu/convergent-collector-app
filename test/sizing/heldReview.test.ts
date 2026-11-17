@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEdit } from "../../src/agentProtocol";
-import { checkShapeFor, collapseEdits, modelKindFor, planForEdits } from "../../src/heldReview";
+import { checkShapeFor, collapseEdits, modelKindFor, planForEdits, reviewTargets } from "../../src/heldReview";
 import { analyzeFile } from "../../src/sizing/analyze";
-import { planPreset } from "../../src/sizing/chunkPolicy";
+import { chunkSizeFor, planPreset } from "../../src/sizing/chunkPolicy";
 import { draftPlan } from "../../src/sizing/plan";
+import { questionForChunk } from "../../src/sizing/questions";
 import { unitsTouchedByEdit } from "../../src/sizing/touched";
 
 const FIRST = `function once(fn) {
@@ -126,6 +127,69 @@ test("the same generated function gets the type the plan assigns for each preset
   assert.equal(modelKindFor("explain"), "free-text");
   assert.equal(modelKindFor("change"), "debug");
   assert.equal(modelKindFor("multiple_choice"), "multiple-choice");
+});
+
+test("quick stays general and each question is only its own function", async () => {
+  const source = many(8) + "\nfunction idle() {\n  return 1;\n}\n";
+  const quickPrefs = { preset: "quick" as const };
+  const standardPrefs = { preset: "standard" as const };
+  assert.equal(checkShapeFor(quickPrefs), "general");
+  assert.equal(checkShapeFor(standardPrefs), "chunks");
+  const quick = await planForEdits([edit("/ws/a.js", source)], quickPrefs);
+  const standard = await planForEdits([edit("/ws/a.js", source)], standardPrefs);
+  assert.ok(quick.chunks.length < standard.chunks.length);
+  assert.equal(standard.chunks.some((chunk) => chunk.unit === "idle"), false);
+  const analysis = await analyzeFile("/ws/a.js", source);
+  for (const chunk of standard.chunks) {
+    const unit = analysis.units.find((item) => item.unit === chunk.unit);
+    assert.ok(unit);
+    assert.equal(chunk.code.includes(`function ${chunk.unit}`), true);
+    assert.equal(chunk.code.includes("function idle"), false);
+    assert.equal(chunk.startLine, unit.startLine);
+    assert.equal(chunk.endLine, unit.endLine);
+    for (const other of standard.chunks) {
+      if (other.unit === chunk.unit) continue;
+      assert.equal(chunk.code.includes(`function ${other.unit}`), false);
+    }
+  }
+  const targets = reviewTargets(quick.chunks, { code: source, filePath: "/ws/a.js" });
+  assert.equal(targets.length, quick.chunks.length);
+  assert.ok(targets.every((target) => target.code.includes(`function ${target.unit}`)));
+});
+
+test("a general check with nothing scored asks about the whole change", () => {
+  const whole = "function idle() {\n  return 1;\n}\n";
+  const targets = reviewTargets([], { code: whole, filePath: "/ws/a.js" });
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.code, whole);
+  assert.equal(targets[0]?.unit, "/ws/a.js");
+});
+
+test("deep names the unit in a change question and quick names it in an ordering question", async () => {
+  const source = wide("classify");
+  const analysis = await analyzeFile("/ws/a.js", source);
+  const unit = analysis.units.find((item) => item.unit === "classify");
+  assert.ok(unit);
+  for (const preset of ["quick", "deep"] as const) {
+    const planned = await planForEdits([edit("/ws/a.js", source)], { preset });
+    const chunk = planned.chunks[0];
+    assert.ok(chunk);
+    const question = questionForChunk(
+      { unit: chunk.fact, questionType: chunk.questionType, concept: "control-flow", reason: "" },
+      { preset },
+    );
+    assert.match(question.prompt, /classify/);
+    assert.equal(question.code?.includes("function classify"), true);
+    assert.equal(chunk.questionType, preset === "quick" ? "ordering" : "change");
+  }
+});
+
+test("strict or a nearby exam forces a fragment-sized chunk check", () => {
+  const now = Date.UTC(2026, 0, 1);
+  assert.equal(chunkSizeFor({ preset: "quick", strictness: "strict", now }), "fragment");
+  assert.equal(checkShapeFor({ preset: "quick", strictness: "strict", now }), "chunks");
+  assert.equal(chunkSizeFor({ preset: "quick", examDate: "2026-01-10", now }), "fragment");
+  assert.equal(checkShapeFor({ preset: "quick", examDate: "2026-01-10", now }), "chunks");
 });
 
 test("a function tree-sitter scores at zero does not add a question", async () => {

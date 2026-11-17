@@ -1,46 +1,232 @@
 /** Shared by the extension and desktop receiver. No VS Code/Electron imports. */
+
 export type CheckOutcome = "pass" | "fail" | "bypass" | "explained" | "disputed" | "ungraded";
-export type CheckEvent = {
+export type CheckShape = "general" | "chunk";
+
+type Envelope = {
   schemaVersion: 1;
-  type: "check.recorded";
   eventId: string;
   installationId: string;
   occurredAt: number;
-  project: { id: string; name: string };
-  check: {
-    concepts: string[];
-    question: string;
-    answer: string;
-    feedback: string;
-    misconception: string;
-    outcome: CheckOutcome;
-    /** Actual assessment result, 0..1. null means no assessment score. */
-    score: number | null;
-    source: string;
-    mode: string;
-    filePath: string | null;
-    retries: number;
-  };
 };
 
+export type ReviewEvent = Envelope & {
+  type: "review.recorded";
+  project: { id: string; name: string };
+  concepts: string[];
+  topic: string;
+  question: string;
+  answer: string;
+  feedback: string;
+  misconception: string;
+  outcome: CheckOutcome;
+  /** Actual assessment result, 0..1. null means no assessment score. */
+  score: number | null;
+  source: string;
+  mode: string;
+  shape: CheckShape;
+  groupId: string;
+  filePath: string | null;
+  retries: number;
+  masteryAfter: number | null;
+};
+
+export type MasteryEvent = Envelope & {
+  type: "mastery.updated";
+  concept: string;
+  mastery: number;
+  elo: number;
+  attempts: number;
+  lastSeen: number;
+};
+
+export type RecallEvent = Envelope & {
+  type: "recall.updated";
+  concept: string;
+  ease: number;
+  intervalDays: number;
+  repetitions: number;
+  dueAt: number;
+  stability: number;
+  difficulty: number;
+  lastReview: number;
+};
+
+export type FileEvent = Envelope & {
+  type: "file.updated";
+  path: string;
+  concepts: string[];
+  topic: string;
+  passed: boolean;
+  aiWritten: boolean;
+  core: boolean;
+  complexity: number | null;
+  centrality: number | null;
+  updatedAt: number;
+};
+
+export type FileEdgesEvent = Envelope & {
+  type: "file.edges";
+  fromPath: string;
+  edges: { toPath: string; kind: "call" | "import" }[];
+};
+
+export type ProfileEvent = Envelope & {
+  type: "profile.updated";
+  examDate?: string;
+  interviewDate?: string;
+  preferredLanguage?: string;
+  strictness?: string;
+};
+
+export type PrepQuestion = {
+  question: string;
+  referenceAnswer: string;
+  conceptTags: string[];
+  excerpt: string;
+  path: string;
+};
+
+export type PrepSetEvent = Envelope & {
+  type: "prepset.created";
+  kind: "interview" | "exam";
+  project: string;
+  questions: PrepQuestion[];
+};
+
+export type DashboardEvent =
+  | ReviewEvent
+  | MasteryEvent
+  | RecallEvent
+  | FileEvent
+  | FileEdgesEvent
+  | ProfileEvent
+  | PrepSetEvent;
+
 const outcomes = new Set(["pass", "fail", "bypass", "explained", "disputed", "ungraded"]);
+const shapes = new Set(["general", "chunk"]);
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
-export function isCheckEvent(v: unknown): v is CheckEvent {
-  if (!object(v) || v.schemaVersion !== 1 || v.type !== "check.recorded" ||
-      !str(v.eventId, 100) || !v.eventId || !str(v.installationId, 100) || !v.installationId ||
-      !Number.isSafeInteger(v.occurredAt) || (v.occurredAt as number) < 0 ||
-      !object(v.project) || !str(v.project.id, 128) || !v.project.id || !str(v.project.name, 500) ||
-      !object(v.check)) return false;
-  const c = v.check;
-  return Array.isArray(c.concepts) && c.concepts.length <= 100 && c.concepts.every(x => str(x, 200)) &&
-    str(c.question, 20000) && str(c.answer, 20000) && str(c.feedback, 20000) && str(c.misconception, 2000) &&
-    typeof c.outcome === "string" && outcomes.has(c.outcome) &&
-    (c.score === null || (typeof c.score === "number" && Number.isFinite(c.score) && c.score >= 0 && c.score <= 1)) &&
-    (!["bypass", "explained", "ungraded"].includes(c.outcome) || c.score === null) &&
-    str(c.source, 100) && str(c.mode, 100) &&
-    (c.filePath === null || (str(c.filePath, 2000) && !c.filePath.startsWith("/") && !/^[A-Za-z]:/.test(c.filePath) && !c.filePath.split(/[\\/]/).includes(".."))) &&
-    Number.isSafeInteger(c.retries) && (c.retries as number) >= 0;
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const unit = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
+const stamp = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+/** Workspace-relative paths only. Absolute paths and parent traversal stay on the machine. */
+export function isRelativePath(value: string): boolean {
+  return value.length > 0
+    && value.length <= 2000
+    && !value.startsWith("/")
+    && !/^[A-Za-z]:/.test(value)
+    && !value.split(/[\\/]/).includes("..");
+}
+
+function envelope(v: Record<string, unknown>): boolean {
+  return v.schemaVersion === 1
+    && str(v.eventId, 100) && v.eventId.length > 0
+    && str(v.installationId, 100) && v.installationId.length > 0
+    && stamp(v.occurredAt);
+}
+
+function concepts(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length <= 100 && v.every((item) => str(item, 200));
+}
+
+function scoreOrNull(v: unknown, outcome: string): boolean {
+  const ok = v === null || unit(v);
+  if (!ok) return false;
+  return !["bypass", "explained", "ungraded"].includes(outcome) || v === null;
+}
+
+export function isReviewEvent(v: unknown): v is ReviewEvent {
+  if (!object(v) || v.type !== "review.recorded" || !envelope(v)) return false;
+  if (!object(v.project) || !str(v.project.id, 128) || !v.project.id || !str(v.project.name, 500)) return false;
+  return concepts(v.concepts)
+    && str(v.topic, 200)
+    && str(v.question, 20000)
+    && str(v.answer, 20000)
+    && str(v.feedback, 20000)
+    && str(v.misconception, 2000)
+    && typeof v.outcome === "string" && outcomes.has(v.outcome)
+    && scoreOrNull(v.score, v.outcome)
+    && str(v.source, 100)
+    && str(v.mode, 100)
+    && typeof v.shape === "string" && shapes.has(v.shape)
+    && str(v.groupId, 100) && v.groupId.length > 0
+    && (v.filePath === null || (str(v.filePath, 2000) && isRelativePath(v.filePath)))
+    && Number.isSafeInteger(v.retries) && (v.retries as number) >= 0
+    && (v.masteryAfter === null || unit(v.masteryAfter));
+}
+
+export function isMasteryEvent(v: unknown): v is MasteryEvent {
+  if (!object(v) || v.type !== "mastery.updated" || !envelope(v)) return false;
+  return str(v.concept, 200) && v.concept.length > 0
+    && unit(v.mastery)
+    && finite(v.elo)
+    && Number.isSafeInteger(v.attempts) && (v.attempts as number) >= 0
+    && stamp(v.lastSeen);
+}
+
+export function isRecallEvent(v: unknown): v is RecallEvent {
+  if (!object(v) || v.type !== "recall.updated" || !envelope(v)) return false;
+  return str(v.concept, 200) && v.concept.length > 0
+    && finite(v.ease) && v.ease > 0
+    && Number.isSafeInteger(v.intervalDays) && (v.intervalDays as number) >= 0
+    && Number.isSafeInteger(v.repetitions) && (v.repetitions as number) >= 0
+    && stamp(v.dueAt)
+    && finite(v.stability) && v.stability > 0
+    && finite(v.difficulty)
+    && stamp(v.lastReview);
+}
+
+export function isFileEvent(v: unknown): v is FileEvent {
+  if (!object(v) || v.type !== "file.updated" || !envelope(v)) return false;
+  return str(v.path, 2000) && isRelativePath(v.path)
+    && concepts(v.concepts)
+    && str(v.topic, 200)
+    && typeof v.passed === "boolean"
+    && typeof v.aiWritten === "boolean"
+    && typeof v.core === "boolean"
+    && (v.complexity === null || finite(v.complexity))
+    && (v.centrality === null || unit(v.centrality))
+    && stamp(v.updatedAt);
+}
+
+export function isFileEdgesEvent(v: unknown): v is FileEdgesEvent {
+  if (!object(v) || v.type !== "file.edges" || !envelope(v)) return false;
+  if (!str(v.fromPath, 2000) || !isRelativePath(v.fromPath)) return false;
+  return Array.isArray(v.edges) && v.edges.length <= 200 && v.edges.every((edge) =>
+    object(edge) && str(edge.toPath, 2000) && isRelativePath(edge.toPath) && (edge.kind === "call" || edge.kind === "import"),
+  );
+}
+
+export function isProfileEvent(v: unknown): v is ProfileEvent {
+  if (!object(v) || v.type !== "profile.updated" || !envelope(v)) return false;
+  const optional = (value: unknown) => value === undefined || str(value, 200);
+  return optional(v.examDate) && optional(v.interviewDate) && optional(v.preferredLanguage) && optional(v.strictness);
+}
+
+export function isPrepSetEvent(v: unknown): v is PrepSetEvent {
+  if (!object(v) || v.type !== "prepset.created" || !envelope(v)) return false;
+  if ((v.kind !== "interview" && v.kind !== "exam") || !str(v.project, 500)) return false;
+  return Array.isArray(v.questions) && v.questions.length <= 50 && v.questions.every((item) =>
+    object(item)
+    && str(item.question, 20000)
+    && str(item.referenceAnswer, 20000)
+    && concepts(item.conceptTags)
+    && str(item.excerpt, 2000)
+    && str(item.path, 2000)
+    && isRelativePath(item.path),
+  );
+}
+
+export function isDashboardEvent(v: unknown): v is DashboardEvent {
+  return isReviewEvent(v)
+    || isMasteryEvent(v)
+    || isRecallEvent(v)
+    || isFileEvent(v)
+    || isFileEdgesEvent(v)
+    || isProfileEvent(v)
+    || isPrepSetEvent(v);
 }
 
 export function localEndpoint(value: string): string {

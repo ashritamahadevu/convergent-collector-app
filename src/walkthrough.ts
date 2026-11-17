@@ -3,6 +3,7 @@ import type { AgentEdit } from "./agentProtocol";
 import { generateQuestion, getJudgeConfigId } from "./llm";
 import { annotateFile, dueConcepts, getMastery } from "./memory/remember";
 import { buildProjectMap, type ProjectFile } from "./memory/projectMap";
+import { recordPrepSet } from "./dashboard/service";
 import { queuePrepSet } from "./memory/sync";
 import { searchCode } from "./memory/rag";
 import { runComprehensionGate, runSession } from "./quiz";
@@ -204,6 +205,7 @@ export async function buildPrepSet(context: vscode.ExtensionContext, kind: "inte
     return;
   }
   queuePrepSet(context, kind, projectName(), questions);
+  void recordPrepSet(context, kind, projectName(), questions);
   void vscode.window.showInformationMessage(
     "Comprehension Guard: saved a " + kind + " prep set (" + questions.length + " questions). judge " + getJudgeConfigId(),
   );

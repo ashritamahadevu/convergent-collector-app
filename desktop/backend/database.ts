@@ -1,7 +1,17 @@
-import { isCheckEvent, type CheckEvent } from "../../src/dashboard/protocol";
+import {
+  isDashboardEvent,
+  isFileEdgesEvent,
+  isFileEvent,
+  isMasteryEvent,
+  isPrepSetEvent,
+  isProfileEvent,
+  isRecallEvent,
+  isReviewEvent,
+  type DashboardEvent,
+  type ReviewEvent,
+} from "../../src/dashboard/protocol";
 
 // node:sqlite is deliberately confined to the desktop backend (Node >=22.13).
-// The extension's Node 20 typings/runtime do not need SQLite.
 interface Statement { run(...args: (string | number | null)[]): unknown; all(...args: (string | number)[]): Record<string, unknown>[]; get(...args: (string | number)[]): Record<string, unknown> | undefined }
 interface Database { exec(sql: string): void; prepare(sql: string): Statement; close(): void }
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (file: string) => Database };
@@ -11,37 +21,157 @@ export class DashboardDatabase {
   constructor(file: string) {
     this.db = new DatabaseSync(file);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;
-      CREATE TABLE IF NOT EXISTS checks (
+      CREATE TABLE IF NOT EXISTS review_events (
         event_id TEXT PRIMARY KEY, occurred_at INTEGER NOT NULL,
         received_at INTEGER NOT NULL, event_json TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS checks_time ON checks(occurred_at);
-      PRAGMA user_version=1;`);
+      CREATE INDEX IF NOT EXISTS review_time ON review_events(occurred_at);
+      CREATE TABLE IF NOT EXISTS concept_mastery (
+        installation_id TEXT NOT NULL, concept TEXT NOT NULL,
+        last_seen INTEGER NOT NULL, event_json TEXT NOT NULL,
+        PRIMARY KEY (installation_id, concept));
+      CREATE TABLE IF NOT EXISTS recall_cards (
+        installation_id TEXT NOT NULL, concept TEXT NOT NULL,
+        due_at INTEGER NOT NULL, last_review INTEGER NOT NULL, event_json TEXT NOT NULL,
+        PRIMARY KEY (installation_id, concept));
+      CREATE TABLE IF NOT EXISTS file_knowledge (
+        installation_id TEXT NOT NULL, path TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, event_json TEXT NOT NULL,
+        PRIMARY KEY (installation_id, path));
+      CREATE TABLE IF NOT EXISTS file_edges (
+        installation_id TEXT NOT NULL, from_path TEXT NOT NULL,
+        to_path TEXT NOT NULL, kind TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (installation_id, from_path, to_path, kind));
+      CREATE TABLE IF NOT EXISTS profiles (
+        installation_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, event_json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS prep_sets (
+        event_id TEXT PRIMARY KEY, occurred_at INTEGER NOT NULL, event_json TEXT NOT NULL);
+      PRAGMA user_version=2;`);
   }
-  insert(event: CheckEvent): void {
-    if (!isCheckEvent(event)) throw new Error("Invalid event");
-    const old = this.db.prepare("SELECT event_json FROM checks WHERE event_id=?").get(event.eventId);
+
+  insert(event: DashboardEvent): void {
+    if (!isDashboardEvent(event)) throw new Error("Invalid event");
+    if (isReviewEvent(event)) this.insertReview(event);
+    else if (isMasteryEvent(event)) this.upsertLatest("concept_mastery", "last_seen", event.lastSeen, event.installationId, event.concept, event);
+    else if (isRecallEvent(event)) this.upsertRecall(event);
+    else if (isFileEvent(event)) this.upsertLatest("file_knowledge", "updated_at", event.updatedAt, event.installationId, event.path, event);
+    else if (isFileEdgesEvent(event)) this.replaceEdges(event);
+    else if (isProfileEvent(event)) this.upsertProfile(event);
+    else if (isPrepSetEvent(event)) this.insertPrep(event);
+    else throw new Error("Invalid event");
+  }
+
+  private insertReview(event: ReviewEvent): void {
+    const old = this.db.prepare("SELECT event_json FROM review_events WHERE event_id=?").get(event.eventId);
     if (old && old.event_json !== JSON.stringify(event)) throw new Error("Event ID already has different data");
-    this.db.prepare("INSERT OR IGNORE INTO checks VALUES (?, ?, ?, ?)")
+    this.db.prepare("INSERT OR IGNORE INTO review_events VALUES (?, ?, ?, ?)")
       .run(event.eventId, event.occurredAt, Date.now(), JSON.stringify(event));
   }
-  history(limit = 50, offset = 0): CheckEvent[] {
-    return this.db.prepare("SELECT event_json FROM checks ORDER BY occurred_at DESC, event_id DESC LIMIT ? OFFSET ?")
+
+  private upsertLatest(table: string, stamp: string, incoming: number, installation: string, key: string, event: DashboardEvent): void {
+    const column = table === "file_knowledge" ? "path" : "concept";
+    const old = this.db.prepare(`SELECT ${stamp} AS stamp FROM ${table} WHERE installation_id=? AND ${column}=?`).get(installation, key);
+    if (old && Number(old.stamp) > incoming) return;
+    this.db.prepare(`INSERT INTO ${table} (installation_id, ${column}, ${stamp}, event_json) VALUES (?, ?, ?, ?)
+      ON CONFLICT(installation_id, ${column}) DO UPDATE SET ${stamp}=excluded.${stamp}, event_json=excluded.event_json`)
+      .run(installation, key, incoming, JSON.stringify(event));
+  }
+
+  private upsertRecall(event: Extract<DashboardEvent, { type: "recall.updated" }>): void {
+    const old = this.db.prepare("SELECT last_review AS stamp FROM recall_cards WHERE installation_id=? AND concept=?").get(event.installationId, event.concept);
+    if (old && Number(old.stamp) > event.lastReview) return;
+    this.db.prepare(`INSERT INTO recall_cards (installation_id, concept, due_at, last_review, event_json) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(installation_id, concept) DO UPDATE SET due_at=excluded.due_at, last_review=excluded.last_review, event_json=excluded.event_json`)
+      .run(event.installationId, event.concept, event.dueAt, event.lastReview, JSON.stringify(event));
+  }
+
+  private replaceEdges(event: Extract<DashboardEvent, { type: "file.edges" }>): void {
+    this.db.prepare("DELETE FROM file_edges WHERE installation_id=? AND from_path=?").run(event.installationId, event.fromPath);
+    const insert = this.db.prepare("INSERT INTO file_edges VALUES (?, ?, ?, ?, ?)");
+    for (const edge of event.edges) {
+      insert.run(event.installationId, event.fromPath, edge.toPath, edge.kind, event.occurredAt);
+    }
+  }
+
+  private upsertProfile(event: Extract<DashboardEvent, { type: "profile.updated" }>): void {
+    const old = this.db.prepare("SELECT updated_at AS stamp FROM profiles WHERE installation_id=?").get(event.installationId);
+    if (old && Number(old.stamp) > event.occurredAt) return;
+    this.db.prepare(`INSERT INTO profiles (installation_id, updated_at, event_json) VALUES (?, ?, ?)
+      ON CONFLICT(installation_id) DO UPDATE SET updated_at=excluded.updated_at, event_json=excluded.event_json`)
+      .run(event.installationId, event.occurredAt, JSON.stringify(event));
+  }
+
+  private insertPrep(event: Extract<DashboardEvent, { type: "prepset.created" }>): void {
+    const old = this.db.prepare("SELECT event_json FROM prep_sets WHERE event_id=?").get(event.eventId);
+    if (old && old.event_json !== JSON.stringify(event)) throw new Error("Event ID already has different data");
+    this.db.prepare("INSERT OR IGNORE INTO prep_sets VALUES (?, ?, ?)").run(event.eventId, event.occurredAt, JSON.stringify(event));
+  }
+
+  history(limit = 50, offset = 0): ReviewEvent[] {
+    return this.db.prepare("SELECT event_json FROM review_events ORDER BY occurred_at DESC, event_id DESC LIMIT ? OFFSET ?")
       .all(limit, offset).map(r => JSON.parse(r.event_json as string));
   }
+
   growth(days: 7 | 30 | null, now = Date.now()) {
     const since = days === null ? 0 : now - days * 86400000;
-    const events: CheckEvent[] = this.db.prepare("SELECT event_json FROM checks WHERE occurred_at>=? AND occurred_at<=? ORDER BY occurred_at")
+    const events: ReviewEvent[] = this.db.prepare("SELECT event_json FROM review_events WHERE occurred_at>=? AND occurred_at<=? ORDER BY occurred_at")
       .all(since, now).map(r => JSON.parse(r.event_json as string));
-    const scored = events.filter(e => e.check.score !== null);
-    return {
-      days, totalChecks: events.length, completedChecks: scored.length,
-      bypassedChecks: events.filter(e => e.check.outcome === "bypass").length,
-      averageScoreOutOfFive: scored.length ? scored.reduce((s, e) => s + e.check.score! * 5, 0) / scored.length : null,
-      points: scored.map(e => ({ eventId: e.eventId, timestamp: e.occurredAt, scoreOutOfFive: e.check.score! * 5 })),
+    const summarize = (rows: ReviewEvent[]) => {
+      const scored = rows.filter(e => e.score !== null);
+      return {
+        totalChecks: rows.length,
+        completedChecks: scored.length,
+        bypassedChecks: rows.filter(e => e.outcome === "bypass").length,
+        averageScoreOutOfFive: scored.length ? scored.reduce((s, e) => s + e.score! * 5, 0) / scored.length : null,
+        points: scored.map(e => ({ eventId: e.eventId, timestamp: e.occurredAt, scoreOutOfFive: e.score! * 5 })),
+      };
     };
+    const all = summarize(events);
+    const first = summarize(events.filter(e => e.retries === 0));
+    return { days, ...all, firstTry: { completedChecks: first.completedChecks, averageScoreOutOfFive: first.averageScoreOutOfFive } };
   }
+
+  mastery(): unknown[] { return this.rows("concept_mastery"); }
+  recall(dueNow?: number): unknown[] {
+    const rows = this.rows("recall_cards") as { dueAt: number }[];
+    return dueNow === undefined ? rows : rows.filter(row => row.dueAt <= dueNow);
+  }
+  files(): unknown[] { return this.rows("file_knowledge"); }
+  edges(): { fromPath: string; toPath: string; kind: string }[] {
+    return this.db.prepare("SELECT from_path, to_path, kind FROM file_edges ORDER BY from_path, to_path").all()
+      .map(row => ({ fromPath: String(row.from_path), toPath: String(row.to_path), kind: String(row.kind) }));
+  }
+  profile(): unknown | null {
+    const row = this.db.prepare("SELECT event_json FROM profiles LIMIT 1").get();
+    return row ? JSON.parse(row.event_json as string) : null;
+  }
+  prepSets(): unknown[] { return this.rows("prep_sets"); }
+
+  /** Questions from one edit, with how many graded answers passed. */
+  checks(): { groupId: string; asked: number; passed: number; filePath: string | null }[] {
+    const events = this.history(1000, 0);
+    const groups = new Map<string, { asked: number; passed: number; filePath: string | null }>();
+    for (const event of events) {
+      const graded = event.score !== null;
+      const current = groups.get(event.groupId) ?? { asked: 0, passed: 0, filePath: event.filePath };
+      if (graded) {
+        current.asked += 1;
+        if (event.outcome === "pass" || event.outcome === "disputed") current.passed += 1;
+      }
+      if (!current.filePath) current.filePath = event.filePath;
+      groups.set(event.groupId, current);
+    }
+    return [...groups.entries()].map(([groupId, group]) => ({ groupId, ...group }));
+  }
+
+  private rows(table: string): unknown[] {
+    return this.db.prepare(`SELECT event_json FROM ${table}`).all().map(row => JSON.parse(row.event_json as string));
+  }
+
   get lastReceivedAt(): number | null {
-    return (this.db.prepare("SELECT MAX(received_at) AS at FROM checks").get()?.at as number | null) ?? null;
+    return (this.db.prepare("SELECT MAX(received_at) AS at FROM review_events").get()?.at as number | null) ?? null;
   }
-  close(): void { this.db.close(); }
+  close(): void {
+    try { this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* Already closing. */ }
+    this.db.close();
+  }
 }

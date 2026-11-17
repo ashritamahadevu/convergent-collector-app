@@ -20,7 +20,7 @@ import type { AttemptOutcome, AttemptRecord, AttemptSource, CriterionVerdict, Ge
 import { sameCode } from "./debugCode";
 import type { DocumentLock } from "./documentLock";
 import { createQuizPanel, type QuizAction, type QuizView } from "./quizPanel";
-import { newDashboardCheckId, recordDashboardCheck } from "./dashboard/service";
+import { newDashboardCheckId } from "./dashboard/service";
 
 let missingApiKeyHintShown = false;
 
@@ -31,6 +31,10 @@ type GateMeta = {
   source?: AttemptSource;
   filePath?: string;
   recall?: boolean;
+  /** One id for every question asked about the same edit. */
+  groupId?: string;
+  shape?: "general" | "chunk";
+  topic?: string;
   editor?: vscode.TextEditor;
   range?: vscode.Range;
   lock?: DocumentLock;
@@ -223,35 +227,32 @@ async function runComprehensionGateBody(
       masteryAfter = await rememberCheck(context, draft);
     }
     const ungraded = outcome === "ungraded";
+    const applicable = (criterionResults ?? []).filter(c => c.verdict !== "n/a");
+    const displayScore = !assessed || ungraded || !["pass", "fail"].includes(outcome) ? null
+      : scoreOverride ?? (applicable.length ? applicable.filter(c => c.verdict === "pass").length / applicable.length : passed ? 1 : 0);
+    const recordedOutcome = ungraded || (!assessed && outcome === "fail") ? "ungraded" : outcome;
     await logReview(context, {
+      eventId: dashboardCheckId,
       concepts: draft.conceptTags,
+      topic: meta?.topic,
       eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : meta?.recall ? "recall" : "check",
       source: draft.source,
-      mode: draft.mode,
-      score: outcome === "bypass" || ungraded ? undefined : draft.score,
-      passed: outcome === "bypass" || outcome === "explained" || ungraded ? undefined : draft.passed,
+      mode: question.kind,
+      shape: meta?.shape ?? "general",
+      groupId: meta?.groupId,
+      outcome: recordedOutcome,
+      score: displayScore === null ? undefined : displayScore,
+      passed: recordedOutcome === "pass" || recordedOutcome === "disputed" ? true : recordedOutcome === "fail" ? false : undefined,
       followups: draft.followups,
       masteryAfter,
       filePath: draft.filePath,
       question: question.question,
       studentAnswer: lastStudentAnswer,
+      feedback: ungraded ? "Grader could not decide." : outcome === "explained" ? "Explanation requested." : outcome === "pass" ? "Correct." : lastFeedback,
       misconception: outcome === "fail" ? lastMisconception : "",
       askedForExplanation: outcome === "explained",
       explanation: outcome === "explained" ? question.referenceAnswer : "",
       judgeConfigId: draft.judgeConfigId,
-    });
-    const applicable = (criterionResults ?? []).filter(c => c.verdict !== "n/a");
-    const displayScore = !assessed || ungraded || !["pass", "fail"].includes(outcome) ? null
-      : scoreOverride ?? (applicable.length ? applicable.filter(c => c.verdict === "pass").length / applicable.length : passed ? 1 : 0);
-    await recordDashboardCheck(context, {
-      eventId: dashboardCheckId, timestamp: draft.timestamp, filePath: meta?.filePath,
-      check: {
-        concepts: question.conceptTags, question: question.question, answer: lastStudentAnswer,
-        feedback: ungraded ? "Grader could not decide." : outcome === "explained" ? "Explanation requested." : outcome === "pass" ? "Correct." : lastFeedback,
-        misconception: outcome === "fail" ? lastMisconception : "",
-        outcome: ungraded || (!assessed && outcome === "fail") ? "ungraded" : outcome, score: displayScore,
-        source: meta?.source ?? "unknown", mode: question.kind, filePath: null, retries: followups,
-      },
     });
     if (ungraded) {
       dashboardCheckId = newDashboardCheckId();
@@ -595,21 +596,19 @@ export async function runSession(
     language?: string;
     questions: GeneratedQuestion[];
     source?: AttemptSource;
+    groupId?: string;
+    shape?: "general" | "chunk";
+    topic?: string;
   },
 ): Promise<boolean> {
   if (input.questions.length === 0) {
     return false;
   }
   const view = createQuizPanel(input.snippet, input.language ?? "", context.extensionUri);
+  const groupId = input.groupId ?? newDashboardCheckId();
   let failed = false;
   for (const question of input.questions) {
     const checkId = newDashboardCheckId();
-    const saveDashboard = (outcome: import("./dashboard/protocol").CheckOutcome, score: number | null,
-      answer = "", feedback = "", misconception = "") => recordDashboardCheck(context, {
-        eventId: checkId, timestamp: Date.now(), filePath: input.filePath,
-        check: { concepts: question.conceptTags, question: question.question, answer, feedback, misconception,
-          outcome, score, source: input.source ?? "walkthrough", mode: question.kind, filePath: null, retries: 0 },
-      });
     const saveUnscored = async (outcome: "bypass" | "explained" | "ungraded", feedback = "") => {
       const record: AttemptRecord = {
         timestamp: Date.now(), language: input.language ?? "", charCount: input.snippet.length,
@@ -619,12 +618,22 @@ export async function runSession(
       };
       await addAttempt(context, record);
       await logReview(context, {
-        concepts: record.conceptTags, eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : "check",
-        source: record.source, mode: record.mode, followups: 0, filePath: record.filePath,
-        question: question.question, askedForExplanation: outcome === "explained", judgeConfigId: record.judgeConfigId,
+        eventId: checkId,
+        concepts: record.conceptTags,
+        topic: input.topic,
+        eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : "check",
+        source: record.source,
+        mode: record.mode,
+        shape: input.shape ?? "general",
+        groupId,
+        outcome,
+        followups: 0,
+        filePath: record.filePath,
+        question: question.question,
+        feedback,
+        askedForExplanation: outcome === "explained",
+        judgeConfigId: record.judgeConfigId,
       });
-      // Unscored exits are history, not evidence for updating mastery/recall.
-      await saveDashboard(outcome, null, "", feedback);
     };
     view.showQuestion(question);
     const action = await waitForQuizAction(view);
@@ -706,28 +715,32 @@ export async function runSession(
     };
     await addAttempt(context, record);
     const masteryAfter = ungraded ? undefined : await rememberCheck(context, record);
+    const answer = question.kind === "multiple-choice" ? question.options?.[action.selectedIndex ?? -1] ?? ""
+      : question.kind === "ordering" ? (action.order ?? []).map(i => question.items?.[i] ?? String(i)).join(" → ")
+      : action.answer ?? "";
     await logReview(context, {
+      eventId: checkId,
       concepts: record.conceptTags,
+      topic: input.topic,
       eventKind: "check",
       source: record.source,
-      mode: record.mode,
+      mode: question.kind,
+      shape: input.shape ?? "general",
+      groupId,
+      outcome: ungraded ? "ungraded" : passed ? "pass" : "fail",
       score: ungraded ? undefined : score,
       passed: ungraded ? undefined : passed,
       followups: 0,
       masteryAfter,
       filePath: record.filePath,
       question: question.question,
-      studentAnswer: action.answer,
+      studentAnswer: answer,
+      feedback: ungraded ? "Grader could not decide." : passed ? "Correct." : "Not quite.",
       misconception: passed || ungraded ? "" : misconception,
       askedForExplanation: false,
       explanation: "",
       judgeConfigId: record.judgeConfigId,
     });
-    const answer = question.kind === "multiple-choice" ? question.options?.[action.selectedIndex ?? -1] ?? ""
-      : question.kind === "ordering" ? (action.order ?? []).map(i => question.items?.[i] ?? String(i)).join(" → ")
-      : action.answer ?? "";
-    await saveDashboard(ungraded ? "ungraded" : passed ? "pass" : "fail", ungraded ? null : score,
-      answer, ungraded ? "Grader could not decide." : passed ? "Correct." : "Not quite.", misconception);
     if (!passed) {
       failed = true;
       view.showFeedback({

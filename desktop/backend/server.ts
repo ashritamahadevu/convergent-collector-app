@@ -1,6 +1,6 @@
 import * as http from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { isCheckEvent } from "../../src/dashboard/protocol";
+import { isDashboardEvent } from "../../src/dashboard/protocol";
 import { DashboardDatabase } from "./database";
 
 export async function startDashboardBackend(options: { databasePath: string; token: string; port?: number }) {
@@ -33,6 +33,16 @@ export async function startDashboardBackend(options: { databasePath: string; tok
         if (!["7", "30", "all"].includes(days)) { reply(400, { error: "days must be 7, 30, or all" }); return; }
         reply(200, database.growth(days === "all" ? null : Number(days) as 7 | 30)); return;
       }
+      if (req.method === "GET" && url.pathname === "/v1/mastery") { reply(200, { concepts: database.mastery() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/recall") {
+        const due = url.searchParams.get("due");
+        reply(200, { cards: database.recall(due === "now" ? Date.now() : undefined) }); return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/files") { reply(200, { files: database.files() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/files/edges") { reply(200, { edges: database.edges() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/profile") { reply(200, { profile: database.profile() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/prepsets") { reply(200, { sets: database.prepSets() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/checks") { reply(200, { checks: database.checks() }); return; }
       if (req.method !== "POST" || !["/v1/events", "/v1/heartbeat"].includes(url.pathname)) { reply(404, { error: "Not found" }); return; }
       if (req.headers["content-type"]?.split(";")[0] !== "application/json") { reply(415, { error: "JSON required" }); return; }
       const chunks: Buffer[] = []; let bytes = 0;
@@ -45,7 +55,7 @@ export async function startDashboardBackend(options: { databasePath: string; tok
       try { event = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
       catch { reply(400, { error: "Invalid JSON" }); return; }
       if (url.pathname === "/v1/heartbeat") { lastSeenAt = Date.now(); reply(200, { ok: true }); return; }
-      if (!isCheckEvent(event)) { reply(400, { error: "Invalid check.recorded v1 event" }); return; }
+      if (!isDashboardEvent(event)) { reply(400, { error: "Invalid dashboard v1 event" }); return; }
       try { database.insert(event); }
       catch (e) { if ((e as Error).message.includes("Event ID")) { reply(409, { error: "Event ID conflict" }); return; } throw e; }
       lastSeenAt = Date.now();
@@ -63,8 +73,9 @@ export async function startDashboardBackend(options: { databasePath: string; tok
   } catch (e) { database.close(); throw e; }
   const port = (server.address() as import("node:net").AddressInfo).port;
   return { endpoint: "http://127.0.0.1:" + port, database,
-    close: () => new Promise<void>((resolve, reject) => {
-      server.close(error => { database.close(); error ? reject(error) : resolve(); });
+    close: () => new Promise<void>((resolve) => {
+      try { database.close(); } catch { /* Already closed. */ }
+      server.close(() => resolve());
       server.closeAllConnections();
     }) };
 }

@@ -3,9 +3,10 @@ import type { RecallCard } from "../types";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 
-export function newCard(concept: string, now: number): RecallCard {
+export function newCard(concept: string, now: number, topic?: string): RecallCard {
   return {
     concept,
+    topic,
     ease: 2.5,
     intervalDays: 0,
     repetitions: 0,
@@ -42,6 +43,7 @@ export function reviewCard(card: RecallCard, score: number, now: number): Recall
   const stability = Math.max(1, interval);
   return {
     concept: card.concept,
+    topic: card.topic,
     ease,
     intervalDays: interval,
     repetitions,

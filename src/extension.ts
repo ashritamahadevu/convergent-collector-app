@@ -178,7 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         for (const card of due) {
           const recall = Math.round(retrievability(card, now) * 100);
-          output.appendLine(card.concept + "  recall " + recall + "%  due " + new Date(card.dueAt).toLocaleDateString());
+          output.appendLine((card.topic ?? card.concept) + " (" + card.concept + ")  recall " + recall + "%  due " + new Date(card.dueAt).toLocaleDateString());
         }
       }
       output.show(true);

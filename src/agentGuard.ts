@@ -631,7 +631,7 @@ async function runGeneralReview(
       prepared: questions[index],
       shape: "general",
       groupId,
-      topic: chunks && chunks.length > 0 ? chunks[index]?.unit : undefined,
+      topic: topicOf(chunks?.[index]),
     });
     if (!passed) {
       return;
@@ -694,7 +694,7 @@ async function runChunkReview(
         lock: locks.get(normPath(target.filePath)),
         shape: "chunk",
         groupId,
-        topic: chunks[index]?.unit,
+        topic: topicOf(chunks[index]),
       });
       if (!passed) {
         for (const lock of locks.values()) {
@@ -1192,6 +1192,13 @@ function readPreferences(): LearnerPreferences {
     interviewDate: profile.interviewDate,
     masteryByConcept,
   };
+}
+
+function topicOf(chunk: CodeChunk | undefined): string | undefined {
+  const signature = chunk?.fact.signature?.trim();
+  if (signature) return signature.slice(0, 120);
+  const unit = chunk?.unit?.trim();
+  return unit || undefined;
 }
 
 function languageFromPath(filePath: string): string {

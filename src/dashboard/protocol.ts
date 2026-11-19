@@ -43,6 +43,7 @@ export type MasteryEvent = Envelope & {
 export type RecallEvent = Envelope & {
   type: "recall.updated";
   concept: string;
+  topic?: string;
   ease: number;
   intervalDays: number;
   repetitions: number;
@@ -169,6 +170,7 @@ export function isMasteryEvent(v: unknown): v is MasteryEvent {
 export function isRecallEvent(v: unknown): v is RecallEvent {
   if (!object(v) || v.type !== "recall.updated" || !envelope(v)) return false;
   return str(v.concept, 200) && v.concept.length > 0
+    && (v.topic === undefined || str(v.topic, 200))
     && finite(v.ease) && v.ease > 0
     && Number.isSafeInteger(v.intervalDays) && (v.intervalDays as number) >= 0
     && Number.isSafeInteger(v.repetitions) && (v.repetitions as number) >= 0

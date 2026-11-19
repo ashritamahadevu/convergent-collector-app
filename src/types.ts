@@ -46,6 +46,8 @@ export type AttemptRecord = {
   charCount: number;
   mode: GradingMode;
   conceptTags: string[];
+  /** Specific idea under the concept, such as a function signature. Recall is scheduled on this. */
+  topic?: string;
   criterionResults?: { id: string; verdict: "pass" | "fail" | "n/a" }[];
   passed: boolean;
   outcome?: AttemptOutcome;
@@ -66,7 +68,10 @@ export type ConceptMastery = {
   lastSeen: number;
 };
 export type RecallCard = {
+  /** Parent concept. Mastery stays on this broad tag. */
   concept: string;
+  /** The scheduled leaf. Absent on older cards, which are not offered for recall. */
+  topic?: string;
   ease: number;
   intervalDays: number;
   repetitions: number;

@@ -327,7 +327,7 @@ function parseGeneratedPayload(
   };
 }
 
-function buildGeneratePrompt(
+export function buildGeneratePrompt(
   snippet: string,
   language: string,
   mode: GradingMode | QuestionKind,
@@ -428,7 +428,7 @@ ${code}
 </code>`;
 }
 
-function buildJudgePrompt(
+export function buildJudgePrompt(
   snippet: string,
   language: string,
   question: GeneratedQuestion,

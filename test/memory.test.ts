@@ -93,6 +93,7 @@ test("file understanding decays when recall lapses", () => {
     [{ concept: "routing", mastery: 0.9, elo: 1200, attempts: 3, lastSeen: now }],
     [{
       concept: "routing",
+      topic: "def create_task()",
       ease: 2.5,
       intervalDays: 1,
       repetitions: 2,

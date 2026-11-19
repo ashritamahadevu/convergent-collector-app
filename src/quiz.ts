@@ -218,6 +218,7 @@ async function runComprehensionGateBody(
       appealed: outcome === "disputed",
       source: meta?.source,
       filePath: meta?.filePath,
+      topic: meta?.topic,
       misconceptions: misconceptionsFor({ mode, passed, criterionResults }),
     };
     draft.score = outcome === "ungraded" ? undefined : scoreOverride ?? gradedScore(draft);
@@ -599,6 +600,7 @@ export async function runSession(
     groupId?: string;
     shape?: "general" | "chunk";
     topic?: string;
+    recall?: boolean;
   },
 ): Promise<boolean> {
   if (input.questions.length === 0) {
@@ -615,13 +617,14 @@ export async function runSession(
         mode: question.kind === "multiple-choice" ? "multiple-choice" : "free-text",
         conceptTags: question.conceptTags, passed: false, outcome, followups: 0,
         judgeConfigId: getJudgeConfigId(), source: input.source ?? "walkthrough", filePath: input.filePath,
+        topic: input.topic,
       };
       await addAttempt(context, record);
       await logReview(context, {
         eventId: checkId,
         concepts: record.conceptTags,
         topic: input.topic,
-        eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : "check",
+        eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : input.recall ? "recall" : "check",
         source: record.source,
         mode: record.mode,
         shape: input.shape ?? "general",
@@ -711,6 +714,7 @@ export async function runSession(
       score: ungraded ? undefined : score,
       source: input.source ?? "walkthrough",
       filePath: input.filePath,
+      topic: input.topic,
       misconceptions: misconception ? [misconception] : [],
     };
     await addAttempt(context, record);
@@ -722,7 +726,7 @@ export async function runSession(
       eventId: checkId,
       concepts: record.conceptTags,
       topic: input.topic,
-      eventKind: "check",
+      eventKind: input.recall ? "recall" : "check",
       source: record.source,
       mode: question.kind,
       shape: input.shape ?? "general",

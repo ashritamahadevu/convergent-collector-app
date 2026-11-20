@@ -28,7 +28,7 @@ export function getCards(context: vscode.ExtensionContext): RecallCard[] {
 
 export function dueConcepts(context: vscode.ExtensionContext, now = Date.now()): RecallCard[] {
   return getCards(context)
-    .filter((card) => card.dueAt <= now)
+    .filter((card) => card.topic && card.dueAt <= now)
     .sort((a, b) => a.dueAt - b.dueAt);
 }
 
@@ -111,9 +111,14 @@ export async function rememberCheck(
     }
     queueMastery(context, row);
     await recordMastery(context, row);
+  }
 
-    const card = reviewCard(cards.find((item) => item.concept === concept) ?? newCard(concept, now), score, now);
-    const cardIndex = cards.findIndex((item) => item.concept === concept);
+  const topic = record.topic?.trim();
+  if (topic) {
+    const parent = tags[0] ?? "unspecified";
+    const existing = cards.find((item) => item.topic === topic);
+    const card = reviewCard(existing ?? newCard(parent, now, topic), score, now);
+    const cardIndex = cards.findIndex((item) => item.topic === topic);
     if (cardIndex >= 0) {
       cards[cardIndex] = card;
     } else {
@@ -130,6 +135,7 @@ export async function rememberCheck(
     await markFile(context, {
       path: record.filePath.replace(/\\/g, "/"),
       concepts: tags,
+      topic: record.topic,
       passed: true,
       aiWritten: record.source === "agent",
       updatedAt: now,

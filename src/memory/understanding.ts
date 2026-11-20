@@ -19,7 +19,6 @@ export function fileUnderstanding(
   now: number,
 ): FileUnderstanding[] {
   const byConcept = new Map(mastery.map((row) => [row.concept, row]));
-  const byCard = new Map(cards.map((row) => [row.concept, row]));
   return files.map((file) => {
     const core = file.core !== false;
     if (!core) {
@@ -34,8 +33,10 @@ export function fileUnderstanding(
     }
     const scores = file.concepts.map((concept) => {
       const known = byConcept.get(concept)?.mastery ?? 0;
-      const card = byCard.get(concept);
-      const recall = card ? retrievability(card, now) : 1;
+      const related = cards.filter((card) => card.concept === concept && card.topic);
+      const recall = related.length === 0
+        ? 1
+        : Math.min(...related.map((card) => retrievability(card, now)));
       return known * recall;
     });
     const score = scores.length === 0 ? (file.passed ? 0.5 : 0) : scores.reduce((sum, value) => sum + value, 0) / scores.length;

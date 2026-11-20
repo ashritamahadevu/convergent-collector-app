@@ -148,6 +148,7 @@ export async function recordRecallCard(
   context: vscode.ExtensionContext,
   row: {
     concept: string;
+    topic?: string;
     ease: number;
     intervalDays: number;
     repetitions: number;
@@ -160,7 +161,7 @@ export async function recordRecallCard(
   const event: RecallEvent = {
     schemaVersion: 1,
     type: "recall.updated",
-    eventId: "recall-" + createHash("sha256").update(row.concept).digest("hex").slice(0, 24),
+    eventId: "recall-" + createHash("sha256").update(row.topic || row.concept).digest("hex").slice(0, 24),
     installationId: installationId(context),
     occurredAt: row.lastReview || row.dueAt,
     ...row,

@@ -213,23 +213,50 @@ export async function buildPrepSet(context: vscode.ExtensionContext, kind: "inte
 
 export async function offerLoginRecall(context: vscode.ExtensionContext): Promise<void> {
   const due = dueConcepts(context);
-  if (due.length === 0) {
+  const card = due.find((item) => item.topic);
+  if (!card?.topic) {
     return;
   }
   const choice = await vscode.window.showInformationMessage(
-    "Review " + due[0].concept + "? It is due based on your last check.",
+    "Review " + card.topic + "? It is due based on your last check.",
     "Review",
     "Later",
   );
   if (choice !== "Review") {
     return;
   }
-  await runComprehensionGate(
-    "Login recall with no code shown. Ask the student to explain this concept: " + due[0].concept,
-    context,
-    "",
-    { source: "recall", recall: true },
-  );
+  const snippet = [
+    "Spaced review. No project source is available.",
+    "Topic: " + card.topic,
+    "Parent concept: " + card.concept,
+    "Ask about this specific topic. Do not ask a general question about the parent concept.",
+  ].join("\n");
+  const kinds = ["multiple-choice", "free-text", "ordering"] as const;
+  const built = await Promise.all(kinds.map(async (kind) => {
+    try {
+      return await generateQuestion({
+        context,
+        snippet,
+        language: "",
+        mode: kind === "multiple-choice" ? "multiple-choice" : "free-text",
+        kind,
+      });
+    } catch {
+      return null;
+    }
+  }));
+  const questions = built.filter((question): question is GeneratedQuestion => question !== null);
+  if (questions.length === 0) {
+    void vscode.window.showWarningMessage("Comprehension Guard: could not write the review questions.");
+    return;
+  }
+  await runSession(context, {
+    snippet,
+    questions,
+    source: "recall",
+    topic: card.topic,
+    recall: true,
+  });
 }
 
 export function coreFiles(mapped: ProjectFile[]): ProjectFile[] {

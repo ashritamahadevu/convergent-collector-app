@@ -29,22 +29,15 @@ function event(outcome: ReviewEvent["outcome"] = "pass", score: number | null = 
 }
 async function fixture(t: import("node:test").TestContext) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "drawbridge-test-"));
-  t.after(async () => {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      try {
-        await fs.rm(directory, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
-        await new Promise((resolve) => setTimeout(resolve, 40));
-      }
-    }
-  });
   const databasePath = path.join(directory, "dashboard.sqlite");
   const backend = await startDashboardBackend({ databasePath, token, port: 0 });
   let closed = false;
   const close = async () => { if (!closed) { closed = true; await backend.close(); } };
-  t.after(close);
+  // Windows cannot delete an open SQLite file. Close before removing the fixture.
+  t.after(async () => {
+    await close();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
   const request = (route: string, body?: unknown, override: Record<string, string> = {}) => fetch(backend.endpoint + route, {
     method: body === undefined ? "GET" : "POST", headers: { ...headers, ...override },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -62,8 +55,8 @@ test("local receiver commits before acknowledgement; duplicate retry survives re
   assert.equal((await f.request("/v1/events", conflicting)).status, 409);
   await f.close();
   const restarted = await startDashboardBackend({ databasePath: f.databasePath, token, port: 0 });
-  t.after(() => restarted.close());
-  assert.deepEqual(restarted.database.history(), [e]);
+  try { assert.deepEqual(restarted.database.history(), [e]); }
+  finally { await restarted.close(); }
 });
 
 test("receiver rejects unauthenticated, browser, malformed, oversized, unsupported, and invalid requests", async t => {
@@ -269,6 +262,66 @@ test("ordinary quiz captures scores, walkthrough bypass is unscored, and new que
 async function waitUntil(predicate: () => boolean) {
   const start = Date.now();
   while (!predicate()) { if (Date.now() - start > 2500) throw new Error("Quiz action timed out"); await new Promise(r => setTimeout(r, 5)); }
+}
+
+test("disabled desktop sync does not inspect dashboard storage or disrupt local recording", async () => {
+  resetStub();
+  const context = fakeContext();
+  Object.defineProperty(context, "globalStorageUri", {
+    get() { throw new Error("Desktop storage must not be inspected while sync is off"); },
+  });
+  await recordReview(context as never, {
+    eventId: "disabled-review", timestamp: Date.now(), concepts: [], question: "Local check",
+    answer: "", feedback: "", misconception: "", outcome: "ungraded", score: null,
+    source: "paste", mode: "fallback", retries: 0,
+  });
+  await recordMastery(context as never, {
+    concept: "test", mastery: 0.5, elo: 1000, attempts: 1, lastSeen: Date.now(),
+  });
+  assert.equal(context.store.size, 0);
+});
+
+for (const reason of ["generation failed", "missing-key"]) {
+  for (const action of ["submit", "bypass", "cancel", "explain"] as const) {
+    test("fallback " + reason + " / " + action + " reaches History without a score or mastery update", async t => {
+      const f = await fixture(t); resetStub(); clearQuestionCache();
+      settings.set("comprehensionGuard.desktopSyncEnabled", true);
+      const context = Object.assign(fakeContext(), {
+        globalStorageUri: { fsPath: path.join(f.directory, "extension"), toString: () => "fallback-storage" },
+      });
+      t.after(() => { resetStub(); });
+      const failure = Object.assign(new Error(reason), { code: reason });
+      const gate = runComprehensionGate("function total() { return 6; }", context as never, "javascript", {
+        source: "paste", shape: "general", groupId: "fallback-paste", prepared: Promise.reject(failure),
+      });
+      await waitUntil(() => panels.length === 1); panels[0].fromWebview({ type: "ready" });
+      await waitUntil(() => panels[0].questions().length === 1);
+      assert.match(String(panels[0].questions()[0].questionText), /Local explanation check \(not graded\)/);
+      if (action === "submit") {
+        panels[0].fromWebview({ type: "submit", answer: "Short" });
+        await waitUntil(() => panels[0].feedback().length > 0);
+        assert.equal(panels[0].disposed, false);
+        assert.equal(f.backend.database.history().length, 0);
+      }
+      const answer = action === "submit" ? "This function returns the number six to its caller." : "";
+      panels[0].fromWebview({ type: action, answer });
+      assert.equal(await gate, action !== "cancel");
+      const box = new DashboardOutbox(path.join(context.globalStorageUri.fsPath, "dashboard-outbox"));
+      await box.flush(async () => ({ endpoint: f.backend.endpoint, token }));
+      const history = f.backend.database.history();
+      assert.equal(history.length, 1);
+      assert.equal(history[0].mode, "fallback");
+      assert.equal(history[0].outcome, action === "submit" || action === "cancel" ? "ungraded" : action === "explain" ? "explained" : "bypass");
+      assert.equal(history[0].score, null);
+      assert.equal(history[0].answer, answer);
+      assert.equal(history[0].source, "paste");
+      assert.equal(history[0].groupId, "fallback-paste");
+      assert.equal(context.store.get("comprehensionGuard.conceptMastery"), undefined);
+      assert.equal(f.backend.database.growth(null).completedChecks, 0);
+      assert.equal((await box.quarantined()).length, 0);
+      panels[0].dispose();
+    });
+  }
 }
 
 async function captureFixture(t: import("node:test").TestContext, first: GeneratedQuestion) {

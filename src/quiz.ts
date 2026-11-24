@@ -157,7 +157,7 @@ async function runComprehensionGateBody(
         "Comprehension Guard: could not generate a question (" + reason.slice(0, 120) + "). A short explanation check is open instead.",
       );
     }
-    return fallbackGate(snippet, language, context.extensionUri, view, nextAction);
+    return fallbackGate(snippet, language, context.extensionUri, view, nextAction, context, meta);
   }
 
   let question = raced.question;
@@ -873,13 +873,42 @@ async function fallbackGate(
   extensionUri?: vscode.Uri,
   existing?: QuizView,
   pending?: Promise<QuizAction>,
+  context?: vscode.ExtensionContext,
+  meta?: GateMeta,
 ): Promise<boolean> {
   const minAnswerLength = getMinAnswerLength();
   const view = existing ?? createQuizPanel(snippet, language ?? "", extensionUri);
   let usePending = pending !== undefined;
+  const prompt = "Local explanation check (not graded): What does this code do? Explain it in your own words to insert it.";
+  const recordFallback = async (
+    outcome: "ungraded" | "bypass" | "explained",
+    answer: string,
+    feedback: string,
+  ): Promise<void> => {
+    if (!context) return;
+    // A length check is not evidence of correctness. Preserve it in History
+    // without updating mastery, recall, or scored-attempt statistics.
+    await logReview(context, {
+      eventId: newDashboardCheckId(),
+      concepts: [],
+      topic: meta?.topic,
+      eventKind: outcome === "bypass" ? "bypass" : outcome === "explained" ? "explain" : "check",
+      source: meta?.source,
+      mode: "fallback",
+      shape: meta?.shape,
+      groupId: meta?.groupId,
+      outcome,
+      followups: 0,
+      filePath: meta?.filePath,
+      question: prompt,
+      studentAnswer: answer,
+      feedback,
+      askedForExplanation: outcome === "explained",
+    });
+  };
   view.showQuestion({
     kind: "free-text",
-    question: "What does this code do? Explain it in your own words to insert it.",
+    question: prompt,
     referenceAnswer: "",
     criteria: [],
     conceptTags: [],
@@ -891,6 +920,7 @@ async function fallbackGate(
     usePending = false;
 
     if (payload.type === "explain") {
+      await recordFallback("explained", "", "Explanation requested during an ungraded local check. No model explanation was available.");
       view.showFeedback({
         message: "No model explanation is available for this check. The code stays.",
         explained: true,
@@ -903,6 +933,7 @@ async function fallbackGate(
     }
 
     if (payload.type === "bypass") {
+      await recordFallback("bypass", "", "Local explanation check bypassed; no assessment score.");
       view.close();
       vscode.window.setStatusBarMessage(
         "Comprehension Guard: bypassed. The code stays and is not counted as correct.",
@@ -919,6 +950,7 @@ async function fallbackGate(
     }
 
     if (payload.type === "cancel") {
+      await recordFallback("ungraded", "", "Local explanation check closed before submission; no assessment score.");
       view.close();
       vscode.window.setStatusBarMessage(
         "Comprehension Guard: quiz closed. The code was removed.",
@@ -938,6 +970,11 @@ async function fallbackGate(
       continue;
     }
 
+    await recordFallback("ungraded", answer, "Explanation accepted by the local length check. No model graded this answer; no assessment score.");
+    vscode.window.setStatusBarMessage(
+      "Comprehension Guard: explanation accepted without model grading. Saved as an unscored local check; desktop delivery requires Desktop Sync.",
+      10000,
+    );
     view.close();
     return true;
   }

@@ -8,7 +8,7 @@ import {
   nextMastery,
 } from "./bkt";
 import { newCard, reviewCard } from "./scheduler";
-import { recordFile, recordMastery, recordProfile, recordRecallCard, recordReview } from "../dashboard/service";
+import { recordFile, recordMastery, recordProfile, recordRecallCard, recordReview, recordSettings } from "../dashboard/service";
 import { queueCard, queueFileKnowledge, queueMastery, queueProfile, queueReview } from "./sync";
 
 const MASTERY_KEY = "comprehensionGuard.conceptMastery";
@@ -66,10 +66,13 @@ export function getProfile(context: vscode.ExtensionContext) {
 export async function saveProfile(
   context: vscode.ExtensionContext,
   profile: { examDate?: string; interviewDate?: string; preferredLanguage?: string; strictness?: string },
+  syncDesktop = true,
 ): Promise<void> {
   await context.globalState.update(PROFILE_KEY, profile);
   queueProfile(context, profile);
+  if (!syncDesktop) return;
   await recordProfile(context, profile);
+  await recordSettings(context);
 }
 
 /**

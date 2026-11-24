@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { DashboardOutbox } from "./outbox";
 import {
   isRelativePath,
+  isSettingsEvent,
   localEndpoint,
   type CheckOutcome,
   type CheckShape,
@@ -17,13 +18,17 @@ import {
   type ProfileEvent,
   type RecallEvent,
   type ReviewEvent,
+  type SettingsEvent,
 } from "./protocol";
 
 const SECRET = "comprehensionGuard.desktopToken";
 const ENDPOINT = "comprehensionGuard.desktopEndpoint";
 const LAST_SYNC = "comprehensionGuard.desktopLastSyncedAt";
+const SETTINGS_AT = "comprehensionGuard.desktopSettingsUpdatedAt";
+const PROFILE_KEY = "comprehensionGuard.profile";
 const services = new WeakMap<vscode.ExtensionContext, DashboardOutbox>();
 const enabled = () => vscode.workspace.getConfiguration("comprehensionGuard").get<boolean>("desktopSyncEnabled", false);
+let suppressSettingsPush = false;
 
 function outbox(context: vscode.ExtensionContext): DashboardOutbox {
   let result = services.get(context);
@@ -43,6 +48,7 @@ async function flush(context: vscode.ExtensionContext): Promise<void> {
   const box = outbox(context);
   await box.flush(() => connection(context));
   if (box.lastSyncedAt !== null) await context.globalState.update(LAST_SYNC, box.lastSyncedAt);
+  await pullSettings(context);
 }
 
 function installationId(context: vscode.ExtensionContext): string {
@@ -250,6 +256,122 @@ export async function recordProfile(
   await enqueueDashboard(context, event);
 }
 
+type LearnerProfile = { examDate?: string; interviewDate?: string; preferredLanguage?: string; strictness?: string };
+
+function readProfile(context: vscode.ExtensionContext): LearnerProfile {
+  const raw = context.globalState.get<unknown>(PROFILE_KEY);
+  return raw && typeof raw === "object" ? raw as LearnerProfile : {};
+}
+
+function settingsSnapshot(context: vscode.ExtensionContext, updatedAt = Date.now()): SettingsEvent {
+  const config = vscode.workspace.getConfiguration("comprehensionGuard");
+  const profile = readProfile(context);
+  return {
+    schemaVersion: 1,
+    type: "settings.updated",
+    eventId: "settings",
+    installationId: installationId(context),
+    occurredAt: updatedAt,
+    updatedAt,
+    enabled: config.get<boolean>("enabled", true) ?? true,
+    charThreshold: config.get<number>("charThreshold", 200) ?? 200,
+    minAnswerLength: config.get<number>("minAnswerLength", 15) ?? 15,
+    provider: config.get<string>("provider", "openai") ?? "openai",
+    model: config.get<string>("model", "") ?? "",
+    gradingMode: config.get<string>("gradingMode", "free-text") ?? "free-text",
+    nonCriticalPassFraction: config.get<number>("nonCriticalPassFraction", 0.5) ?? 0.5,
+    mode: config.get<string>("mode", "auto") ?? "auto",
+    walkthroughFileThreshold: config.get<number>("walkthroughFileThreshold", 7) ?? 7,
+    walkthroughLineThreshold: config.get<number>("walkthroughLineThreshold", 500) ?? 500,
+    maxFollowups: config.get<number>("maxFollowups", 3) ?? 3,
+    agentPause: config.get<boolean>("agentPause", true) ?? true,
+    checkPreset: config.get<string>("checkPreset", "standard") ?? "standard",
+    preferredLanguage: config.get<string>("preferredLanguage", "") ?? "",
+    strictness: config.get<string>("strictness", "standard") || "standard",
+    examDate: profile.examDate ?? "",
+    interviewDate: profile.interviewDate ?? "",
+  };
+}
+
+/** Push the current VS Code settings and profile dates. No-ops while a desktop bag is being applied. */
+export async function recordSettings(context: vscode.ExtensionContext): Promise<void> {
+  if (suppressSettingsPush || !enabled() || vscode.env.remoteName) return;
+  const event = settingsSnapshot(context);
+  if (!isSettingsEvent(event)) return;
+  await context.globalState.update(SETTINGS_AT, event.updatedAt);
+  await enqueueDashboard(context, event);
+}
+
+async function pushLocalSettings(context: vscode.ExtensionContext): Promise<void> {
+  if (suppressSettingsPush || !enabled() || vscode.env.remoteName) return;
+  const profile = readProfile(context);
+  const config = vscode.workspace.getConfiguration("comprehensionGuard");
+  const { saveProfile } = await import("../memory/remember.js");
+  if (suppressSettingsPush) return;
+  await saveProfile(context, {
+    examDate: profile.examDate ?? "",
+    interviewDate: profile.interviewDate ?? "",
+    preferredLanguage: config.get<string>("preferredLanguage", "") ?? "",
+    strictness: config.get<string>("strictness", "standard") || "standard",
+  });
+}
+
+async function applyRemoteSettings(context: vscode.ExtensionContext, event: SettingsEvent): Promise<void> {
+  suppressSettingsPush = true;
+  try {
+    const config = vscode.workspace.getConfiguration("comprehensionGuard");
+    const target = vscode.ConfigurationTarget.Global;
+    const fields: [string, string | number | boolean][] = [
+      ["enabled", event.enabled],
+      ["charThreshold", event.charThreshold],
+      ["minAnswerLength", event.minAnswerLength],
+      ["provider", event.provider],
+      ["model", event.model],
+      ["gradingMode", event.gradingMode],
+      ["nonCriticalPassFraction", event.nonCriticalPassFraction],
+      ["mode", event.mode],
+      ["walkthroughFileThreshold", event.walkthroughFileThreshold],
+      ["walkthroughLineThreshold", event.walkthroughLineThreshold],
+      ["maxFollowups", event.maxFollowups],
+      ["agentPause", event.agentPause],
+      ["checkPreset", event.checkPreset],
+      ["preferredLanguage", event.preferredLanguage],
+      ["strictness", event.strictness],
+    ];
+    for (const [key, value] of fields) await config.update(key, value, target);
+    const { saveProfile } = await import("../memory/remember.js");
+    await saveProfile(context, {
+      examDate: event.examDate,
+      interviewDate: event.interviewDate,
+      preferredLanguage: event.preferredLanguage,
+      strictness: event.strictness,
+    }, false);
+    await context.globalState.update(SETTINGS_AT, event.updatedAt);
+  } finally {
+    suppressSettingsPush = false;
+  }
+}
+
+async function pullSettings(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const link = await connection(context);
+    if (!link) return;
+    const response = await fetch(localEndpoint(link.endpoint) + "/v1/settings", {
+      headers: { Authorization: "Bearer " + link.token },
+      redirect: "error",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return;
+    const body = await response.json() as { settings?: unknown };
+    if (body.settings == null || !isSettingsEvent(body.settings)) return;
+    const applied = context.globalState.get<number>(SETTINGS_AT) ?? 0;
+    if (body.settings.updatedAt <= applied) return;
+    await applyRemoteSettings(context, body.settings);
+  } catch {
+    // Keep the local values. The next flush tries again.
+  }
+}
+
 export async function recordPrepSet(
   context: vscode.ExtensionContext,
   kind: "interview" | "exam",
@@ -279,7 +401,14 @@ export function registerDashboardSync(context: vscode.ExtensionContext): void {
   const timer = setInterval(retry, 15000);
   context.subscriptions.push({ dispose: () => clearInterval(timer) });
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
-    if (e.affectsConfiguration("comprehensionGuard.desktopSyncEnabled")) retry();
+    if (suppressSettingsPush) return;
+    const changed = e.affectsConfiguration("comprehensionGuard");
+    const syncToggle = e.affectsConfiguration("comprehensionGuard.desktopSyncEnabled");
+    if (!changed && !syncToggle) return;
+    void (async () => {
+      if (changed) await pushLocalSettings(context);
+      if (syncToggle) retry();
+    })();
   }));
   context.subscriptions.push(vscode.commands.registerCommand("comprehensionGuard.connectDesktop", async () => {
     if (vscode.env.remoteName) { void vscode.window.showWarningMessage("Desktop sync currently supports local VS Code windows only."); return; }

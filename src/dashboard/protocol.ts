@@ -95,6 +95,29 @@ export type PrepSetEvent = Envelope & {
   questions: PrepQuestion[];
 };
 
+/** Student-facing settings only. API keys and the desktop-sync toggle stay on the machine. */
+export type SettingsEvent = Envelope & {
+  type: "settings.updated";
+  updatedAt: number;
+  enabled: boolean;
+  charThreshold: number;
+  minAnswerLength: number;
+  provider: string;
+  model: string;
+  gradingMode: string;
+  nonCriticalPassFraction: number;
+  mode: string;
+  walkthroughFileThreshold: number;
+  walkthroughLineThreshold: number;
+  maxFollowups: number;
+  agentPause: boolean;
+  checkPreset: string;
+  preferredLanguage: string;
+  strictness: string;
+  examDate: string;
+  interviewDate: string;
+};
+
 export type DashboardEvent =
   | ReviewEvent
   | MasteryEvent
@@ -102,10 +125,16 @@ export type DashboardEvent =
   | FileEvent
   | FileEdgesEvent
   | ProfileEvent
-  | PrepSetEvent;
+  | PrepSetEvent
+  | SettingsEvent;
 
 const outcomes = new Set(["pass", "fail", "bypass", "explained", "disputed", "ungraded"]);
 const shapes = new Set(["general", "chunk"]);
+const providers = new Set(["openai", "anthropic", "gemini", "ollama", "claude-cli", "cursor-cli", "codex-cli", "gemini-cli", "copilot-cli"]);
+const gradingModes = new Set(["free-text", "multiple-choice"]);
+const modes = new Set(["auto", "learn", "walkthrough"]);
+const presets = new Set(["quick", "standard", "deep"]);
+const strictnessLevels = new Set(["lenient", "standard", "strict"]);
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -221,6 +250,31 @@ export function isPrepSetEvent(v: unknown): v is PrepSetEvent {
   );
 }
 
+function atLeast(v: unknown, min: number): v is number {
+  return finite(v) && v >= min;
+}
+
+export function isSettingsEvent(v: unknown): v is SettingsEvent {
+  if (!object(v) || v.type !== "settings.updated" || !envelope(v) || !stamp(v.updatedAt)) return false;
+  return typeof v.enabled === "boolean"
+    && atLeast(v.charThreshold, 1)
+    && atLeast(v.minAnswerLength, 0)
+    && typeof v.provider === "string" && providers.has(v.provider)
+    && str(v.model, 200)
+    && typeof v.gradingMode === "string" && gradingModes.has(v.gradingMode)
+    && unit(v.nonCriticalPassFraction)
+    && typeof v.mode === "string" && modes.has(v.mode)
+    && atLeast(v.walkthroughFileThreshold, 2)
+    && atLeast(v.walkthroughLineThreshold, 1)
+    && atLeast(v.maxFollowups, 1)
+    && typeof v.agentPause === "boolean"
+    && typeof v.checkPreset === "string" && presets.has(v.checkPreset)
+    && str(v.preferredLanguage, 200)
+    && typeof v.strictness === "string" && strictnessLevels.has(v.strictness)
+    && str(v.examDate, 200)
+    && str(v.interviewDate, 200);
+}
+
 export function isDashboardEvent(v: unknown): v is DashboardEvent {
   return isReviewEvent(v)
     || isMasteryEvent(v)
@@ -228,7 +282,8 @@ export function isDashboardEvent(v: unknown): v is DashboardEvent {
     || isFileEvent(v)
     || isFileEdgesEvent(v)
     || isProfileEvent(v)
-    || isPrepSetEvent(v);
+    || isPrepSetEvent(v)
+    || isSettingsEvent(v);
 }
 
 export function localEndpoint(value: string): string {

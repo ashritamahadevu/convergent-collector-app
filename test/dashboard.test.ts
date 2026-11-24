@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { startDashboardBackend } from "../desktop/backend/server";
 import { DashboardOutbox } from "../src/dashboard/outbox";
 import { isReviewEvent, localEndpoint, type ReviewEvent } from "../src/dashboard/protocol";
-import { recordMastery, recordReview } from "../src/dashboard/service";
+import { recordMastery, recordReview, registerDashboardSync } from "../src/dashboard/service";
 import { settings, panels, resetStub, window as vscodeWindow, Position } from "./network/vscodeStub";
 import { fakeContext, MCQ_QUESTION, FREE_TEXT_QUESTION, judgeJson } from "./network/harness";
 import { clearQuestionCache } from "../src/llm";
@@ -497,4 +497,79 @@ test("mastery keeps the newer row, edges replace a file, and a group reports cov
   const grouped = (await (await f.request("/v1/checks")).json() as { checks: { groupId: string; asked: number; passed: number }[] }).checks;
   const row = grouped.find(item => item.groupId === group);
   assert.equal(row?.asked, 2); assert.equal(row?.passed, 1);
+});
+
+function settingsEvent(updatedAt: number, patch: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1, type: "settings.updated", eventId: "settings", installationId: "test-install",
+    occurredAt: updatedAt, updatedAt, enabled: true, charThreshold: 200, minAnswerLength: 15,
+    provider: "openai", model: "", gradingMode: "free-text", nonCriticalPassFraction: 0.5,
+    mode: "auto", walkthroughFileThreshold: 7, walkthroughLineThreshold: 500, maxFollowups: 3,
+    agentPause: true, checkPreset: "standard", preferredLanguage: "", strictness: "standard",
+    examDate: "", interviewDate: "", ...patch,
+  };
+}
+
+test("settings keep the newest bag and reject an invalid preset or threshold", async t => {
+  const f = await fixture(t);
+  assert.deepEqual(await (await f.request("/v1/settings")).json(), { settings: null });
+  const invalidPreset = settingsEvent(1000, { checkPreset: "ultra" });
+  const invalidThreshold = settingsEvent(1000, { charThreshold: 0 });
+  assert.equal((await f.request("/v1/events", invalidPreset)).status, 400);
+  assert.equal((await f.request("/v1/events", invalidThreshold)).status, 400);
+  assert.equal(f.backend.database.settings(), null);
+  const newer = settingsEvent(2000, { charThreshold: 80, checkPreset: "deep" });
+  const older = settingsEvent(1000, { charThreshold: 9, checkPreset: "quick" });
+  assert.equal((await f.request("/v1/events", newer)).status, 200);
+  assert.equal((await f.request("/v1/events", older)).status, 200);
+  const body = await (await f.request("/v1/settings")).json() as { settings: { updatedAt: number; charThreshold: number; checkPreset: string } };
+  assert.equal(body.settings.updatedAt, 2000);
+  assert.equal(body.settings.charThreshold, 80);
+  assert.equal(body.settings.checkPreset, "deep");
+});
+
+test("extension applies a newer desktop settings bag without echoing it", async t => {
+  const f = await fixture(t);
+  resetStub();
+  const subscriptions: { dispose(): void }[] = [];
+  t.after(() => { for (const item of subscriptions) item.dispose(); resetStub(); });
+  const stored = settingsEvent(5_000_000_000_000, {
+    charThreshold: 80, checkPreset: "deep", strictness: "strict",
+    preferredLanguage: "python", examDate: "2026-12-01", model: "claude-sonnet",
+  });
+  assert.equal((await f.request("/v1/events", stored)).status, 200);
+  const storage = path.join(f.directory, "extension");
+  const store = new Map<string, unknown>();
+  store.set("comprehensionGuard.desktopEndpoint", f.backend.endpoint);
+  settings.set("comprehensionGuard.desktopSyncEnabled", true);
+  settings.set("comprehensionGuard.checkPreset", "quick");
+  settings.set("comprehensionGuard.charThreshold", 200);
+  const context = {
+    subscriptions,
+    globalStorageUri: { fsPath: storage, toString: () => storage },
+    globalState: {
+      get: (key: string, fallback?: unknown) => store.has(key) ? store.get(key) : fallback,
+      update: async (key: string, value: unknown) => { store.set(key, value); },
+    },
+    secrets: { get: async (key: string) => key === "comprehensionGuard.desktopToken" ? token : undefined },
+  };
+  registerDashboardSync(context as never);
+  const start = Date.now();
+  while (settings.get("comprehensionGuard.checkPreset") !== "deep" || store.get("comprehensionGuard.profile") == null) {
+    if (Date.now() - start > 2000) throw new Error("Desktop settings were not applied");
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(settings.get("comprehensionGuard.charThreshold"), 80);
+  assert.equal(settings.get("comprehensionGuard.model"), "claude-sonnet");
+  assert.equal(settings.get("comprehensionGuard.strictness"), "strict");
+  assert.equal(settings.get("comprehensionGuard.preferredLanguage"), "python");
+  assert.equal(settings.get("comprehensionGuard.desktopSyncEnabled"), true);
+  const profile = store.get("comprehensionGuard.profile") as { examDate?: string; strictness?: string; preferredLanguage?: string };
+  assert.equal(profile.examDate, "2026-12-01");
+  assert.equal(profile.strictness, "strict");
+  assert.equal(profile.preferredLanguage, "python");
+  let pending: string[] = [];
+  try { pending = await fs.readdir(path.join(storage, "dashboard-outbox")); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+  assert.deepEqual(pending.filter(name => name.endsWith(".json")), []);
 });

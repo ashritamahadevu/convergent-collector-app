@@ -7,6 +7,7 @@ import {
   isProfileEvent,
   isRecallEvent,
   isReviewEvent,
+  isSettingsEvent,
   type DashboardEvent,
   type ReviewEvent,
 } from "../../src/dashboard/protocol";
@@ -45,7 +46,9 @@ export class DashboardDatabase {
         installation_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, event_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS prep_sets (
         event_id TEXT PRIMARY KEY, occurred_at INTEGER NOT NULL, event_json TEXT NOT NULL);
-      PRAGMA user_version=2;`);
+      CREATE TABLE IF NOT EXISTS settings (
+        installation_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, event_json TEXT NOT NULL);
+      PRAGMA user_version=3;`);
   }
 
   insert(event: DashboardEvent): void {
@@ -57,6 +60,7 @@ export class DashboardDatabase {
     else if (isFileEdgesEvent(event)) this.replaceEdges(event);
     else if (isProfileEvent(event)) this.upsertProfile(event);
     else if (isPrepSetEvent(event)) this.insertPrep(event);
+    else if (isSettingsEvent(event)) this.upsertSettings(event);
     else throw new Error("Invalid event");
   }
 
@@ -98,6 +102,14 @@ export class DashboardDatabase {
     this.db.prepare(`INSERT INTO profiles (installation_id, updated_at, event_json) VALUES (?, ?, ?)
       ON CONFLICT(installation_id) DO UPDATE SET updated_at=excluded.updated_at, event_json=excluded.event_json`)
       .run(event.installationId, event.occurredAt, JSON.stringify(event));
+  }
+
+  private upsertSettings(event: Extract<DashboardEvent, { type: "settings.updated" }>): void {
+    const old = this.db.prepare("SELECT updated_at AS stamp FROM settings WHERE installation_id=?").get(event.installationId);
+    if (old && Number(old.stamp) > event.updatedAt) return;
+    this.db.prepare(`INSERT INTO settings (installation_id, updated_at, event_json) VALUES (?, ?, ?)
+      ON CONFLICT(installation_id) DO UPDATE SET updated_at=excluded.updated_at, event_json=excluded.event_json`)
+      .run(event.installationId, event.updatedAt, JSON.stringify(event));
   }
 
   private insertPrep(event: Extract<DashboardEvent, { type: "prepset.created" }>): void {
@@ -145,6 +157,10 @@ export class DashboardDatabase {
     return row ? JSON.parse(row.event_json as string) : null;
   }
   prepSets(): unknown[] { return this.rows("prep_sets"); }
+  settings(): unknown | null {
+    const row = this.db.prepare("SELECT event_json FROM settings LIMIT 1").get();
+    return row ? JSON.parse(row.event_json as string) : null;
+  }
 
   /** Questions from one edit, with how many graded answers passed. */
   checks(): { groupId: string; asked: number; passed: number; filePath: string | null }[] {

@@ -40,6 +40,8 @@ export const OverviewRulerLane = { Left: 1, Center: 2, Right: 4, Full: 7 };
 
 /** "section.key" -> value. Tests set this directly. */
 export const settings = new Map<string, unknown>();
+type ConfigListener = (event: { affectsConfiguration(section: string): boolean }) => void;
+const configListeners = new Set<ConfigListener>();
 export const statusMessages: string[] = [];
 export const infoMessages: string[] = [];
 export const warnMessages: string[] = [];
@@ -53,14 +55,20 @@ export const workspace = {
         return (settings.has(full) ? settings.get(full) : fallback) as T;
       },
       async update(key: string, value: unknown): Promise<void> {
-        settings.set(section + "." + key, value);
+        const full = section + "." + key;
+        settings.set(full, value);
+        const event = { affectsConfiguration: (part: string) => full === part || full.startsWith(part + ".") };
+        for (const listener of [...configListeners]) listener(event);
       },
     };
   },
   onDidChangeTextDocument: () => ({ dispose() {} }),
   onDidOpenTextDocument: () => ({ dispose() {} }),
   onDidSaveTextDocument: () => ({ dispose() {} }),
-  onDidChangeConfiguration: () => ({ dispose() {} }),
+  onDidChangeConfiguration(listener: ConfigListener) {
+    configListeners.add(listener);
+    return { dispose: () => { configListeners.delete(listener); } };
+  },
   textDocuments: [] as unknown[],
   workspaceFolders: undefined as unknown,
 };
@@ -166,6 +174,7 @@ export const Uri = {
 
 export function resetStub(): void {
   settings.clear();
+  configListeners.clear();
   statusMessages.length = 0;
   infoMessages.length = 0;
   warnMessages.length = 0;

@@ -4,7 +4,7 @@
 
 The extension produces records; the desktop backend receives and stores them. Being in the same Git repository shares source code, not running application memory.
 
-This version supports History, Growth, connection status, concept mastery, recall cards, file knowledge, related-file edges, profiles, and prep sets. History is one `review.recorded` row per question. Questions from the same edit share a `groupId`; `GET /v1/checks` reports how many graded questions in that group passed. A check is `general` (one question about the whole change) or `chunk` (one question per planned unit). The separate `checks` table is gone.
+This version supports History, Growth, connection status, concept mastery, recall cards, file knowledge, related-file edges, profiles, prep sets, and shared student settings. History is one `review.recorded` row per question. Questions from the same edit share a `groupId`; `GET /v1/checks` reports how many graded questions in that group passed. A check is `general` (one question about the whole change) or `chunk` (one question per planned unit). The separate `checks` table is gone.
 
 File edges are best-effort. A link is stored only when both files were analyzed in the same batch, and it means "related," not a precise call graph.
 
@@ -53,7 +53,7 @@ Every endpoint requires `Authorization: Bearer <pairing-token>`. Browser-origin 
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/events` | Validate and commit one dashboard v1 event (`review.recorded`, `mastery.updated`, `recall.updated`, `file.updated`, `file.edges`, `profile.updated`, `prepset.created`), then acknowledge its `eventId` |
+| `POST /v1/events` | Validate and commit one dashboard v1 event (`review.recorded`, `mastery.updated`, `recall.updated`, `file.updated`, `file.edges`, `profile.updated`, `prepset.created`, `settings.updated`), then acknowledge its `eventId` |
 | `POST /v1/heartbeat` | Update extension last-seen time |
 | `GET /v1/history?limit=50&offset=0` | Newest review rows first; page size 1–200 |
 | `GET /v1/growth?days=7` | Raw score points, average out of five, counts, plus a first-try (`retries = 0`) average; accepts `7`, `30`, `all` |
@@ -64,6 +64,7 @@ Every endpoint requires `Authorization: Bearer <pairing-token>`. Browser-origin 
 | `GET /v1/files/edges` | Best-effort related-file links |
 | `GET /v1/profile` | Latest learner profile |
 | `GET /v1/prepsets` | Saved interview and exam question sets |
+| `GET /v1/settings` | `{ settings }` newest bag, or `{ settings: null }` |
 | `GET /v1/status` | Extension recently seen, last seen, last received review |
 
 Example read without printing the token:
@@ -78,9 +79,15 @@ The extension writes one atomic JSON file per event under its `globalStorageUri/
 
 Corrupt JSON, invalid schemas, permanent per-event HTTP rejections (400/409/413/415/422), and mismatching acknowledgements are moved to `dashboard-outbox/quarantine` with a reason sidecar; the flush continues with later records. Original event bytes are retained and unique quarantine filenames prevent overwriting rejected versions. The **Desktop Sync Status** command lists the quarantine directory, filenames (up to five), reasons, and total count, including after a restart. Quarantined files are not retried automatically. After diagnosing the reason, manually repair/requeue a copy with a fresh event ID when appropriate; leave the quarantined original for inspection. Delivery is background work; local storage failures show a warning without changing the gate result.
 
-Review rows and prep sets use `event_id` as their primary key. Re-delivering an identical event is acknowledged without duplication; reusing the ID with different content returns 409. Mastery, recall, file knowledge, and profile rows keep the newest timestamp for that concept, path, or installation. A file-edge event replaces that file's previous links. Acknowledgement happens only after the write commits. Receiver history survives restarts. A heartbeat marks an extension as connected for 45 seconds; it is distinct from successfully syncing a review. Last-sync time is persisted separately.
+Review rows and prep sets use `event_id` as their primary key. Re-delivering an identical event is acknowledged without duplication; reusing the ID with different content returns 409. Mastery, recall, file knowledge, and profile rows keep the newest timestamp for that concept, path, or installation. A settings row keeps the newest `updatedAt` for that installation; an older settings event is ignored. A file-edge event replaces that file's previous links. Acknowledgement happens only after the write commits. Receiver history survives restarts. A heartbeat marks an extension as connected for 45 seconds; it is distinct from successfully syncing a review. Last-sync time is persisted separately.
 
 The extension stores the pairing token in VS Code SecretStorage. Do not expose it to the renderer or commit it. When adding Electron, run the backend in the main process with an explicit `databasePath` under `app.getPath("userData")`, after verifying the selected Electron runtime supports `node:sqlite`. Alternatively keep this as a Node backend process. Expose narrow history/growth/status methods through a preload bridge; the UI should not receive filesystem or token access. Choose one backend owner so Electron and the standalone development server do not compete for the same port.
+
+## Settings
+
+`settings.updated` is one bag, and the newest `updatedAt` wins. The extension sends it when a `comprehensionGuard` setting changes, when the profile is saved, and when desktop sync is turned on. The same 15-second flush reads `GET /v1/settings`. A newer bag is written into global VS Code settings and the local profile, and that write is not sent back.
+
+The bag contains `enabled`, `charThreshold`, `minAnswerLength`, `provider`, `model`, `gradingMode`, `nonCriticalPassFraction`, `mode`, `walkthroughFileThreshold`, `walkthroughLineThreshold`, `maxFollowups`, `agentPause`, `checkPreset`, `preferredLanguage`, `strictness`, `examDate`, and `interviewDate`. Values use the same enums and ranges as the extension settings. API keys, `supabaseUrl`, `supabaseAnonKey`, `misgradeReportUrl`, and `desktopSyncEnabled` are not in the bag.
 
 ## Score and count definitions
 

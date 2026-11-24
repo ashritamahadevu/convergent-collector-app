@@ -98,6 +98,7 @@ export async function recordReview(
     masteryAfter?: number;
   },
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const project = projectOf(input.filePath);
   const event: ReviewEvent = {
     schemaVersion: 1,
@@ -129,6 +130,7 @@ export async function recordMastery(
   context: vscode.ExtensionContext,
   row: { concept: string; mastery: number; elo: number; attempts: number; lastSeen: number },
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const event: MasteryEvent = {
     schemaVersion: 1,
     type: "mastery.updated",
@@ -158,6 +160,7 @@ export async function recordRecallCard(
     lastReview: number;
   },
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const event: RecallEvent = {
     schemaVersion: 1,
     type: "recall.updated",
@@ -183,6 +186,7 @@ export async function recordFile(
     updatedAt: number;
   },
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const relative = projectOf(row.path).relative;
   if (!relative) return;
   const event: FileEvent = {
@@ -209,6 +213,7 @@ export async function recordFileEdges(
   fromPath: string,
   edges: { toPath: string; kind: "call" | "import" }[],
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const from = projectOf(fromPath).relative;
   if (!from) return;
   const mapped = edges
@@ -230,6 +235,7 @@ export async function recordProfile(
   context: vscode.ExtensionContext,
   row: { examDate?: string; interviewDate?: string; preferredLanguage?: string; strictness?: string },
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const event: ProfileEvent = {
     schemaVersion: 1,
     type: "profile.updated",
@@ -250,6 +256,7 @@ export async function recordPrepSet(
   project: string,
   questions: PrepQuestion[],
 ): Promise<void> {
+  if (!enabled() || vscode.env.remoteName) return;
   const safe = questions
     .map((item) => ({ ...item, path: projectOf(item.path).relative ?? "" }))
     .filter((item) => isRelativePath(item.path));

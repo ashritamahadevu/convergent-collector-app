@@ -10,6 +10,8 @@ File edges are best-effort. A link is stored only when both files were analyzed 
 
 Deferred: accounts and cloud sync. Existing Supabase code stays in the extension but is not required; the same payloads are also written to this local backend. The dashboard cannot automatically access VS Code's internal state. Only newly captured, opted-in records are sent; no historical backfill.
 
+When question generation fails or a provider key is missing, the local explanation-length fallback is explicitly labeled as ungraded. Submitting a sufficient explanation records an ungraded review with a null score before closing the panel; bypass, explanation and cancellation exits are recorded too. These fallback reviews do not update mastery, recall or scored-attempt statistics. They use the same desktop opt-in and delivery queue as model-backed reviews.
+
 After merging the newer agent-pause flow, locally scored pause questions also emit check records. That local picker currently returns only pass/fail/bypass, so its selected-answer text is empty and its retry count is unavailable (zero). Its ordering score is binary (0 or 1); partial ordering credit is not preserved on that local-picker path. Model-backed pause questions use the ordinary session recorder. Follow-up questions get separate event IDs. A failed question is recorded before a successfully generated replacement is installed; a generation failure leaves the current question open rather than finalizing it twice.
 
 ## First local run
@@ -43,7 +45,7 @@ Launch the extension using the repository's VS Code Extension Development Host c
 
 Desktop sync is off by default. Disable **Comprehension Guard: Desktop Sync Enabled** in user settings to stop new capture and pause pending delivery. Pending files are retained; re-enabling sends them. A request already in flight may finish. Quiz text and student answers are included, but complete source snippets, API keys, prompts, account credentials, and absolute file paths are not included as separate payload fields. Explanation events send the generic feedback "Explanation requested." rather than copying the answer key. This change does not remove keys already stored by older versions or change the extension's separate learning log. Questions and user-written answers may themselves contain code or sensitive text; no source-code scrubber runs on those fields.
 
-Supported: local VS Code and backend on the same computer. Remote SSH, WSL, containers, and Codespaces are not supported. The Electron window and preload bridge are not implemented in this change.
+Supported: local VS Code and backend on the same computer. Remote SSH, WSL, containers, and Codespaces are not supported. The separate [Electron History application](../desktop/app/README.md) now reads this backend through a restricted main-process/preload bridge. Start the standalone backend first; Electron does not start another receiver or change its storage.
 
 ## Receiver and API
 

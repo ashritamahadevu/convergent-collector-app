@@ -127,7 +127,7 @@ describe("the model writes the question", () => {
 });
 
 describe("network down before the quiz starts", () => {
-  test("generation fails -> min-length fallback quiz opens fast, with no hint that grading is offline", async () => {
+  test("generation fails -> explicitly ungraded min-length fallback quiz opens fast", async () => {
     routeOllamaTo("http://127.0.0.1:" + (await closedPort()));
     const ctx = fakeContext();
     const started = Date.now();
@@ -139,8 +139,12 @@ describe("network down before the quiz starts", () => {
     // Any 15+ character text passes the fallback.
     panel.fromWebview({ type: "submit", answer: "x".repeat(15) });
     assert.equal(await gate.promise, true);
-    assert.equal(attempts(ctx).length, 0, "fallback is not recorded");
-    console.log("[observed] fallback panel shown after " + shownAfter + "ms; 15 x's pass it; no user-visible reason");
+    assert.equal(attempts(ctx).length, 0, "fallback is not a scored attempt");
+    const reviews = ctx.store.get("comprehensionGuard.reviewEvents") as { outcome: string; score?: number }[];
+    assert.equal(reviews.length, 1);
+    assert.equal(reviews[0].outcome, "ungraded");
+    assert.equal(reviews[0].score, undefined);
+    console.log("[observed] ungraded fallback panel shown after " + shownAfter + "ms; explanation accepted without grading");
   });
 
   test("generation fails -> Bypass on the fallback quiz keeps the code", async () => {

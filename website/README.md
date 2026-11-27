@@ -2,7 +2,7 @@
 
 The public landing page for DrawBridge: product overview, how it works, a try-it demo, the team, and the waitlist.
 
-Live at **https://drawbridge-lake.vercel.app**
+Live at **https://drawbrdge.com**
 
 ## What's here
 

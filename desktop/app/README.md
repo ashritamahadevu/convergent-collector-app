@@ -147,4 +147,32 @@ restrictions, prototype labels, asset loading and a stopped backend.
 Screenshots are written to ignored test-results/. It never uses the user's
 database/token or pairs their extension. It closes its test app and backend.
 
-This is a development application, not an installer or a distribution release.
+This is a development application when you run `npm start`. An installed
+Windows build checks GitHub Releases for a newer version.
+
+## Updates
+
+`npm start` runs unpackaged Electron and does not check for updates. An
+installed copy checks on launch and about every four hours. When a download
+finishes, a banner offers Restart. Closing the app also installs a downloaded
+update. Builds are unsigned, so Windows SmartScreen can warn on first install.
+Signature checks for later updates are turned off because there is no
+certificate.
+
+To build a Windows installer without publishing it:
+
+    npm.cmd run dist
+
+The installer is written to `release/`, which is gitignored. Publishing is done
+from the repository root with `npm run publish:desktop`. That needs `GH_TOKEN`,
+uploads `DrawBridge-Setup-<version>.exe` and `latest.yml` to the GitHub release
+`v<version>`, uploads the extension VSIX onto the same release, and rewrites
+`website/releases.json`. Commit that file and push so the website shows the new
+links. The latest GitHub release has to keep `latest.yml` and the Windows
+installer. A newer release without those files would make the updater look at
+an incomplete release.
+
+The Mac dmg name is configured, but this machine does not build it. On a Mac,
+run `npx electron-builder --mac --publish always` in `desktop/app` for the same
+version, then set `desktop.mac` in `website/releases.json` to the dmg URL.
+Re-running the Windows publish script keeps an existing Mac URL.

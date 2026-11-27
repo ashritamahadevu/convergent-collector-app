@@ -263,6 +263,7 @@
     "compile": "node scripts/copy-tree-sitter.mjs && node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "package": "vsce package",
+    "publish:desktop": "node scripts/publish-desktop.mjs",
     "install:cursor": "npm run package && node scripts/install-cursor.mjs",
     "eval:judge": "npx -y tsx eval/run.ts",
     "test:agent": "npx -y tsx --test test/agentDetection.test.ts && node --test scripts/cursor-ide.test.mjs",

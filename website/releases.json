@@ -1,0 +1,11 @@
+{
+  "desktop": {
+    "version": "0.1.0",
+    "windows": null,
+    "mac": null
+  },
+  "extension": {
+    "version": "0.0.1",
+    "vsix": null
+  }
+}

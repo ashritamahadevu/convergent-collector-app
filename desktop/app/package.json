@@ -4,14 +4,46 @@
   "private": true,
   "type": "module",
   "main": "build/main.cjs",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "build": "tsc --noEmit && tsc -p tsconfig.electron.json && vite build && node scripts/build-electron.mjs",
     "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --win",
     "test": "node scripts/test-client.mjs",
     "test:smoke": "node scripts/smoke.mjs"
   },
+  "build": {
+    "appId": "com.drawbridge.desktop",
+    "productName": "DrawBridge",
+    "directories": { "output": "release" },
+    "files": ["build/**/*", "package.json"],
+    "publish": {
+      "provider": "github",
+      "owner": "ashritamahadevu",
+      "repo": "convergent-collector-app",
+      "releaseType": "release",
+      "vPrefixedTagName": true
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "DrawBridge-Setup-${version}.${ext}",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    },
+    "mac": {
+      "target": "dmg",
+      "artifactName": "DrawBridge-${version}.${ext}",
+      "category": "public.app-category.education"
+    }
+  },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -22,6 +54,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.0",
     "playwright": "^1.58.0",
     "tailwindcss": "^4.0.0",

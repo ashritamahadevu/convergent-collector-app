@@ -11,8 +11,9 @@ out/
 **/.gradle/
 jetbrains/build/
 
-# Packaged extension
+# Packaged extension and desktop installers
 *.vsix
+desktop/app/release/
 
 # VS Code extension test runner
 .vscode-test/

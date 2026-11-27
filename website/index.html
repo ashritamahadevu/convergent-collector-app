@@ -94,6 +94,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .btn:active { transform: translateY(1px); }
 .btn.ghost { background: transparent; color: var(--mint); border: 1px solid var(--line); box-shadow: none; }
 .btn.ghost:hover { border-color: var(--leaf); background: var(--panel); }
+.btn[aria-disabled="true"] { opacity: .55; cursor: default; pointer-events: none; }
 
 /* ---------- shared type ---------- */
 .eyebrow {
@@ -291,6 +292,14 @@ canvas#pxchart { width: 100%; height: 170px; display: block; }
 .crew ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font: 500 15px var(--f-num); }
 .crew li span { color: var(--muted); font-weight: 400; font-size: 13.5px; }
 
+/* ---------- downloads ---------- */
+.download-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.download-card { padding: 28px; display: grid; gap: 14px; align-content: start; }
+.download-card .ver { font: 700 1.8rem/1 var(--f-num); color: var(--mint); margin: 0; }
+.download-card p { margin: 0; color: var(--muted); }
+.download-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.download-status { margin: 0; }
+
 /* ---------- waitlist ---------- */
 .cta { position: relative; overflow: hidden; padding: 56px clamp(20px, 5vw, 56px); display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; border-color: var(--leaf); background: radial-gradient(120% 140% at 0% 0%, #142a1a 0%, var(--panel) 55%); }
 .cta-copy { display: grid; gap: 16px; min-width: 0; }
@@ -321,7 +330,7 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 960px) {
-  .hero .wrap, .row-feat, .about-grid, .cta, .demo-grid { grid-template-columns: 1fr; }
+  .hero .wrap, .row-feat, .about-grid, .cta, .demo-grid, .download-grid { grid-template-columns: 1fr; }
   .row-feat.flip .feat-copy { order: 0; }
   .steps { grid-template-columns: 1fr 1fr; }
   .gate-wrap { max-width: 560px; }
@@ -357,6 +366,7 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
       <a href="#how">How it works</a>
       <a href="#demo">Demo</a>
       <a href="#about">About</a>
+      <a href="#download">Download</a>
     </nav>
     <a class="btn" href="#waitlist">Join waitlist</a>
   </div>
@@ -611,6 +621,22 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
   </div>
 </section>
 
+<div class="wrap"><div class="wall" aria-hidden="true"></div></div>
+
+<!-- DOWNLOAD -->
+<section id="download">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Download</span>
+      <h2>Get the latest DrawBridge.</h2>
+      <p class="lede">The installed Windows app checks for updates on its own. The extension is a manual install.</p>
+    </div>
+    <div class="download-grid" id="download-grid">
+      <p class="download-status" id="download-status">Loading the latest versions.</p>
+    </div>
+  </div>
+</section>
+
 <!-- WAITLIST -->
 <section id="waitlist">
   <div class="wrap">
@@ -665,7 +691,7 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
       <p>Checks and balances for AI code. A VS Code extension and dashboard that make sure you understand the code AI writes for you.</p>
     </div>
     <div class="foot-cols">
-      <div><h4>Explore</h4><a href="#product">Product</a><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#about">About</a></div>
+      <div><h4>Explore</h4><a href="#product">Product</a><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#about">About</a><a href="#download">Download</a></div>
       <div><h4>Early access</h4><a href="#waitlist">Join the waitlist</a><a href="#about">Meet the team</a></div>
     </div>
     <p class="legal">© 2026 DrawBridge. A Texas Convergent project. Not affiliated with or endorsed by The University of Texas at Austin.</p>
@@ -753,6 +779,72 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
     opts.forEach(x => { x.disabled = false; x.classList.remove('right', 'wrong'); });
     verdict.hidden = true; bridge.style.width = '0'; gob.src = '/assets/gob-stand.png';
   });
+})();
+
+/* ---------- downloads ---------- */
+(function () {
+  const grid = document.getElementById("download-grid");
+  if (!grid) return;
+  const status = document.getElementById("download-status");
+  fetch("/releases.json")
+    .then(response => { if (!response.ok) throw new Error("missing"); return response.json(); })
+    .then(render)
+    .catch(() => { if (status) status.textContent = "The latest versions could not be loaded."; });
+
+  function action(label, url) {
+    if (url) {
+      const link = document.createElement("a");
+      link.className = "btn";
+      link.href = url;
+      link.rel = "noopener";
+      link.textContent = label;
+      return link;
+    }
+    const unavailable = document.createElement("span");
+    unavailable.className = "btn ghost";
+    unavailable.setAttribute("aria-disabled", "true");
+    unavailable.textContent = label;
+    return unavailable;
+  }
+
+  function card(title, version, copy, actions) {
+    const panel = document.createElement("article");
+    panel.className = "panel download-card";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const ver = document.createElement("p");
+    ver.className = "ver";
+    ver.textContent = version ? "Version " + version : "Version unavailable";
+    const text = document.createElement("p");
+    text.textContent = copy;
+    const row = document.createElement("div");
+    row.className = "download-actions";
+    actions.forEach(item => row.append(item));
+    panel.append(heading, ver, text, row);
+    return panel;
+  }
+
+  function render(data) {
+    const desktop = data && data.desktop || {};
+    const extension = data && data.extension || {};
+    grid.replaceChildren(
+      card(
+        "Desktop app",
+        desktop.version,
+        "The Windows app updates itself after you install it. macOS comes later.",
+        [
+          action(desktop.windows ? "Download for Windows" : "Not published yet", desktop.windows || ""),
+          action(desktop.mac ? "Download for macOS" : "macOS coming soon", desktop.mac || ""),
+        ],
+      ),
+      card(
+        "VS Code extension",
+        extension.version,
+        "Install the VSIX from VS Code or Cursor. This download does not update itself.",
+        [action(extension.vsix ? "Download the extension" : "Not published yet", extension.vsix || "")],
+      ),
+    );
+  }
 })();
 
 /* ---------- waitlist ---------- */

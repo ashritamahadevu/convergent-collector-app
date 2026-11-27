@@ -7,7 +7,16 @@ export type ConnectionStatus = {
 };
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type Pagination = { limit: number; offset: number };
+export type UpdatePhase = "downloading" | "ready" | "error";
+export type UpdateStatus = {
+  phase: UpdatePhase;
+  version: string | null;
+  message: string | null;
+};
 export interface DashboardBridge {
   readHistory(pagination: Pagination): Promise<Result<HistoryPage>>;
   readStatus(): Promise<Result<ConnectionStatus>>;
+  readUpdateStatus(): Promise<UpdateStatus | null>;
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
+  installUpdate(): Promise<Result<null>>;
 }

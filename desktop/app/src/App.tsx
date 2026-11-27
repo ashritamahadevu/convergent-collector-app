@@ -6,6 +6,24 @@ import HomeScreen from "./screens/HomeScreen";
 import MapAllScreen from "./screens/MapAllScreen";
 
 type Screen = "home" | "history" | "growth" | "map";
+type UpdateStatus = { phase: "downloading" | "ready" | "error"; version: string | null; message: string | null };
+
+function UpdateBanner({ status, onRestart }: { status: UpdateStatus; onRestart: () => void }) {
+  const name = status.version ? `DrawBridge ${status.version}` : "DrawBridge";
+  const text = status.phase === "downloading"
+    ? `Downloading ${name}.`
+    : status.phase === "ready"
+      ? `${name} is ready.`
+      : status.message || "Couldn't check for updates.";
+  return (
+    <div className="update-banner" role="status">
+      <span>{text}</span>
+      {status.phase === "ready" && (
+        <button className="live-button live-primary" onClick={onRestart} type="button">Restart</button>
+      )}
+    </div>
+  );
+}
 type MapFilter = "all" | "review" | "strong";
 type GrowthView = "summary" | "topics";
 
@@ -246,6 +264,16 @@ export default function App() {
   const [growthHover, setGrowthHover] = useState<number | null>(null);
   const [growthView, setGrowthView] = useState<GrowthView>("summary");
   const [scale, setScale] = useState(1);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+
+  useEffect(() => {
+    const bridge = window.drawbridge;
+    if (!bridge) return;
+    let active = true;
+    void bridge.readUpdateStatus().then(status => { if (active && status) setUpdate(status); });
+    const stop = bridge.onUpdateStatus(status => { if (active) setUpdate(status); });
+    return () => { active = false; stop(); };
+  }, []);
 
   useEffect(() => {
     const fitCanvas = () => {
@@ -515,6 +543,16 @@ export default function App() {
           </>
         )}
       </div>
+      {update && (
+        <UpdateBanner
+          onRestart={() => {
+            void window.drawbridge?.installUpdate().then(result => {
+              if (!result.ok) setUpdate({ phase: "error", version: update.version, message: result.error });
+            });
+          }}
+          status={update}
+        />
+      )}
     </main>
   );
 }

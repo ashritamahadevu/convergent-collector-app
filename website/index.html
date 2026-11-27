@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DrawBridge</title>
+<meta name="description" content="DrawBridge is a VS Code extension that holds AI-written code until you prove you understand it. Join the waitlist.">
+<meta property="og:title" content="DrawBridge: AI wrote it. Can you explain it?">
+<meta property="og:description" content="A VS Code extension that holds AI-written code until you understand it. Join the waitlist.">
+<meta property="og:image" content="/assets/og.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0b0d0b">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Pixelify+Sans:wght@500;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: the DrawBridge dashboard turned into a page. Near-black ground, thin-bordered
+   charcoal panels, mint labels, pixel-block charts, castle-wall outlines between sections. */
+:root {
+  --ink: #0b0d0b;
+  --panel: #151815;
+  --panel-2: #1c201c;
+  --line: #2a302b;
+  --wall: #1e4a2a;
+  --leaf: #2e8b4a;
+  --green: #5fd38a;
+  --mint: #a9d8b1;
+  --text: #e4ede5;
+  --muted: #8d998e;
+  --bad: #e06a5f;
+
+  --f-pixel: "Pixelify Sans", "Courier New", monospace;
+  --f-num: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --f-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-code: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --r: 12px;
+  --maxw: 1120px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font: 400 16px/1.6 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+img { max-width: 100%; display: block; }
+a { color: var(--mint); }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
+.pixel { image-rendering: pixelated; }
+
+.wrap {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+
+/* ---------- castle wall divider ---------- */
+.wall {
+  height: 22px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='22'%3E%3Cpath d='M0 20.5H12V6.5H26V20.5H38V6.5H52V20.5H64' fill='none' stroke='%231e4a2a' stroke-width='2'/%3E%3C/svg%3E") repeat-x left bottom;
+  opacity: .9;
+}
+
+/* ---------- nav ---------- */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--ink); }
+.nav {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--ink) 86%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.nav .wrap { display: flex; align-items: center; gap: 28px; height: 68px; }
+.nav-logo img { height: 34px; width: auto; }
+.nav-links { display: flex; gap: 26px; margin-left: auto; }
+.nav-links a { color: var(--muted); text-decoration: none; font: 500 15px var(--f-num); }
+.nav-links a:hover { color: var(--text); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font: 600 15px var(--f-num); letter-spacing: .01em;
+  background: var(--green); color: #07240f; border: 0; border-radius: 999px;
+  padding: 11px 20px; cursor: pointer; text-decoration: none; white-space: nowrap;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,.22);
+  transition: transform .12s ease, background .12s ease;
+}
+.btn:hover { background: #74e09c; }
+.btn:active { transform: translateY(1px); }
+.btn.ghost { background: transparent; color: var(--mint); border: 1px solid var(--line); box-shadow: none; }
+.btn.ghost:hover { border-color: var(--leaf); background: var(--panel); }
+
+/* ---------- shared type ---------- */
+.eyebrow {
+  font: 600 13px var(--f-num); letter-spacing: .12em; text-transform: uppercase; color: var(--green);
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.eyebrow::before { content: ""; width: 8px; height: 8px; background: var(--green); box-shadow: 8px 0 0 var(--leaf); margin-right: 8px; }
+h1, h2 { font-family: var(--f-pixel); font-weight: 700; letter-spacing: .005em; text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-size: clamp(2.6rem, 6.2vw, 4.6rem); }
+h2 { font-size: clamp(2rem, 4.2vw, 3.1rem); }
+h3 { font: 600 1.2rem/1.3 var(--f-num); margin: 0; color: var(--text); }
+.lede { color: var(--muted); font-size: 1.125rem; max-width: 58ch; margin: 0; }
+.mint { color: var(--mint); }
+.green { color: var(--green); }
+
+section { padding-block: 96px; }
+.sec-head { display: grid; gap: 16px; margin-bottom: 48px; max-width: 720px; }
+
+/* ---------- panel (dashboard card) ---------- */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
+.label { font: 600 12.5px var(--f-num); color: var(--mint); letter-spacing: .02em; }
+.tiny { font: 500 12px var(--f-num); color: var(--muted); }
+
+/* ---------- hero ---------- */
+.hero { padding-block: 72px 88px; position: relative; }
+.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+.hero-copy { display: grid; gap: 24px; min-width: 0; }
+.hero h1 .q { color: var(--green); display: block; }
+.join-inline { display: flex; gap: 10px; max-width: 480px; flex-wrap: wrap; }
+.join-inline input { flex: 1 1 220px; min-width: 0; }
+input, select {
+  font: 500 15px var(--f-body); color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 12px 18px; outline: none; transition: border-color .12s;
+}
+select { border-radius: 10px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--mint) 50%), linear-gradient(135deg, var(--mint) 50%, transparent 50%); background-position: calc(100% - 20px) 52%, calc(100% - 15px) 52%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 40px; }
+input::placeholder { color: #66716a; }
+input:focus, select:focus { border-color: var(--green); }
+.hero-sub { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.hero-sub a { font: 500 15px var(--f-num); text-decoration: none; }
+.hero-sub a:hover { text-decoration: underline; }
+.form-msg { font: 500 14px var(--f-num); min-height: 1.4em; margin: 0; }
+.form-msg.ok { color: var(--green); }
+.form-msg.err { color: var(--bad); }
+
+/* hero visual: the gate */
+.gate-card { position: relative; padding: 0; overflow: hidden; min-width: 0; }
+.gate-top { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #2f3631; }
+.tab { margin-left: 10px; font: 500 12.5px var(--f-code); color: var(--muted); }
+.tab b { color: var(--text); font-weight: 500; }
+.code {
+  font: 400 13.5px/1.75 var(--f-code); color: #c9d4ca; margin: 0; padding: 18px 18px 18px 0;
+  counter-reset: ln; overflow-x: auto; white-space: pre;
+}
+.code span.l { display: block; padding-left: 52px; position: relative; }
+.code span.l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 36px; text-align: right; color: #48524a; }
+.code span.l.ai { background: rgba(95,211,138,.07); box-shadow: inset 3px 0 0 var(--green); }
+.k { color: #8fc7ff; } .s { color: #e6c07b; } .c { color: #5d6b60; } .f { color: var(--mint); }
+.portcullis {
+  position: absolute; inset: 46px 0 0 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(30,74,42,.85) 34px 40px),
+    repeating-linear-gradient(180deg, transparent 0 40px, rgba(30,74,42,.75) 40px 46px);
+  transform: translateY(-100%);
+  animation: drop 1.1s cubic-bezier(.5,0,.3,1.25) .5s forwards;
+}
+@keyframes drop { to { transform: translateY(0); } }
+.held {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  width: min(88%, 360px); padding: 16px 18px; display: grid; gap: 10px;
+  background: rgba(11,13,11,.94); border: 1px solid var(--leaf); border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0,0,0,.5);
+}
+.held .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.held-title { font: 700 18px var(--f-pixel); color: var(--green); letter-spacing: .03em; }
+.pill { font: 600 11.5px var(--f-num); color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.held .btn { padding: 9px 16px; font-size: 14px; justify-self: start; }
+.hero-gob { position: absolute; width: 112px; right: -6px; top: -58px; z-index: 2; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+.gate-wrap { position: relative; padding-top: 40px; min-width: 0; }
+
+/* ---------- feature rows ---------- */
+.rows { display: grid; gap: 28px; }
+.row-feat { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: stretch; }
+.row-feat.flip .feat-copy { order: 2; }
+.feat-copy { display: grid; gap: 16px; align-content: start; padding: 8px 4px; min-width: 0; }
+.feat-copy p { margin: 0; color: var(--muted); }
+.cards { display: grid; gap: 12px; }
+.card { padding: 18px 20px; display: grid; gap: 6px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.card-k { font: 600 12px var(--f-num); color: var(--green); letter-spacing: .1em; text-transform: uppercase; }
+.mock { padding: 22px; display: grid; gap: 16px; align-content: start; min-width: 0; position: relative; }
+.mock-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.example { font: 500 11px var(--f-num); color: var(--muted); border: 1px dashed var(--line); border-radius: 6px; padding: 2px 8px; }
+
+/* tracker feed */
+.feed { display: grid; gap: 8px; }
+.feed-item { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.src { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: #0f1a12; border: 1px solid var(--wall); font: 700 13px var(--f-code); color: var(--green); }
+.feed-item b { font: 600 14px var(--f-num); display: block; }
+.feed-item .tiny { display: block; }
+.status { font: 600 11.5px var(--f-num); padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.status.held-s { color: #f0c36a; background: rgba(240,195,106,.1); }
+.status.pass { color: var(--green); background: rgba(95,211,138,.1); }
+.status.drop { color: var(--muted); background: rgba(141,153,142,.12); }
+
+/* question mock */
+.q-dots { display: flex; gap: 6px; }
+.q-dots i { width: 9px; height: 9px; border-radius: 50%; background: #2f3631; }
+.q-dots i.on { background: var(--green); }
+.presets { display: flex; gap: 8px; flex-wrap: wrap; }
+.preset { font: 600 13px var(--f-num); padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
+.preset.on { color: #07240f; background: var(--mint); border-color: var(--mint); }
+.qtypes { display: flex; flex-wrap: wrap; gap: 8px; }
+.qtypes span { font: 500 13px var(--f-num); color: var(--mint); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--wall); background: #0f1a12; }
+
+/* dashboard mock */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tile { padding: 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 2px; min-width: 0; }
+.tile .big { font: 700 clamp(1.5rem, 3vw, 2.1rem)/1.1 var(--f-num); color: var(--mint); font-variant-numeric: tabular-nums; }
+.chart { padding: 14px 14px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.chart-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.chart-top .big { font: 700 1.6rem var(--f-num); color: var(--text); }
+canvas#pxchart { width: 100%; height: 170px; display: block; }
+.xlabels { display: flex; justify-content: space-between; font: 500 11px var(--f-num); color: var(--muted); padding: 4px 2px 0 30px; }
+.xlabels b { color: var(--text); }
+
+/* pricing strip */
+.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 28px; }
+.plan { padding: 24px; display: grid; gap: 14px; align-content: start; }
+.plan .price { font: 700 2.2rem/1 var(--f-num); color: var(--text); font-variant-numeric: tabular-nums; }
+.plan .price small { font-size: .95rem; color: var(--muted); font-weight: 500; }
+.plan ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--muted); font-size: 15px; }
+.plan li { display: flex; gap: 10px; }
+.plan li::before { content: ""; flex: none; width: 8px; height: 8px; margin-top: 8px; background: var(--green); }
+.plan.pro { border-color: var(--leaf); background: linear-gradient(180deg, #132116, var(--panel) 60%); }
+
+/* ---------- how it works ---------- */
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; counter-reset: st; }
+.step { padding: 22px 20px; display: grid; gap: 10px; align-content: start; position: relative; }
+.step .n { font: 700 1.9rem/1 var(--f-pixel); color: var(--leaf); }
+.step p { margin: 0; color: var(--muted); font-size: 15px; }
+.step img { width: 56px; position: absolute; right: 14px; top: 14px; }
+.bypass { margin-top: 18px; color: var(--muted); font-size: 15px; display: flex; gap: 10px; align-items: center; }
+.bypass b { color: var(--mint); font-weight: 600; font-family: var(--f-num); }
+
+/* ---------- demo ---------- */
+.demo-grid { display: grid; grid-template-columns: 340px 1fr; gap: 28px; align-items: start; }
+.phone { position: relative; border-radius: 30px; padding: 10px; background: #050605; border: 1px solid var(--line); box-shadow: 0 30px 60px rgba(0,0,0,.5); max-width: 340px; width: 100%; justify-self: center; }
+.phone video { width: 100%; aspect-ratio: 9 / 16; border-radius: 22px; display: block; background: #000; object-fit: cover; }
+.sound { position: absolute; right: 22px; bottom: 22px; font: 600 12.5px var(--f-num); color: var(--text); background: rgba(11,13,11,.78); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.try { padding: 0; overflow: hidden; min-width: 0; }
+.try-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+.try-body { padding: 20px; display: grid; gap: 16px; }
+.try .code { padding: 14px 14px 14px 0; background: #0e110e; border: 1px solid var(--line); border-radius: 10px; }
+.try-q { display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: center; }
+.try-q img { width: 64px; }
+.try-q p { margin: 0; font: 600 1.05rem/1.4 var(--f-num); }
+.try-q code { font: 500 .95em var(--f-code); color: var(--mint); }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.opt {
+  font: 500 14.5px var(--f-code); text-align: left; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px; cursor: pointer;
+  display: flex; gap: 10px; align-items: center; transition: border-color .12s, background .12s;
+}
+.opt:hover:not([disabled]) { border-color: var(--leaf); }
+.opt .key { font: 600 12px var(--f-num); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; }
+.opt.right { border-color: var(--green); background: rgba(95,211,138,.1); }
+.opt.wrong { border-color: var(--bad); background: rgba(224,106,95,.08); }
+.opt[disabled] { cursor: default; }
+.verdict { display: grid; gap: 6px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: #0e110e; }
+.verdict b { font: 700 1.1rem var(--f-pixel); letter-spacing: .03em; }
+.verdict p { margin: 0; color: var(--muted); font-size: 15px; }
+.verdict .btn { justify-self: start; margin-top: 6px; padding: 8px 14px; font-size: 13.5px; }
+.bridge-bar { height: 8px; border-radius: 999px; background: #232823; overflow: hidden; }
+.bridge-bar i { display: block; height: 100%; width: 0; background: var(--green); transition: width .8s cubic-bezier(.3,.7,.2,1); }
+
+/* ---------- about ---------- */
+.about-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 28px; align-items: start; }
+.about-copy { display: grid; gap: 18px; min-width: 0; }
+.about-copy p { margin: 0; color: var(--muted); max-width: 60ch; }
+.about-copy p strong { color: var(--text); font-weight: 600; }
+.quote { padding: 26px; display: grid; gap: 14px; }
+.quote blockquote { margin: 0; font: 500 1.3rem/1.45 var(--f-num); color: var(--text); text-wrap: pretty; }
+.quote blockquote::before { content: "\201C"; display: block; font: 700 3rem/0.6 var(--f-pixel); color: var(--green); margin-bottom: 6px; }
+.stat { display: flex; align-items: baseline; gap: 14px; padding: 18px 22px; }
+.stat .big { font: 700 2.6rem/1 var(--f-num); color: var(--mint); font-variant-numeric: tabular-nums; }
+.stat p { margin: 0; color: var(--muted); font-size: 15px; }
+.loop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 500 14px var(--f-num); color: var(--mint); }
+.loop span { padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.loop i { font-style: normal; color: var(--leaf); }
+.team { margin-top: 56px; display: grid; gap: 18px; }
+.team-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.crew { padding: 20px; display: grid; gap: 10px; align-content: start; }
+.crew ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font: 500 15px var(--f-num); }
+.crew li span { color: var(--muted); font-weight: 400; font-size: 13.5px; }
+
+/* ---------- waitlist ---------- */
+.cta { position: relative; overflow: hidden; padding: 56px clamp(20px, 5vw, 56px); display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; border-color: var(--leaf); background: radial-gradient(120% 140% at 0% 0%, #142a1a 0%, var(--panel) 55%); }
+.cta-copy { display: grid; gap: 16px; min-width: 0; }
+.cta-copy img { width: 120px; }
+.wl-form { display: grid; gap: 12px; min-width: 0; }
+.wl-form .field { display: grid; gap: 6px; }
+.wl-form label { font: 600 13px var(--f-num); color: var(--mint); }
+.wl-form input, .wl-form select { border-radius: 10px; width: 100%; }
+.wl-form .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wl-form .btn { justify-self: start; margin-top: 4px; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.done { display: grid; grid-template-columns: 84px 1fr; gap: 16px; align-items: center; padding: 18px; border: 1px solid var(--leaf); border-radius: 12px; background: #0f1a12; }
+.done img { width: 84px; }
+.done b { font: 700 1.4rem var(--f-pixel); color: var(--green); display: block; }
+.done p { margin: 4px 0 0; color: var(--muted); }
+
+/* ---------- footer ---------- */
+footer { padding-block: 48px 56px; border-top: 1px solid var(--line); margin-top: 40px; }
+footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
+.foot-brand { display: grid; gap: 12px; align-content: start; }
+.foot-brand img { width: 170px; }
+.foot-brand p { margin: 0; color: var(--muted); font-size: 14px; max-width: 46ch; }
+.foot-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.foot-cols h4 { margin: 0 0 10px; font: 600 12.5px var(--f-num); letter-spacing: .1em; text-transform: uppercase; color: var(--mint); }
+.foot-cols a { display: block; color: var(--muted); text-decoration: none; font-size: 14.5px; padding: 3px 0; }
+.foot-cols a:hover { color: var(--text); }
+.legal { grid-column: 1 / -1; color: #5f6a61; font-size: 13px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 8px; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 960px) {
+  .hero .wrap, .row-feat, .about-grid, .cta, .demo-grid { grid-template-columns: 1fr; }
+  .row-feat.flip .feat-copy { order: 0; }
+  .steps { grid-template-columns: 1fr 1fr; }
+  .gate-wrap { max-width: 560px; }
+}
+@media (max-width: 720px) {
+  .nav-links { display: none; }
+  .nav .btn { margin-left: auto; padding: 9px 16px; font-size: 14px; }
+  section { padding-block: 72px; }
+  .hero { padding-block: 40px 64px; }
+  .team-grid, .plans, .steps, .foot-cols, footer .wrap { grid-template-columns: 1fr; }
+  .opts, .wl-form .two { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .tile { padding: 10px; }
+  .tile .tiny { font-size: 10.5px; }
+  .tile .big { font-size: 1.35rem; white-space: nowrap; }
+  .hero-gob { width: 84px; top: -40px; }
+  .code { font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .portcullis { animation: none; transform: none; }
+  .bridge-bar i { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="nav-logo" href="#top" aria-label="DrawBridge home"><img src="/assets/logo-sm.png" alt="DrawBridge" width="84" height="34"></a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#product">Product</a>
+      <a href="#how">How it works</a>
+      <a href="#demo">Demo</a>
+      <a href="#about">About</a>
+    </nav>
+    <a class="btn" href="#waitlist">Join waitlist</a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-copy">
+      <span class="eyebrow">VS Code extension · coming soon</span>
+      <h1>AI wrote it. <span class="q">Can you explain it?</span></h1>
+      <p class="lede">DrawBridge holds AI-written code at the gate until you show you understand it. You answer a few short questions inside VS Code, and a dashboard tracks what you've actually learned.</p>
+      <form class="join-inline js-waitlist" data-source="hero" novalidate>
+        <label class="hp" for="hero-website">Leave this empty</label>
+        <input class="hp" id="hero-website" name="website" tabindex="-1" autocomplete="off">
+        <label for="hero-email" class="hp">Email</label>
+        <input id="hero-email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@school.edu" required>
+        <button class="btn" type="submit">Join the waitlist</button>
+      </form>
+      <p class="form-msg" aria-live="polite"></p>
+      <div class="hero-sub">
+        <a href="#how">See how it works →</a>
+        <span class="tiny">Free for students. No code leaves your laptop.</span>
+      </div>
+    </div>
+
+    <div class="gate-wrap">
+      <img class="hero-gob" src="/assets/gob-stand.png" alt="" width="112" height="91">
+      <div class="panel gate-card" aria-label="Example: code held by DrawBridge">
+        <div class="gate-top">
+          <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="tab"><b>cart.js</b> · agent edit from Claude Code</span>
+        </div>
+<pre class="code"><span class="l"><span class="k">export function</span> <span class="f">applyDiscount</span>(cart, code) {</span><span class="l ai">  <span class="k">const</span> rules = <span class="f">loadRules</span>(code);</span><span class="l ai">  <span class="k">if</span> (!rules) <span class="k">return</span> cart.total;</span><span class="l ai">  <span class="k">let</span> total = <span class="s">0</span>;</span><span class="l ai">  <span class="k">for</span> (<span class="k">const</span> item <span class="k">of</span> cart.items) {</span><span class="l ai">    <span class="k">const</span> pct = rules[item.category] ?? <span class="s">0</span>;</span><span class="l ai">    total += item.price * item.qty * (<span class="s">1</span> - pct);</span><span class="l ai">  }</span><span class="l ai">  <span class="k">return</span> Math.<span class="f">round</span>(total * <span class="s">100</span>) / <span class="s">100</span>;</span><span class="l">}</span><span class="l"> </span><span class="l"> </span></pre>
+        <div class="portcullis" aria-hidden="true"></div>
+        <div class="held">
+          <div class="row"><span class="held-title">HELD BY DRAWBRIDGE</span><span class="pill">Quick · ~2 min</span></div>
+          <span class="tiny">+8 lines from Claude Code · 2 questions before this can be committed</span>
+          <a class="btn" href="#demo">Try a check</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="wall" aria-hidden="true"></div></div>
+
+<!-- PRODUCT -->
+<section id="product">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Product</span>
+      <h2>Checks and balances for AI code.</h2>
+      <p class="lede">Keep using Claude, Copilot and Cursor. DrawBridge makes sure you can explain what they wrote before it ships.</p>
+    </div>
+
+    <div class="rows">
+      <!-- row 1: trackers -->
+      <div class="row-feat">
+        <div class="feat-copy">
+          <h3>It notices AI code, wherever it came from.</h3>
+          <p>DrawBridge watches the three ways AI code gets into your project. When it lands, the code is held and the commit stays locked until you pass a short check.</p>
+          <div class="cards">
+            <div class="panel card"><span class="card-k">Copy-paste</span><p>Code pasted in from ChatGPT, Claude or a forum.</p></div>
+            <div class="panel card"><span class="card-k">Inline suggestions</span><p>The tab-complete blocks you accept without reading.</p></div>
+            <div class="panel card"><span class="card-k">Agent edits</span><p>Whole files from Claude Code, Cursor or Codex.</p></div>
+          </div>
+        </div>
+        <div class="panel mock">
+          <div class="mock-head"><span class="label">Tracked this session</span><span class="example">Example</span></div>
+          <div class="feed">
+            <div class="feed-item"><span class="src">CC</span><div><b>cart.js · 8 lines</b><span class="tiny">Agent edit · Claude Code</span></div><span class="status held-s">Held</span></div>
+            <div class="feed-item"><span class="src">⌘V</span><div><b>utils/date.ts · 23 lines</b><span class="tiny">Pasted from chat</span></div><span class="status pass">Passed 3/3</span></div>
+            <div class="feed-item"><span class="src">⇥</span><div><b>api/users.py · 1 line</b><span class="tiny">Inline suggestion</span></div><span class="status pass">Passed 1/1</span></div>
+            <div class="feed-item"><span class="src">CC</span><div><b>auth/session.go · 61 lines</b><span class="tiny">Agent edit · Cursor</span></div><span class="status drop">Bridge dropped</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- row 2: sized questions -->
+      <div class="row-feat flip">
+        <div class="feat-copy">
+          <h3>Questions sized to the change.</h3>
+          <p>A one-line fix gets one quick question. A new feature gets a short walkthrough. You pick how deep it goes, and every miss comes with an explanation so you learn the part you skipped.</p>
+          <div class="cards">
+            <div class="panel card"><span class="card-k">Five question types</span><p>Multiple choice, put the steps in order, predict the output, explain it in your own words, and change or fix the code.</p></div>
+            <div class="panel card"><span class="card-k">Private by design</span><p>Your code is scored on your laptop. Only summaries sync to your dashboard.</p></div>
+          </div>
+        </div>
+        <div class="panel mock">
+          <div class="mock-head"><span class="label">Difficulty</span><div class="q-dots" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div></div>
+          <div class="presets" role="list">
+            <span class="preset on" role="listitem">Quick · ~2 min</span>
+            <span class="preset" role="listitem">Standard · ~5 min</span>
+            <span class="preset" role="listitem">Deep</span>
+          </div>
+          <div class="label" style="margin-top:6px">Question 2 of 5 · Predict the output</div>
+<pre class="code" style="background:#0e110e;border:1px solid var(--line);border-radius:10px;padding:12px 12px 12px 0"><span class="l">nums = [<span class="s">4</span>, <span class="s">8</span>, <span class="s">15</span>]</span><span class="l">print(<span class="f">sum</span>(n // <span class="s">4</span> <span class="k">for</span> n <span class="k">in</span> nums))</span></pre>
+          <div class="qtypes"><span>5</span><span>6</span><span>6.75</span><span>Error</span></div>
+          <span class="tiny">Answer: 6. Integer division rounds each one down: 1 + 2 + 3.</span>
+        </div>
+      </div>
+
+      <!-- row 3: dashboard -->
+      <div class="row-feat">
+        <div class="feat-copy">
+          <h3>A dashboard of what you actually know.</h3>
+          <p>Every check feeds your dashboard: a weekly comprehension score, a goal to hit, a map of the files you've checked, and recall checks later so it sticks.</p>
+          <div class="cards">
+            <div class="panel card"><span class="card-k">Weekly goal</span><p>Set a target score and see the gap each week.</p></div>
+            <div class="panel card"><span class="card-k">Interview prep</span><p>Mock interview questions built from the projects you wrote. Premium.</p></div>
+          </div>
+        </div>
+        <div class="panel mock">
+          <div class="mock-head"><span class="label">Summary</span><span class="example">Example data</span></div>
+          <div class="tiles">
+            <div class="tile"><span class="tiny">First-try score</span><span class="big">47%</span></div>
+            <div class="tile"><span class="tiny">Weekly goal</span><span class="big">80%</span></div>
+            <div class="tile"><span class="tiny">Gap to goal</span><span class="big">33 pts</span></div>
+          </div>
+          <div class="chart">
+            <div class="chart-top"><span class="big">47%</span><span class="tiny">Comprehension score by week · goal 80%</span></div>
+            <canvas id="pxchart" aria-label="Pixel bar chart of weekly comprehension score rising from 22% to 47%, goal 80%"></canvas>
+            <div class="xlabels"><span>Oct 5</span><span>Oct 12</span><span>Oct 19</span><span>Oct 26</span><span>Nov 2</span><b>Nov 9</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="plans">
+      <div class="panel plan">
+        <span class="card-k">Free</span>
+        <span class="price">$0</span>
+        <ul>
+          <li>Questions generated for your AI code</li>
+          <li>Progress tracking and the dashboard</li>
+          <li>Quick, Standard and Deep checks</li>
+        </ul>
+      </div>
+      <div class="panel plan pro">
+        <span class="card-k">Premium</span>
+        <span class="price">$4.99<small> / month</small></span>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Strictness levels</li>
+          <li>Interview prep from your own projects</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="wall" aria-hidden="true"></div></div>
+
+<!-- HOW IT WORKS -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">How it works</span>
+      <h2>Raise the gate. Prove it. Cross.</h2>
+    </div>
+    <div class="steps">
+      <div class="panel step"><span class="n">01</span><h3>AI writes code</h3><p>Paste it, tab it in, or let an agent build the feature. Work the way you already do.</p></div>
+      <div class="panel step"><span class="n">02</span><h3>The gate drops</h3><p>DrawBridge holds the new code and locks the commit. It sizes a check to how much changed.</p></div>
+      <div class="panel step"><span class="n">03</span><h3>Answer the goblin</h3><p>A few short questions about the code. Miss one and you get an explanation, not a lecture.</p></div>
+      <div class="panel step"><span class="n">04</span><h3>The bridge lowers</h3><p>Your code goes through and the result lands on your dashboard.</p></div>
+    </div>
+    <p class="bypass"><img class="pixel" src="/assets/gob-sleep.png" alt="" width="44" height="35"> In a rush? You can <b>drop the bridge</b> and skip the check. It's logged, so you can come back to it.</p>
+  </div>
+</section>
+
+<div class="wrap"><div class="wall" aria-hidden="true"></div></div>
+
+<!-- DEMO -->
+<section id="demo">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Demo</span>
+      <h2>Try a check yourself.</h2>
+      <p class="lede">This is the kind of question DrawBridge asks after AI writes a function. Answer it to lower the bridge.</p>
+    </div>
+    <div class="demo-grid">
+      <div class="phone">
+        <video id="reel" src="/assets/demo-reel.mp4" poster="/assets/demo-poster.jpg" autoplay muted loop playsinline preload="metadata" aria-label="DrawBridge teaser reel"></video>
+        <button class="sound" id="sound" type="button" aria-pressed="false">Sound off</button>
+      </div>
+
+      <div class="panel try">
+        <div class="try-head">
+          <span class="label">dedupe.js · inline suggestion · 1 question</span>
+          <span class="pill">Predict the output</span>
+        </div>
+        <div class="try-body">
+<pre class="code"><span class="l ai"><span class="k">function</span> <span class="f">dedupe</span>(items) {</span><span class="l ai">  <span class="k">const</span> seen = <span class="k">new</span> Set();</span><span class="l ai">  <span class="k">return</span> items.<span class="f">filter</span>(x =&gt; {</span><span class="l ai">    <span class="k">if</span> (seen.<span class="f">has</span>(x)) <span class="k">return false</span>;</span><span class="l ai">    seen.<span class="f">add</span>(x);</span><span class="l ai">    <span class="k">return true</span>;</span><span class="l ai">  });</span><span class="l ai">}</span></pre>
+          <div class="try-q">
+            <img id="try-gob" src="/assets/gob-stand.png" alt="" width="64" height="52">
+            <p>What does <code>dedupe([3, 1, 3, 2, 1])</code> return?</p>
+          </div>
+          <div class="opts" role="group" aria-label="Answer choices">
+            <button class="opt" type="button" data-a="0"><span class="key">A</span>[1, 2, 3]</button>
+            <button class="opt" type="button" data-a="1"><span class="key">B</span>[3, 1, 2]</button>
+            <button class="opt" type="button" data-a="0"><span class="key">C</span>[3, 1, 3, 2, 1]</button>
+            <button class="opt" type="button" data-a="0"><span class="key">D</span>[2]</button>
+          </div>
+          <div class="bridge-bar" aria-hidden="true"><i id="bridge"></i></div>
+          <div class="verdict" id="verdict" hidden>
+            <b id="v-title"></b>
+            <p id="v-text"></p>
+            <button class="btn ghost" id="retry" type="button">Try again</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="wall" aria-hidden="true"></div></div>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="wrap">
+    <div class="about-grid">
+      <div class="about-copy">
+        <span class="eyebrow">About</span>
+        <h2>Built by students who've hit Accept All.</h2>
+        <p>AI made writing code fast. It didn't make understanding it automatic. You accept a block you didn't read, it works, and you move on. Then something breaks, or an interviewer asks why your loop runs the way it does, and you can't say.</p>
+        <p>We watched it happen to friends. One was asked about his own project in a Google interview. Claude had written that part and he'd never read it. He couldn't explain it and didn't get the offer.</p>
+        <p><strong>DrawBridge keeps the speed and adds a checkpoint.</strong> You still use AI for everything you use it for now. You just can't ship code you can't explain.</p>
+        <div class="loop" aria-label="The AI crutch loop">
+          <span>AI writes it</span><i>→</i><span>accepted, not understood</span><i>→</i><span>can't debug it</span><i>→</i><span>lean on AI more</span><i>↺</i>
+        </div>
+      </div>
+      <div style="display:grid;gap:14px;min-width:0">
+        <figure class="panel quote" style="margin:0">
+          <blockquote>Students rely on AI as a crutch when coding, and over time they lose their problem-solving skills.</blockquote>
+          <figcaption class="tiny">Dr. Siddhartha Chatterjee, Professor, Computer Architecture, UT Austin</figcaption>
+        </figure>
+        <div class="panel stat"><span class="big">84%</span><p>of developers use or plan to use AI tools. <span class="tiny">Stack Overflow Developer Survey 2025</span></p></div>
+      </div>
+    </div>
+
+    <div class="team">
+      <h3>The team · Texas Convergent, UT Austin</h3>
+      <div class="team-grid">
+        <div class="panel crew"><span class="card-k">Product</span><ul><li>Omar Mohamed <span>· PM</span></li><li>Elizaveta Khudorozhkova</li></ul></div>
+        <div class="panel crew"><span class="card-k">Tech</span><ul><li>Ethan Jeng</li><li>Ashrita Mahadevu</li><li>Elizabeth Kuromiema</li><li>Sameer Agarwal</li><li>Angelyna Mackie</li></ul></div>
+        <div class="panel crew"><span class="card-k">Design</span><ul><li>Sumit Kalamani</li><li>Sophia Sartor</li></ul></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WAITLIST -->
+<section id="waitlist">
+  <div class="wrap">
+    <div class="panel cta">
+      <div class="cta-copy">
+        <img class="pixel" src="/assets/gob-yes.png" alt="" width="120" height="98">
+        <span class="eyebrow">Coming soon to VS Code</span>
+        <h2>Be first across the bridge.</h2>
+        <p class="lede">Join the waitlist for early access. We'll email you when the extension is ready to install.</p>
+      </div>
+      <div>
+        <form class="wl-form js-waitlist" id="wl-form" data-source="waitlist" novalidate>
+          <label class="hp" for="wl-website">Leave this empty</label>
+          <input class="hp" id="wl-website" name="website" tabindex="-1" autocomplete="off">
+          <div class="field">
+            <label for="wl-email">Email</label>
+            <input id="wl-email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@school.edu" required>
+          </div>
+          <div class="two">
+            <div class="field">
+              <label for="wl-role">I'm a</label>
+              <select id="wl-role" name="role">
+                <option value="cs-student">CS student</option>
+                <option value="educator">Professor or TA</option>
+                <option value="developer">Developer</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="wl-school">School <span class="tiny">(optional)</span></label>
+              <input id="wl-school" name="school" type="text" autocomplete="organization" placeholder="UT Austin">
+            </div>
+          </div>
+          <button class="btn" type="submit">Join the waitlist</button>
+          <p class="form-msg" aria-live="polite"></p>
+        </form>
+        <div class="done" id="wl-done" hidden>
+          <img class="pixel" src="/assets/gob-yes.png" alt="" width="84" height="69">
+          <div><b>You're on the list.</b><p>We'll email you when DrawBridge is ready to install.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-brand">
+      <img src="/assets/logo-sm.png" alt="DrawBridge" width="170" height="69">
+      <p>Checks and balances for AI code. A VS Code extension and dashboard that make sure you understand the code AI writes for you.</p>
+    </div>
+    <div class="foot-cols">
+      <div><h4>Explore</h4><a href="#product">Product</a><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#about">About</a></div>
+      <div><h4>Early access</h4><a href="#waitlist">Join the waitlist</a><a href="#about">Meet the team</a></div>
+    </div>
+    <p class="legal">© 2026 DrawBridge. A Texas Convergent project. Not affiliated with or endorsed by The University of Texas at Austin.</p>
+  </div>
+</footer>
+
+<script>
+/* ---------- pixel chart (example data, mirrors the dashboard) ---------- */
+(function () {
+  const cv = document.getElementById('pxchart');
+  if (!cv) return;
+  const weekly = [22, 26, 31, 34, 38, 41, 47];          // example scores, oldest → newest
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+    const left = 30, top = 8, bottom = H - 4;
+    const cols = Math.max(24, Math.floor((W - left) / 9));
+    const rows = 16;
+    const cw = (W - left) / cols, rh = (bottom - top) / rows;
+    const gap = 1.4;
+    ctx.font = '500 10px "Space Grotesk", sans-serif';
+    ctx.fillStyle = '#8d998e'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    [0, 25, 50, 75, 100].forEach(v => ctx.fillText(v + '%', left - 6, bottom - (v / 100) * (bottom - top)));
+    for (let c = 0; c < cols; c++) {
+      const wk = Math.min(weekly.length - 1, Math.floor(c / cols * weekly.length));
+      const val = weekly[wk];
+      const filled = Math.round(val / 100 * rows);
+      const latest = wk === weekly.length - 1;
+      for (let r = 0; r < rows; r++) {
+        const x = left + c * cw + gap / 2, y = bottom - (r + 1) * rh + gap / 2;
+        ctx.fillStyle = r < filled ? (latest ? '#d6efd9' : '#7fc28a') : '#1f241f';
+        ctx.fillRect(x, y, cw - gap, rh - gap);
+      }
+    }
+    // goal line at 80%
+    const gy = bottom - 0.8 * (bottom - top);
+    ctx.strokeStyle = '#a9d8b1'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(left, gy); ctx.lineTo(W, gy); ctx.stroke(); ctx.setLineDash([]);
+  }
+  draw();
+  let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(draw, 120); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+})();
+
+/* ---------- reel sound toggle ---------- */
+(function () {
+  const v = document.getElementById('reel'), b = document.getElementById('sound');
+  if (!v || !b) return;
+  b.addEventListener('click', () => {
+    v.muted = !v.muted;
+    if (!v.muted) { v.currentTime = 0; v.play().catch(() => {}); }
+    b.textContent = v.muted ? 'Sound off' : 'Sound on';
+    b.setAttribute('aria-pressed', String(!v.muted));
+  });
+})();
+
+/* ---------- try-a-check quiz ---------- */
+(function () {
+  const opts = [...document.querySelectorAll('.opt')];
+  const verdict = document.getElementById('verdict');
+  const title = document.getElementById('v-title'), text = document.getElementById('v-text');
+  const bridge = document.getElementById('bridge'), gob = document.getElementById('try-gob');
+  const retry = document.getElementById('retry');
+  const EXPLAIN = 'filter keeps an item only the first time it shows up. The Set remembers what has been seen, so repeats are dropped and the original order stays: [3, 1, 2].';
+  opts.forEach(o => o.addEventListener('click', () => {
+    const right = o.dataset.a === '1';
+    opts.forEach(x => { x.disabled = true; if (x.dataset.a === '1') x.classList.add('right'); });
+    if (!right) o.classList.add('wrong');
+    verdict.hidden = false;
+    if (right) {
+      title.textContent = 'CORRECT. BRIDGE LOWERED.'; title.style.color = 'var(--green)';
+      text.textContent = EXPLAIN + ' Your code goes through.';
+      gob.src = '/assets/gob-yes.png'; bridge.style.width = '100%'; retry.hidden = true;
+    } else {
+      title.textContent = 'NOT QUITE.'; title.style.color = 'var(--bad)';
+      text.textContent = EXPLAIN;
+      gob.src = '/assets/gob-no.png'; bridge.style.width = '20%'; retry.hidden = false;
+    }
+  }));
+  retry.addEventListener('click', () => {
+    opts.forEach(x => { x.disabled = false; x.classList.remove('right', 'wrong'); });
+    verdict.hidden = true; bridge.style.width = '0'; gob.src = '/assets/gob-stand.png';
+  });
+})();
+
+/* ---------- waitlist ---------- */
+(function () {
+  const MSG = {
+    invalid_email: 'That email doesn’t look right. Check it and try again.',
+    not_configured: 'Signups open very soon. Check back in a bit.',
+    server_error: 'Something went wrong on our end. Try again in a minute.',
+    network: 'Couldn’t reach the server. Check your connection and try again.'
+  };
+  document.querySelectorAll('.js-waitlist').forEach(form => {
+    const msg = form.querySelector('.form-msg') || form.nextElementSibling;
+    const btn = form.querySelector('button[type=submit]');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(form));
+      data.source = form.dataset.source || '';
+      const email = (data.email || '').trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { show(msg, MSG.invalid_email, 'err'); return; }
+      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Joining…';
+      try {
+        const res = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const out = await res.json().catch(() => ({}));
+        if (res.ok && out.ok) {
+          if (form.id === 'wl-form') { form.hidden = true; document.getElementById('wl-done').hidden = false; }
+          else { form.reset(); show(msg, out.already ? 'You’re already on the list. We’ll be in touch.' : 'You’re on the list. We’ll email you at launch.', 'ok'); }
+        } else {
+          show(msg, MSG[out.error] || MSG.server_error, 'err');
+        }
+      } catch (_) { show(msg, MSG.network, 'err'); }
+      btn.disabled = false; btn.textContent = label;
+    });
+  });
+  function show(el, text, kind) { if (!el) return; el.textContent = text; el.className = 'form-msg ' + kind; }
+})();
+</script>
+</body>
+</html>

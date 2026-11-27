@@ -20,3 +20,6 @@ scripts/test-dashboard.cjs
 scripts/check-dashboard-runtime.cjs
 dist/dashboard*
 tsconfig.dashboard.json
+
+# Marketing site (deployed separately on Vercel)
+website/**

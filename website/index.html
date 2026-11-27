@@ -172,7 +172,21 @@ input:focus, select:focus { border-color: var(--green); }
 .held-title { font: 700 18px var(--f-pixel); color: var(--green); letter-spacing: .03em; }
 .pill { font: 600 11.5px var(--f-num); color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
 .held .btn { padding: 9px 16px; font-size: 14px; justify-self: start; }
-.hero-gob { position: absolute; width: 112px; right: -6px; top: -58px; z-index: 2; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+.hero-gob { position: absolute; width: 112px; right: -6px; top: -58px; z-index: 3; padding: 0; border: 0; background: none; cursor: pointer; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); -webkit-tap-highlight-color: transparent; }
+.hero-gob img { display: block; width: 100%; height: auto; }
+.hero-gob:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; border-radius: 8px; }
+.hero-gob.hop { animation: gob-hop .5s steps(3) both; }
+.hero-gob.huff { animation: gob-huff .36s steps(2) both; }
+@keyframes gob-hop { 0% { transform: translateY(0); } 35% { transform: translateY(-22px); } 65% { transform: translateY(0); } 82% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+@keyframes gob-huff { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.gob-say {
+  position: absolute; right: 116px; top: -50px; z-index: 3; max-width: min(240px, calc(100% - 130px));
+  margin: 0; padding: 9px 12px; background: var(--ink); color: var(--green); border: 2px solid var(--green);
+  box-shadow: 4px 4px 0 var(--wall); font: 500 15px/1.25 var(--f-pixel); letter-spacing: .02em;
+  opacity: 0; transform: scale(.6); transform-origin: right center; pointer-events: none;
+}
+.gob-say::after { content: ""; position: absolute; right: -9px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--green); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.gob-say.on { opacity: 1; transform: scale(1); transition: opacity .12s steps(2), transform .12s steps(2); }
 .gate-wrap { position: relative; padding-top: 40px; min-width: 0; }
 
 /* ---------- feature rows ---------- */
@@ -338,12 +352,14 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
   .tile .tiny { font-size: 10.5px; }
   .tile .big { font-size: 1.35rem; white-space: nowrap; }
   .hero-gob { width: 84px; top: -40px; }
+  .gob-say { right: 88px; top: -38px; font-size: 13.5px; max-width: min(220px, calc(100% - 100px)); }
   .code { font-size: 12.5px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .portcullis { animation: none; transform: none; }
   .bridge-bar i { transition: none; }
+  .hero-gob.hop, .hero-gob.huff { animation: none; }
 }
 /* ---------- intro: the bridge lowers (plays once per visit) ---------- */
 #intro { display: none; position: fixed; inset: 0; z-index: 100; background: var(--ink); overflow: hidden; cursor: pointer; }
@@ -405,7 +421,8 @@ html.intro body { overflow: hidden; }
     </div>
 
     <div class="gate-wrap">
-      <img class="hero-gob" src="/assets/gob-stand.png" alt="" width="112" height="91">
+      <button class="hero-gob" id="hero-gob" type="button" aria-label="Poke the goblin"><img src="/assets/gob-stand.png" alt="" width="112" height="91"></button>
+      <p class="gob-say" id="gob-say" role="status" aria-live="polite"></p>
       <div class="panel gate-card" aria-label="Example: code held by DrawBridge">
         <div class="gate-top">
           <i class="dot"></i><i class="dot"></i><i class="dot"></i>
@@ -933,6 +950,61 @@ html.intro body { overflow: hidden; }
   }
   raf = requestAnimationFrame(frame);
   timer = setTimeout(finish, OUT);
+})();
+</script>
+<script>
+/* Hero goblin: poke it and it questions you back. Five quick pokes and it falls asleep. */
+(function () {
+  const btn = document.getElementById('hero-gob'), say = document.getElementById('gob-say');
+  if (!btn || !say) return;
+  const img = btn.querySelector('img');
+  const SRC = { stand: '/assets/gob-stand.png', no: '/assets/gob-no.png', sleep: '/assets/gob-sleep.png' };
+  [SRC.no, SRC.sleep].forEach(s => { const i = new Image(); i.src = s; });
+  const LINES = [
+    'hey. explain that click.',
+    'did AI write that click?',
+    'no free passes.',
+    "poking me won't lower the bridge.",
+    'the gate stays shut till you explain it.',
+    'ok but what does dedupe() return?',
+    'join the waitlist. then we talk.'
+  ];
+  let i = 0, pokes = 0, asleep = false, tSay, tFace, tReset, tWake;
+
+  function bubble(text, ms) {
+    clearTimeout(tSay);
+    say.textContent = text;
+    say.classList.remove('on'); void say.offsetWidth; say.classList.add('on');
+    tSay = setTimeout(() => say.classList.remove('on'), ms || 2200);
+  }
+  function play(cls) {
+    btn.classList.remove('hop', 'huff'); void btn.offsetWidth; btn.classList.add(cls);
+  }
+  btn.addEventListener('animationend', () => btn.classList.remove('hop', 'huff'));
+
+  btn.addEventListener('click', () => {
+    if (asleep) { play('huff'); bubble('zzz…', 1200); return; }
+    pokes++;
+    clearTimeout(tReset);
+    tReset = setTimeout(() => { pokes = 0; }, 4000);
+
+    if (pokes >= 5) {
+      pokes = 0; asleep = true;
+      clearTimeout(tFace);
+      img.src = SRC.sleep;
+      bubble("ok i'm done. wake me when you ship.", 2400);
+      tWake = setTimeout(() => {
+        asleep = false; img.src = SRC.stand; play('hop');
+        bubble('huh? oh. you again.', 2000);
+      }, 4500);
+      return;
+    }
+    play('hop');
+    img.src = SRC.no;
+    clearTimeout(tFace);
+    tFace = setTimeout(() => { if (!asleep) img.src = SRC.stand; }, 900);
+    bubble(LINES[i++ % LINES.length]);
+  });
 })();
 </script>
 </body>

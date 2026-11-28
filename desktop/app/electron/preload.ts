@@ -6,6 +6,13 @@ const bridge: DashboardBridge = {
   readProjects: () => ipcRenderer.invoke("dashboard:projects"),
   readHistory: pagination => ipcRenderer.invoke("dashboard:history", pagination),
   readStatus: () => ipcRenderer.invoke("dashboard:status"),
+  readRank: () => ipcRenderer.invoke("dashboard:rank"),
+  readDue: () => ipcRenderer.invoke("dashboard:due"),
+  readGrowth: days => ipcRenderer.invoke("dashboard:growth", days),
+  readMap: () => ipcRenderer.invoke("dashboard:map"),
+  readSettings: () => ipcRenderer.invoke("dashboard:settings"),
+  writeSettings: event => ipcRenderer.invoke("dashboard:settings-write", event),
+  openRecall: topic => ipcRenderer.invoke("app:open-recall", topic),
   readUpdateStatus: () => ipcRenderer.invoke("app:update-status"),
   onUpdateStatus: listener => {
     const wrapped = (_event: IpcRendererEvent, status: UpdateStatus) => listener(status);

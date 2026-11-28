@@ -132,10 +132,9 @@ The recent dials include ungraded/bypassed checks as Not scored, never zero.
 Missing concepts/checks produce empty placeholders. Home Refresh reloads these
 cards; loading and unavailable-backend states are explicit.
 
-Only Home's goblin stats, rank, welcome identity and local goal remain demo data;
-its header identifies the goblin/goal preview. Growth and Map have a visible
-**Design prototype / Sample data** banner. Their numbers and graph edges
-are not connected or implemented by this batch. History search,
+Home shows the goblin stage and five stats from saved mastery, recall, and checks.
+Due topics open the VS Code recall quiz. Growth, Map, and Settings read this backend.
+The welcome name and weekly goal text on Home are still local notes. History search,
 week and review filters are not yet provided because filtering only a loaded
 page would give incomplete results.
 
@@ -153,10 +152,9 @@ screens, assets and navigation). History's fixed example rows were replaced
 with a scrollable real-data view retaining the design's logo, toolbar, canvas,
 dark palette and green accents. HomeScreen.tsx remains the actual Home layout,
 including the goblin, weak points, Stats, goal and recent-check dials. The user's
-reference screenshot supplies the Peasant demo rank; recent-check dial percentages
-now come from real records instead of the sample 33/75/100 values.
+reference screenshot. Recent-check dials, goblin rank, Growth, and Map now use saved records.
 Project summaries live behind Browse projects, not in place of Home.
-Growth and Map retain their prototype content.
+Settings edits the shared student bag and leaves API keys in VS Code.
 Asset URLs are relative for Electron's local built files. Inter 4.1 is bundled
 under public/fonts with its license; all Figma weight aliases use that file.
 Vite rewrites its font URLs for Electron, so no font installation or runtime

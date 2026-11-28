@@ -49,6 +49,8 @@ export async function startDashboardBackend(options: { databasePath: string; tok
       if (req.method === "GET" && url.pathname === "/v1/prepsets") { reply(200, { sets: database.prepSets() }); return; }
       if (req.method === "GET" && url.pathname === "/v1/checks") { reply(200, { checks: database.checks() }); return; }
       if (req.method === "GET" && url.pathname === "/v1/settings") { reply(200, { settings: database.settings() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/rank") { reply(200, database.rank()); return; }
+      if (req.method === "GET" && url.pathname === "/v1/map") { reply(200, database.map()); return; }
       if (req.method !== "POST" || !["/v1/events", "/v1/heartbeat"].includes(url.pathname)) { reply(404, { error: "Not found" }); return; }
       if (req.headers["content-type"]?.split(";")[0] !== "application/json") { reply(415, { error: "JSON required" }); return; }
       const chunks: Buffer[] = []; let bytes = 0;

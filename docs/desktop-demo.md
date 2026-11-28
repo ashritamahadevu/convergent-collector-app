@@ -36,10 +36,10 @@ terminals. Existing records and pairing credentials stay in their current folder
 5. Complete a supported comprehension quiz. Return to History and Refresh to see
    the new record. Go Home and Refresh to update the recent-check dials and
    lowest-scored concept cards. Browse projects provides the project summaries.
-6. Home keeps the original goblin/Stats layout. Its concept cards and recent-check
-   dials are real, across all projects. Goblin stats, rank, welcome identity and
-   the locally editable goal remain demo content. Growth and Map are also marked as prototypes; they are not
-   part of the working project-summary demo.
+6. Home shows the goblin stage from mastery, recall, and check history, plus due topics.
+   Review in editor opens the existing VS Code quiz. Growth, Map, and Settings read
+   the local backend. The weekly goal text on Home is still a local note. The
+   installed app can still update from GitHub Releases.
 
 The extension already includes the project name and workspace-derived ID in
 each review. This batch adds read-only summaries and filtering, not another

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import BrandLogo from "../components/BrandLogo";
 import Toolbar from "../components/Toolbar";
-import type { HomeSummary } from "../../electron/contract";
+import type { HomeSummary, DueCard, RankReport } from "../../electron/contract";
 import type { ReviewEvent } from "../../../../src/dashboard/protocol";
 
 const defaultGoal = "Raise your comprehension score to 80%.";
@@ -16,43 +16,19 @@ const imgGroup4 = `${assetPathPrefix}/5f1fb.svg`;
 const imgGroup5 = `${assetPathPrefix}/2fd73.svg`;
 const goblinSprite = `${assetPathPrefix}/goblin_sprite.png`;
 
-const homeMockData = {
-  goblin: { name: "Grub", rank: "Peasant" },
-  stats: [
-    {
-      title: "Happiness",
-      detail: "Consistency",
-      value: "78%",
-      filled: 8,
-    },
-    {
-      title: "Dexterity",
-      detail: "Weekly comprehension score",
-      value: "47%",
-      filled: 5,
-    },
-    {
-      title: "EXP",
-      detail: "Progress to next rank",
-      value: "64%",
-      filled: 6,
-    },
-    {
-      title: "Decay",
-      detail: "Performance on follow up checks",
-      value: "Low",
-      filled: 2,
-    },
-    {
-      title: "Rank",
-      detail: "Percentile vs other goblins",
-      value: "Top 18%",
-      filled: 8,
-    },
-  ],
-} as const;
-
 const pasteScoreColors = ["#58805F", "#6A9A71", "#74AB7B"] as const;
+
+const rankLabels: Record<RankReport["stage"], string> = {
+  peasant: "Peasant", squire: "Squire", knight: "Knight", wizard: "Wizard", king: "King",
+};
+
+const statRows: { key: keyof RankReport["stats"]; title: string; detail: string }[] = [
+  { key: "streak", title: "Streak", detail: "Checks you stayed for" },
+  { key: "iq", title: "IQ", detail: "Average concept mastery" },
+  { key: "recall", title: "Recall", detail: "Follow-ups with the code hidden" },
+  { key: "range", title: "Range", detail: "Concepts above the mastery line" },
+  { key: "grit", title: "Grit", detail: "Recent checks you answered" },
+];
 
 function User({ className }: { className?: string }) {
   return (
@@ -203,7 +179,8 @@ function HomeToolbar({ className }: { className?: string }) {
   );
 }
 
-function GoblinCard() {
+function GoblinCard({ rank }: { rank: RankReport | null }) {
+  const stage = rank ? rankLabels[rank.stage] : "Peasant";
   return (
     <section className="absolute left-[174px] top-[346px] h-[400px] w-[582px]">
       <img
@@ -213,47 +190,46 @@ function GoblinCard() {
         style={{ imageRendering: "pixelated" }}
       />
       <p className="absolute top-[302px] left-0 w-full text-center font-['Inter:Bold'] text-[30px] leading-[45px] font-bold text-[#bddbc1]">
-        {homeMockData.goblin.name}
+        {stage}
       </p>
       <p className="absolute top-[346px] left-1/2 flex h-[28px] -translate-x-1/2 items-center rounded-full bg-[#bddbc1] px-[14px] font-['Inter:Bold'] text-[14px] leading-[21px] font-bold text-[#0a0c0b]">
-        {homeMockData.goblin.rank}
+        {rank ? Math.round(rank.stats.total) + " total" : "No checks yet"}
       </p>
     </section>
   );
 }
 
-function StatsCard() {
+function StatsCard({ rank, due, onReview }: { rank: RankReport | null; due: DueCard[]; onReview: (topic: string) => void }) {
   return (
     <section className="home-glass-card absolute left-[782px] top-[346px] h-[400px] w-[582px] rounded-[32px]">
       <h2 className="absolute left-[27px] top-[25px] font-['Inter:Semi_Bold'] text-[14px] leading-[21px] font-semibold text-[#6c7b6e]">
-        Stats · Demo
+        Stats{rank?.frozen ? " · Quiet week" : ""}
       </h2>
-      <div className="absolute top-[62px] right-[27px] left-[27px]">
-        {homeMockData.stats.map((stat, rowIndex) => (
-          <div
-            className={`relative h-[60px] ${rowIndex > 0 ? "border-t border-white/[0.08]" : ""}`}
-            key={stat.title}
-          >
-            <p className="absolute top-[10px] left-0 font-['Inter:Semi_Bold'] text-[16px] leading-[24px] font-semibold text-[#bddbc1]">
-              {stat.title}
-            </p>
-            <p className="absolute top-[33px] left-0 font-['Inter:Medium'] text-[13px] leading-[20px] font-medium text-[#74ab7b]">
-              {stat.detail}
-            </p>
-            <p className="absolute top-[10px] right-0 font-['Inter:Semi_Bold'] text-[16px] leading-[24px] font-semibold text-[#bddbc1]">
-              {stat.value}
-            </p>
-            <div className="absolute top-[36px] right-0 flex gap-[3px]" aria-hidden="true">
-              {Array.from({ length: 10 }, (_, blockIndex) => (
-                <span
-                  className={`h-[6px] w-[12px] rounded-[1.5px] ${
-                    blockIndex < stat.filled ? "bg-[#74ab7b]" : "bg-[#2b3530]"
-                  }`}
-                  key={blockIndex}
-                />
-              ))}
+      <div className="absolute top-[52px] right-[27px] left-[27px]">
+        {statRows.map((stat, rowIndex) => {
+          const value = rank ? rank.stats[stat.key] : 0;
+          const filled = Math.round(Number(value) / 10);
+          return (
+            <div className={`relative h-[46px] ${rowIndex > 0 ? "border-t border-white/[0.08]" : ""}`} key={stat.key}>
+              <p className="absolute top-[4px] left-0 font-['Inter:Semi_Bold'] text-[16px] leading-[24px] font-semibold text-[#bddbc1]">{stat.title}</p>
+              <p className="absolute top-[24px] left-0 font-['Inter:Medium'] text-[13px] leading-[20px] font-medium text-[#74ab7b]">{stat.detail}</p>
+              <p className="absolute top-[4px] right-0 font-['Inter:Semi_Bold'] text-[16px] leading-[24px] font-semibold text-[#bddbc1]">{Math.round(Number(value))}</p>
+              <div className="absolute top-[26px] right-0 flex gap-[3px]" aria-hidden="true">
+                {Array.from({ length: 10 }, (_, blockIndex) => (
+                  <span className={`h-[6px] w-[12px] rounded-[1.5px] ${blockIndex < filled ? "bg-[#74ab7b]" : "bg-[#2b3530]"}`} key={blockIndex} />
+                ))}
+              </div>
             </div>
-          </div>
+          );
+        })}
+      </div>
+      <div className="absolute right-[27px] bottom-[12px] left-[27px]">
+        <p className="mb-[4px] font-['Inter:Semi_Bold'] text-[13px] text-[#6c7b6e]">Due for review</p>
+        {due.length === 0 ? <p className="text-[13px] text-[#74ab7b]">Nothing due.</p> : due.slice(0, 2).map((card) => (
+          <button className="live-button mr-[8px]" key={(card.topic ?? card.concept) + card.dueAt} type="button"
+            onClick={() => card.topic && onReview(card.topic)} disabled={!card.topic}>
+            Review {card.topic} in editor
+          </button>
         ))}
       </div>
     </section>
@@ -312,6 +288,8 @@ function RecentPastesCard({ reviews, loading }: { reviews: ReviewEvent[]; loadin
 
 export default function DashboardDrawbridge() {
   const [home, setHome] = useState<HomeSummary>({ recentChecks: [], weakPoints: [] });
+  const [rank, setRank] = useState<RankReport | null>(null);
+  const [due, setDue] = useState<DueCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const requestNumber = useRef(0);
@@ -321,12 +299,19 @@ export default function DashboardDrawbridge() {
     try {
       if (!window.drawbridge) throw new Error("Open the desktop app to connect to saved reviews.");
       const result = await window.drawbridge.readHome();
+      const [rankResult, dueResult] = await Promise.all([
+        window.drawbridge.readRank(), window.drawbridge.readDue(),
+      ]);
       if (request !== requestNumber.current) return;
       if (!result.ok) throw new Error(result.error);
       setHome(result.data);
+      setRank(rankResult.ok ? rankResult.data : null);
+      setDue(dueResult.ok ? dueResult.data.cards.filter((card) => card.topic) : []);
     } catch (e) {
       if (request !== requestNumber.current) return;
       setHome({ recentChecks: [], weakPoints: [] });
+      setRank(null);
+      setDue([]);
       setError(e instanceof Error ? e.message : "Home data unavailable. Check the backend and Refresh.");
     } finally {
       if (request === requestNumber.current) setLoading(false);
@@ -371,8 +356,8 @@ export default function DashboardDrawbridge() {
           <BrandLogo className="absolute top-[45px] left-[184px] h-[70px] w-[190px] object-contain" />
         </div>
         <User className="absolute flex h-[50px] items-center justify-center left-[1118px] top-[41px] w-[246px]" />
-        <GoblinCard />
-        <StatsCard />
+        <GoblinCard rank={rank} />
+        <StatsCard due={due} onReview={(topic) => { void window.drawbridge?.openRecall(topic); }} rank={rank} />
         <section aria-label="Weak points" className="home-weak-points">
           {[0, 1, 2].map(index => {
             const point = home.weakPoints[index];

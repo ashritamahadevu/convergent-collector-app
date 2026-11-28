@@ -7,7 +7,8 @@ import { warmParsers } from "./sizing/parser";
 import { clearApiKey, setApiKey } from "./secrets";
 import { dueConcepts, getMastery, getProfile, saveProfile } from "./memory/remember";
 import { showUnderstandingMapFor } from "./mapPanel";
-import { buildPrepSet, offerLoginRecall, resumeWalkthrough } from "./walkthrough";
+import { buildPrepSet, offerLoginRecall, resumeWalkthrough, startRecall } from "./walkthrough";
+import { parseRecallTopic } from "./dashboard/recallLink";
 import { deleteCodeIndex, indexFile, indexWorkspace, searchCode } from "./memory/rag";
 import { retrievability } from "./memory/scheduler";
 import { signIn, signOut } from "./memory/sync";
@@ -29,6 +30,14 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(output);
   setLogSink((line) => output.appendLine(line));
   registerDashboardSync(context);
+  context.subscriptions.push(vscode.window.registerUriHandler({
+    handleUri(uri) {
+      if (uri.path.replace(/^\//, "") !== "recall") return;
+      const topic = parseRecallTopic(new URLSearchParams(uri.query).get("topic"));
+      if (!topic) return;
+      void startRecall(context, topic);
+    },
+  }));
 
   // Status bar indicator (click to toggle).
   statusBarItem = vscode.window.createStatusBarItem(

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { AgentEdit } from "./agentProtocol";
 import { generateQuestion, getJudgeConfigId } from "./llm";
-import { annotateFile, dueConcepts, getMastery } from "./memory/remember";
+import { annotateFile, dueConcepts, getCards, getMastery } from "./memory/remember";
 import { buildProjectMap, type ProjectFile } from "./memory/projectMap";
 import { recordPrepSet } from "./dashboard/service";
 import { queuePrepSet } from "./memory/sync";
@@ -223,6 +223,15 @@ export async function offerLoginRecall(context: vscode.ExtensionContext): Promis
     "Later",
   );
   if (choice !== "Review") {
+    return;
+  }
+  await startRecall(context, card.topic);
+}
+
+export async function startRecall(context: vscode.ExtensionContext, topic: string): Promise<void> {
+  const card = getCards(context).find((item) => item.topic === topic);
+  if (!card?.topic) {
+    void vscode.window.showWarningMessage("Comprehension Guard: that review topic is not on this computer.");
     return;
   }
   const snippet = [

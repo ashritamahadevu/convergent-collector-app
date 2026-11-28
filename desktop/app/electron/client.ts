@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isRelativePath, isReviewEvent } from "../../../src/dashboard/protocol.js";
+import { isRelativePath, isReviewEvent, isSettingsEvent } from "../../../src/dashboard/protocol.js";
 import { isProjectId, isProjectSummary } from "../../../src/dashboard/views.js";
-import type { ConnectionStatus, HistoryPage, HistoryQuery, HomeSummary, ProjectsPage, Result } from "./contract.js";
+import type { ConnectionStatus, DueCard, GrowthPage, HistoryPage, HistoryQuery, HomeSummary, MapPage, ProjectsPage, RankReport, Result } from "./contract.js";
+import type { SettingsEvent } from "../../../src/dashboard/protocol.js";
 
 export function validPagination(value: unknown): value is HistoryQuery {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -15,7 +16,7 @@ export function validPagination(value: unknown): value is HistoryQuery {
 
 const timestamp = (v: unknown) => v === null || (Number.isSafeInteger(v) && (v as number) >= 0);
 
-/** Read-only client. The standalone backend remains the sole SQLite/token owner. */
+/** Talks to the standalone backend. That process remains the sole SQLite and token owner. */
 export class DashboardClient {
   constructor(private readonly settings: { directory: string; port: number }) {}
 
@@ -26,7 +27,7 @@ export class DashboardClient {
     });
   }
 
-  private async request<T>(route: string, validate: (v: unknown) => v is T): Promise<Result<T>> {
+  private async request<T>(route: string, validate: (v: unknown) => v is T, body?: unknown): Promise<Result<T>> {
     if (!Number.isInteger(this.settings.port) || this.settings.port < 1 || this.settings.port > 65535) {
       return { ok: false, error: "Invalid DRAWBRIDGE_PORT. Use the same port as the standalone backend, then restart the desktop app." };
     }
@@ -38,7 +39,10 @@ export class DashboardClient {
     }
     try {
       const response = await fetch(`http://127.0.0.1:${this.settings.port}${route}`, {
-        headers: { Authorization: `Bearer ${token}` }, redirect: "error",
+        method: body === undefined ? "GET" : "POST",
+        headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        redirect: "error",
         signal: AbortSignal.timeout(5000),
       });
       if (response.status === 401 || response.status === 403) {
@@ -98,5 +102,60 @@ export class DashboardClient {
       return !!s && s.schemaVersion === 1 && typeof s.extensionConnected === "boolean" &&
         timestamp(s.lastSeenAt) && timestamp(s.lastSyncedAt);
     });
+  }
+
+  readRank(): Promise<Result<RankReport>> {
+    const stat = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+    return this.request("/v1/rank", (v): v is RankReport => {
+      const rank = v as RankReport | null;
+      return !!rank && ["peasant", "squire", "knight", "wizard", "king"].includes(rank.stage) &&
+        typeof rank.frozen === "boolean" && !!rank.stats &&
+        stat(rank.stats.iq) && stat(rank.stats.range) && stat(rank.stats.recall) &&
+        stat(rank.stats.grit) && stat(rank.stats.streak) && stat(rank.stats.total) &&
+        Number.isSafeInteger(rank.stats.followups) && rank.stats.followups >= 0;
+    });
+  }
+
+  readDue(): Promise<Result<{ cards: DueCard[] }>> {
+    return this.request("/v1/recall?due=now", (v): v is { cards: DueCard[] } => {
+      const page = v as { cards?: DueCard[] } | null;
+      return !!page && Array.isArray(page.cards) && page.cards.every((card) =>
+        !!card && typeof card.concept === "string" && timestamp(card.dueAt) &&
+        (card.topic === undefined || typeof card.topic === "string"));
+    });
+  }
+
+  readGrowth(days: "7" | "30" | "all"): Promise<Result<GrowthPage>> {
+    return this.request("/v1/growth?days=" + days, (v): v is GrowthPage => {
+      const page = v as GrowthPage | null;
+      return !!page && (page.days === 7 || page.days === 30 || page.days === null) &&
+        Number.isSafeInteger(page.totalChecks) && Number.isSafeInteger(page.completedChecks) &&
+        Array.isArray(page.points);
+    });
+  }
+
+  readMap(): Promise<Result<MapPage>> {
+    return this.request("/v1/map", (v): v is MapPage => {
+      const page = v as MapPage | null;
+      return !!page && Array.isArray(page.files) && Array.isArray(page.edges) &&
+        page.files.every((file) => typeof file.path === "string" && typeof file.score === "number" &&
+          ["understood", "in-progress", "not-yet", "skipped"].includes(file.status)) &&
+        page.edges.every((edge) => typeof edge.fromPath === "string" && typeof edge.toPath === "string");
+    });
+  }
+
+  readSettings(): Promise<Result<{ settings: SettingsEvent | null }>> {
+    return this.request("/v1/settings", (v): v is { settings: SettingsEvent | null } => {
+      const page = v as { settings?: unknown } | null;
+      return !!page && (page.settings === null || isSettingsEvent(page.settings));
+    });
+  }
+
+  writeSettings(event: unknown): Promise<Result<{ eventId: string }>> {
+    if (!isSettingsEvent(event)) return Promise.resolve({ ok: false, error: "Those settings are not valid." });
+    return this.request("/v1/events", (v): v is { eventId: string } => {
+      const ack = v as { eventId?: unknown } | null;
+      return !!ack && ack.eventId === event.eventId;
+    }, event);
   }
 }

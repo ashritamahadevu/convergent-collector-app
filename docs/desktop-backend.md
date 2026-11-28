@@ -67,6 +67,8 @@ Every endpoint requires `Authorization: Bearer <pairing-token>`. Browser-origin 
 | `GET /v1/profile` | Latest learner profile |
 | `GET /v1/prepsets` | Saved interview and exam question sets |
 | `GET /v1/settings` | `{ settings }` newest bag, or `{ settings: null }` |
+| `GET /v1/rank` | Goblin stage and five stats. A quiet week keeps the last stage. |
+| `GET /v1/map` | File understanding and saved call or import links |
 | `GET /v1/status` | Extension recently seen, last seen, last received review |
 
 Example read without printing the token:

@@ -9,6 +9,8 @@ import { startDashboardBackend } from "../desktop/backend/server";
 import { DashboardOutbox } from "../src/dashboard/outbox";
 import { isReviewEvent, localEndpoint, type ReviewEvent } from "../src/dashboard/protocol";
 import { recordMastery, recordReview, registerDashboardSync } from "../src/dashboard/service";
+import { parseRecallTopic, recallUri } from "../src/dashboard/recallLink";
+import { weekKey } from "../src/dashboard/rank";
 import { settings, panels, resetStub, window as vscodeWindow, Position } from "./network/vscodeStub";
 import { fakeContext, MCQ_QUESTION, FREE_TEXT_QUESTION, judgeJson } from "./network/harness";
 import { clearQuestionCache } from "../src/llm";
@@ -643,4 +645,72 @@ test("extension applies a newer desktop settings bag without echoing it", async 
   try { pending = await fs.readdir(path.join(storage, "dashboard-outbox")); }
   catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
   assert.deepEqual(pending.filter(name => name.endsWith(".json")), []);
+});
+
+test("goblin rank promotes from checks, ignores a quiet week, and demotes after two missed weeks", async t => {
+  const f = await fixture(t);
+  const t1 = Date.UTC(2026, 0, 5);
+  const t2 = t1 + 8 * 86400000;
+  const t3 = t1 + 15 * 86400000;
+  assert.notEqual(weekKey(t1), weekKey(t2));
+  const mastery = {
+    schemaVersion: 1 as const, type: "mastery.updated" as const, eventId: "mastery-rank", installationId: "test-install",
+    occurredAt: t1, concept: "control-flow", mastery: 0.5, elo: 1000, attempts: 2, lastSeen: t1,
+  };
+  f.backend.database.insert(mastery);
+  const pass = (id: string, group: string) => {
+    const row = event("pass", 1);
+    row.eventId = id; row.groupId = group; row.occurredAt = t1; row.source = "agent";
+    return row;
+  };
+  f.backend.database.insert(pass("rank-a", "group-a"));
+  f.backend.database.insert(pass("rank-b", "group-b"));
+  assert.equal(f.backend.database.rank(t1).stage, "squire");
+  const quiet = f.backend.database.rank(t2);
+  assert.equal(quiet.stage, "squire");
+  assert.equal(quiet.frozen, true);
+  const bypass = event("bypass", null);
+  bypass.eventId = "rank-c"; bypass.groupId = "group-c"; bypass.occurredAt = t2;
+  f.backend.database.insert(bypass);
+  assert.equal(f.backend.database.rank(t2).stage, "squire");
+  const later = event("bypass", null);
+  later.eventId = "rank-d"; later.groupId = "group-d"; later.occurredAt = t3;
+  f.backend.database.insert(later);
+  assert.equal(f.backend.database.rank(t3).stage, "peasant");
+});
+
+test("map marks a strong file understood and a weak file not yet", async t => {
+  const f = await fixture(t);
+  const now = Date.UTC(2026, 2, 1);
+  const file = (path: string, concept: string) => ({
+    schemaVersion: 1 as const, type: "file.updated" as const, eventId: "file-" + path, installationId: "test-install",
+    occurredAt: now, path, concepts: [concept], topic: path, passed: true, aiWritten: true, core: true,
+    complexity: 1, centrality: 0.5, updatedAt: now,
+  });
+  const mastery = (concept: string, value: number) => ({
+    schemaVersion: 1 as const, type: "mastery.updated" as const, eventId: "mastery-" + concept, installationId: "test-install",
+    occurredAt: now, concept, mastery: value, elo: 1000, attempts: 1, lastSeen: now,
+  });
+  f.backend.database.insert(file("src/strong.ts", "control-flow"));
+  f.backend.database.insert(file("src/weak.ts", "recursion"));
+  f.backend.database.insert(mastery("control-flow", 0.9));
+  f.backend.database.insert(mastery("recursion", 0.2));
+  f.backend.database.insert({
+    schemaVersion: 1, type: "file.edges", eventId: "edges-strong", installationId: "test-install",
+    occurredAt: now, fromPath: "src/strong.ts", edges: [{ toPath: "src/weak.ts", kind: "call" }],
+  });
+  const map = f.backend.database.map(now);
+  const strong = map.files.find(row => row.path === "src/strong.ts");
+  const weak = map.files.find(row => row.path === "src/weak.ts");
+  assert.equal(strong?.status, "understood");
+  assert.equal(weak?.status, "not-yet");
+  assert.equal(map.edges.length, 1);
+  assert.equal((await (await f.request("/v1/map")).json() as { files: { path: string }[] }).files.length, 2);
+});
+
+test("recall links keep the topic and reject an empty one", () => {
+  assert.equal(parseRecallTopic("  binary search "), "binary search");
+  assert.equal(parseRecallTopic(""), null);
+  assert.equal(parseRecallTopic("a\nb"), null);
+  assert.equal(recallUri("trees", "cursor"), "cursor://comprehension-guard.comprehension-guard/recall?topic=trees");
 });

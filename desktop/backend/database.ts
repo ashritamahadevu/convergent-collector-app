@@ -12,6 +12,9 @@ import {
   type ReviewEvent,
 } from "../../src/dashboard/protocol";
 import type { HomeSummary, ProjectSummary, WeakPoint } from "../../src/dashboard/views";
+import { fileUnderstanding } from "../../src/memory/understanding";
+import { settleRank, weekKey, rankStats, type RankSnapshot, type RankStage } from "../../src/dashboard/rank";
+import type { ConceptMastery, FileKnowledge, RecallCard } from "../../src/types";
 
 // node:sqlite is deliberately confined to the desktop backend (Node >=22.13).
 interface Statement { run(...args: (string | number | null)[]): unknown; all(...args: (string | number)[]): Record<string, unknown>[]; get(...args: (string | number)[]): Record<string, unknown> | undefined }
@@ -49,7 +52,10 @@ export class DashboardDatabase {
         event_id TEXT PRIMARY KEY, occurred_at INTEGER NOT NULL, event_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (
         installation_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, event_json TEXT NOT NULL);
-      PRAGMA user_version=3;`);
+      CREATE TABLE IF NOT EXISTS rank_state (
+        id TEXT PRIMARY KEY, stage TEXT NOT NULL, week TEXT NOT NULL,
+        missed_json TEXT NOT NULL, stats_json TEXT NOT NULL);
+      PRAGMA user_version=4;`);
   }
 
   insert(event: DashboardEvent): void {
@@ -220,6 +226,53 @@ export class DashboardDatabase {
   settings(): unknown | null {
     const row = this.db.prepare("SELECT event_json FROM settings LIMIT 1").get();
     return row ? JSON.parse(row.event_json as string) : null;
+  }
+
+  rank(now = Date.now()) {
+    const reviews = this.history(10000, 0);
+    const mastery = (this.mastery() as { mastery?: number }[]).map((row) => Number(row.mastery)).filter((value) => Number.isFinite(value));
+    const recall = (this.recall() as { lastReview?: number; stability?: number; topic?: string }[]).map((row) => ({
+      lastReview: Number(row.lastReview) || 0,
+      stability: Number(row.stability) || 0.1,
+      topic: row.topic,
+    }));
+    const stats = rankStats({
+      mastery,
+      recall,
+      reviews: reviews.map((review) => ({
+        groupId: review.groupId, occurredAt: review.occurredAt, outcome: review.outcome, source: review.source,
+      })),
+      now,
+    });
+    const week = weekKey(now);
+    const active = reviews.some((review) => weekKey(review.occurredAt) === week);
+    const stored = this.rankSnapshot();
+    const settled = settleRank(stored, stats, week, active);
+    const shown = !active && stored ? stored.stats : stats;
+    if (settled.snapshot) {
+      this.db.prepare(`INSERT INTO rank_state (id, stage, week, missed_json, stats_json) VALUES ('local', ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET stage=excluded.stage, week=excluded.week, missed_json=excluded.missed_json, stats_json=excluded.stats_json`)
+        .run(settled.snapshot.stage, settled.snapshot.week, JSON.stringify(settled.snapshot.missed), JSON.stringify(settled.snapshot.stats));
+    }
+    return { stage: settled.stage, stats: shown, frozen: !active && !!stored };
+  }
+
+  map(now = Date.now()) {
+    const files = this.files() as FileKnowledge[];
+    const mastery = this.mastery() as ConceptMastery[];
+    const cards = (this.recall() as RecallCard[]);
+    return { files: fileUnderstanding(files, mastery, cards, now), edges: this.edges() };
+  }
+
+  private rankSnapshot(): RankSnapshot | null {
+    const row = this.db.prepare("SELECT stage, week, missed_json, stats_json FROM rank_state WHERE id='local'").get();
+    if (!row) return null;
+    return {
+      stage: String(row.stage) as RankStage,
+      week: String(row.week),
+      missed: JSON.parse(String(row.missed_json)),
+      stats: JSON.parse(String(row.stats_json)),
+    };
   }
 
   /** Questions from one edit, with how many graded answers passed. */

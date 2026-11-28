@@ -1,9 +1,11 @@
-import { app, BrowserWindow, ipcMain, session, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell, type IpcMainInvokeEvent } from "electron";
+import { spawnSync } from "node:child_process";
 import { autoUpdater } from "electron-updater";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { DashboardClient } from "./client.js";
 import type { UpdateStatus } from "./contract.js";
+import { parseRecallTopic, recallUri } from "../../../src/dashboard/recallLink.js";
 
 const rendererPath = path.join(__dirname, "renderer", "index.html");
 const rendererURL = pathToFileURL(rendererPath).href;
@@ -87,7 +89,29 @@ if (!app.requestSingleInstanceLock()) {
       trusted(event) ? client.readHistory(pagination) : { ok: false, error: "Untrusted dashboard request." });
     ipcMain.handle("dashboard:status", event =>
       trusted(event) ? client.readStatus() : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:rank", event =>
+      trusted(event) ? client.readRank() : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:due", event =>
+      trusted(event) ? client.readDue() : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:growth", (event, days: unknown) =>
+      trusted(event) && (days === "7" || days === "30" || days === "all") ? client.readGrowth(days) : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:map", event =>
+      trusted(event) ? client.readMap() : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:settings", event =>
+      trusted(event) ? client.readSettings() : { ok: false, error: "Untrusted dashboard request." });
+    ipcMain.handle("dashboard:settings-write", (event, body: unknown) =>
+      trusted(event) ? client.writeSettings(body as never) : { ok: false, error: "Untrusted dashboard request." });
     ipcMain.handle("app:update-status", event => trusted(event) ? latestUpdate : null);
+    ipcMain.handle("app:open-recall", (event, topic: unknown) => {
+      if (!trusted(event)) return { ok: false, error: "Untrusted dashboard request." };
+      const safe = parseRecallTopic(topic);
+      if (!safe) return { ok: false, error: "That topic cannot be opened." };
+      const lookup = process.platform === "win32" ? "where.exe" : "which";
+      const cursor = spawnSync(lookup, ["cursor"], { encoding: "utf8" }).status === 0;
+      return shell.openExternal(recallUri(safe, cursor ? "cursor" : "vscode"))
+        .then(() => ({ ok: true, data: null }))
+        .catch(() => ({ ok: false, error: "The editor did not open." }));
+    });
     ipcMain.handle("app:install-update", event => {
       if (!trusted(event)) return { ok: false, error: "Untrusted dashboard request." };
       if (!app.isPackaged) return { ok: false, error: "Updates run in the installed app." };

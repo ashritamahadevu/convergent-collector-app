@@ -180,7 +180,9 @@ try {
   await page.locator(".live-question").filter({ hasText: /^Fixture question 21$/ }).waitFor();
   assert.equal(await page.locator("tbody tr").count(), 20);
   await page.getByRole("button", { name: "Growth", exact: true }).click();
-  await page.getByText("Design prototype · Sample data · Projects and History use your saved checks.", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Growth", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Map", exact: true }).click();
+  await page.getByRole("heading", { name: "Map", exact: true }).waitFor();
   await page.getByRole("button", { name: "History", exact: true }).click();
   await page.locator(".live-question").filter({ hasText: "<img src=x onerror=alert(1)> is plain text" }).waitFor();
   console.log("PASS: Real project summaries, unassessed state, project selection, filtered pagination and selection-preserving Refresh.");

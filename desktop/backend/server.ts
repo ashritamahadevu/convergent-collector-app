@@ -2,6 +2,7 @@ import * as http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { isDashboardEvent } from "../../src/dashboard/protocol";
 import { DashboardDatabase } from "./database";
+import { isProjectId } from "../../src/dashboard/views";
 
 export async function startDashboardBackend(options: { databasePath: string; token: string; port?: number }) {
   if (!/^[a-f0-9]{64}$/.test(options.token)) throw new Error("A 32-byte hex pairing token is required");
@@ -26,8 +27,12 @@ export async function startDashboardBackend(options: { databasePath: string; tok
       if (req.method === "GET" && url.pathname === "/v1/history") {
         const limit = Number(url.searchParams.get("limit") ?? 50), offset = Number(url.searchParams.get("offset") ?? 0);
         if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isSafeInteger(offset) || offset < 0) { reply(400, { error: "Invalid pagination" }); return; }
-        reply(200, { checks: database.history(limit, offset), limit, offset }); return;
+        const projectId = url.searchParams.get("projectId");
+        if (projectId !== null && !isProjectId(projectId)) { reply(400, { error: "Invalid project ID" }); return; }
+        reply(200, { checks: database.history(limit, offset, projectId ?? undefined), limit, offset, projectId }); return;
       }
+      if (req.method === "GET" && url.pathname === "/v1/projects") { reply(200, { projects: database.projects() }); return; }
+      if (req.method === "GET" && url.pathname === "/v1/home") { reply(200, database.home()); return; }
       if (req.method === "GET" && url.pathname === "/v1/growth") {
         const days = url.searchParams.get("days") ?? "all";
         if (!["7", "30", "all"].includes(days)) { reply(400, { error: "days must be 7, 30, or all" }); return; }

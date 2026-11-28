@@ -55,7 +55,9 @@ Every endpoint requires `Authorization: Bearer <pairing-token>`. Browser-origin 
 | --- | --- |
 | `POST /v1/events` | Validate and commit one dashboard v1 event (`review.recorded`, `mastery.updated`, `recall.updated`, `file.updated`, `file.edges`, `profile.updated`, `prepset.created`, `settings.updated`), then acknowledge its `eventId` |
 | `POST /v1/heartbeat` | Update extension last-seen time |
-| `GET /v1/history?limit=50&offset=0` | Newest review rows first; page size 1–200 |
+| `GET /v1/history?limit=50&offset=0&projectId=...` | Newest review rows first; page size 1–200; optional exact project-ID filter applied before pagination. Response echoes projectId (null for all projects). |
+| `GET /v1/projects` | Per-project totals, scored/unscored counts, latest activity/name and average assessment out of five, derived from all saved review rows |
+| `GET /v1/home` | Three latest reviews (including unscored), plus three concepts ranked by lowest average recorded assessment score |
 | `GET /v1/growth?days=7` | Raw score points, average out of five, counts, plus a first-try (`retries = 0`) average; accepts `7`, `30`, `all` |
 | `GET /v1/checks` | Review rows folded by `groupId`, with graded questions asked and passed |
 | `GET /v1/mastery` | Latest mastery row per concept |
@@ -98,6 +100,8 @@ The bag contains `enabled`, `charThreshold`, `minAnswerLength`, `provider`, `mod
 - Walkthrough cancellation, bypass, and explanation exits (including during a debug edit) also create local attempt/review records. They do not update mastery/recall. Local statistics exclude the ungraded cancellation outcome as well as bypass/explanation.
 - A bypass count is observed quiz bypasses, not every possible skipped insertion. Failed questions can still be scored/completed. No denominator-based bypass rate or pass-rate chart is supplied yet.
 - File paths are workspace-relative or null if the workspace is unavailable. Projects are identified by a hash of their workspace URI. Moving a project changes its identity in this MVP.
+
+The desktop Projects view (Home > Browse projects) shows real project summaries and opens project-specific History. Project averages use the same non-null assessment scores as the existing backend, with equal weight per review; they are not mastery or first-try scores. An unscored-only project has no numeric average. Projects with no saved reviews are not listed. Identical project names remain separate when their IDs differ; the most recent review supplies the display name. This is an additive read API: event payloads, existing tables, pairing and storage locations are unchanged.
 
 Known scaling limit: Growth currently loads the matching events and computes its average/points in JavaScript. In particular, `days=all` has no point limit. SQL aggregation plus paginated or bucketed chart points is deferred; use bounded periods for large histories.
 

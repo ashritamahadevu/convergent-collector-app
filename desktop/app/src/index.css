@@ -1,8 +1,54 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Inter", Arial, sans-serif;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+.home-projects-control { position: absolute; z-index: 10; left: 415px; top: 55px; font: 14px "Inter:Regular", Arial, sans-serif; }
+.home-refresh-control { position: absolute; z-index: 10; left: 595px; top: 55px; font: 14px "Inter:Regular", Arial, sans-serif; }
+.home-data-status { position: absolute; z-index: 6; left: 190px; right: 76px; top: 117px; color: #94a697; font: 11px/1.4 "Inter", sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-data-error { color: #f2c6ad; }
+.home-weak-card { position: absolute; top: 140px; width: 342px; height: 169px; border: 1px solid rgba(189,219,193,.25); border-radius: 20px; background: rgba(43,43,43,.5); }
+.home-weak-label { position: absolute; top: 13px; left: 16px; color: rgba(189,219,193,.5); font: 700 17px/1.5 "Inter", sans-serif; letter-spacing: .34px; }
+.home-weak-concept { position: absolute; top: 39px; left: 16px; right: 16px; color: #fff; font: 500 30px/1.5 "Inter", sans-serif; letter-spacing: .6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.home-weak-evidence { position: absolute; top: 130px; left: 15px; right: 15px; color: rgba(189,219,193,.5); font: 700 13px/1.5 "Inter", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.live-actions { display: flex; gap: 12px; align-items: center; }
+.projects-scroll { flex: 1; min-height: 0; overflow: auto; padding: 2px 10px 12px 2px; color-scheme: dark; }
+.project-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.projects-home { font-family: "Inter", Arial, sans-serif; }
+.project-card { display: flex; flex-direction: column; gap: 14px; padding: 26px; border-radius: 20px; }
+.project-card:hover { border-color: #72977c; }
+.project-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.project-emblem { font: 700 14px "Inter:Bold", Arial, sans-serif; letter-spacing: 1px; color: rgba(189,219,193,.6); }
+.project-card h2 { font-size: 26px; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.project-identity { color: #8fa795; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-score { display: flex; flex-direction: column; gap: 4px; }
+.project-score strong { font-size: 30px; font-weight: 600; }
+.project-score span, .project-activity { font-size: 14px; color: #a2b1a5; }
+.project-counts { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; padding: 16px 0; border-block: 1px solid #2f4436; }
+.project-counts dt { font-size: 13px; color: #a2b1a5; }
+.project-counts dd { font-size: 24px; margin-top: 4px; }
+.project-activity { margin-top: auto; }
+.project-card .live-button { align-self: flex-start; margin-top: 4px; }
+.project-empty { border-radius: 20px; }
+.project-goblin { width: 110px; height: 110px; image-rendering: pixelated; object-fit: contain; margin-bottom: 22px; }
+.project-empty .live-button { margin-top: 24px; }
+.project-filter { display: flex; align-items: center; gap: 12px; font-size: 14px; flex-shrink: 0; }
+.project-filter select { color-scheme: dark; color: #bddbc1; background: #141b16; border: 1px solid #536e59; border-radius: 12px; padding: 10px; max-width: 340px; font: inherit; }
+.project-filter select:focus-visible { outline: 2px solid #bddbc1; outline-offset: 3px; }
+
 /* Real History keeps the Figma canvas, palette, logo and navigation.
    Its scrollable content supports arbitrary records instead of fixed mock rows. */
-.live-history-screen { color: #bddbc1; font-family: Arial, sans-serif; }
+.live-history-screen { color: #bddbc1; font-family: "Inter", Arial, sans-serif; }
 .live-local-badge { position: absolute; right: 66px; top: 68px; font-size: 16px; color: #94a697; }
 .live-history { position: absolute; left: 184px; right: 66px; top: 150px; bottom: 36px; display: flex; flex-direction: column; gap: 16px; }
 .live-history-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
@@ -43,35 +89,86 @@
 .live-score { font-weight: 600; }
 .live-pagination { display: flex; align-items: center; gap: 12px; font-size: 14px; }
 .live-pagination > span { margin-right: auto; color: #a2b1a5; }
-.prototype-banner { position: absolute; left: 440px; right: 45px; top: 20px; z-index: 50; background: #2b2716; border: 1px solid #756136; color: #f1dfb4; border-radius: 8px; padding: 10px 14px; font: 14px/1.4 Arial, sans-serif; text-align: center; pointer-events: none; }
 .update-banner { position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 80; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #141b16; border: 1px solid #4c6653; color: #bddbc1; border-radius: 12px; padding: 12px 16px; font: 15px/1.4 Arial, sans-serif; }
+
+/* History follows the Figma table treatment without changing review outcomes. */
+.history-view .live-history { z-index: 1; gap: 16px; }
+.history-view .live-history-heading { margin-bottom: 12px; }
+.history-view .live-history h1 { font-size: 32px; }
+.history-view .live-history-heading p { margin-top: 6px; }
+.history-header-actions { display: flex; align-items: center; gap: 22px; }
+.history-header-actions .live-button { border-radius: 24px; }
+.history-sync { display: flex; align-items: center; gap: 8px; color: #91a294; font-size: 12px; }
+.history-view .history-section-title { margin: 0; font-size: 20px; font-weight: 600; }
+.history-view .live-history-tools { margin: 4px 0 6px; min-height: 36px; }
+.history-filter-controls { display: flex; align-items: center; gap: 12px; }
+.history-all-pill { display: inline-flex; align-items: center; height: 36px; padding: 0 24px; border-radius: 28px; color: #172019; background: #bddbc1; font-size: 15px; font-weight: 700; }
+.history-view .project-filter select { height: 36px; padding: 5px 16px; border-radius: 24px; background: rgba(43,43,43,.5); border-color: rgba(189,219,193,.45); font-size: 14px; }
+.history-project-label { color: #95aa99; font-size: 14px; }
+.history-page-controls { display: flex; gap: 7px; align-items: center; color: #bddbc1; }
+.history-page-controls > span { min-width: 54px; font-size: 14px; text-align: center; }
+.history-page-controls button { border: 0; border-radius: 8px; background: transparent; color: #9ebda4; font: 28px/1 "Inter", sans-serif; cursor: pointer; padding: 0 3px; min-width: 22px; }
+.history-page-controls button:disabled { opacity: .3; cursor: default; }
+.history-page-controls button:hover:enabled { background: rgba(189,219,193,.1); color: #d5ebd8; }
+.history-page-controls button:focus-visible, .history-check-toggle:focus-visible { outline: 2px solid #bddbc1; outline-offset: 3px; }
+.history-view .live-records { background: rgba(43,43,43,.5); border-color: rgba(189,219,193,.35); border-radius: 32px; color-scheme: dark; scrollbar-width: thin; scrollbar-color: #566c5b transparent; }
+.history-view .live-table { font-size: 17px; }
+.history-view .live-table th { padding: 14px 26px; background: #1c1f1c; color: #bddbc1; font-size: 16px; font-weight: 400; border-bottom: 1px solid rgba(189,219,193,.25); }
+.history-view .live-table td { padding: 13px 26px; border-top: 0; vertical-align: middle; }
+.history-view .live-table th:first-child { width: 28%; }
+.history-view .live-table th:nth-child(2) { width: 25%; }
+.history-view .live-table th:nth-child(3) { width: 16%; }
+.history-view .live-table th:nth-child(4) { width: 19%; }
+.history-view .live-table th:nth-child(5) { width: 12%; }
+.history-record:hover { background: rgba(189,219,193,.04); }
+.history-check-toggle { display: block; width: 100%; border: 0; background: transparent; text-align: left; color: #f1f3f1; cursor: pointer; font: inherit; }
+.history-check-toggle strong { display: block; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.history-row-chevron { margin-left: 10px; color: #8fa795; font-size: 15px; font-weight: 400; }
+.history-view .live-question { margin-top: 5px; font-size: 12px; color: #8d9b90; -webkit-line-clamp: 1; }
+.history-concepts { color: #8aaf91; font-weight: 500; }
+.history-date { color: #87948a; font-size: 14px; font-weight: 600; }
+.history-score-value { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.history-score-value strong { font-size: 15px; color: #bddbc1; font-weight: 700; }
+.history-score-blocks { display: flex; gap: 3px; flex-shrink: 0; }
+.history-score-blocks > span { display: block; width: 13px; height: 7px; border-radius: 2px; background: #5d6c60; overflow: hidden; }
+.history-score-blocks i { display: block; height: 100%; background: #bddbc1; }
+.history-view .live-outcome { color: #f0f2f0; font-size: 15px; font-weight: 600; }
+.history-view .history-detail-row > td { padding: 6px 26px 24px; background: rgba(10,10,10,.35); }
+.history-view .live-details { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px 24px; padding: 20px; border: 1px solid rgba(189,219,193,.15); border-radius: 16px; }
+.history-view .live-details dt { margin: 0; font-size: 13px; }
+.history-view .live-details dd { font-size: 14px; }
+.prototype-banner { position: absolute; left: 440px; right: 45px; top: 20px; z-index: 50; background: #2b2716; border: 1px solid #756136; color: #f1dfb4; border-radius: 8px; padding: 10px 14px; font: 14px/1.4 "Inter", Arial, sans-serif; text-align: center; pointer-events: none; }
 
 @font-face {
   font-family: "Inter:Bold";
-  src: local("Inter"), local("Arial");
+  src: url("/fonts/InterVariable.woff2") format("woff2");
   font-style: normal;
   font-weight: 700;
+  font-display: swap;
 }
 
 @font-face {
   font-family: "Inter:Medium";
-  src: local("Inter"), local("Arial");
+  src: url("/fonts/InterVariable.woff2") format("woff2");
   font-style: normal;
   font-weight: 500;
+  font-display: swap;
 }
 
 @font-face {
   font-family: "Inter:Regular";
-  src: local("Inter"), local("Arial");
+  src: url("/fonts/InterVariable.woff2") format("woff2");
   font-style: normal;
   font-weight: 400;
+  font-display: swap;
 }
 
 @font-face {
   font-family: "Inter:Semi Bold";
-  src: local("Inter"), local("Arial");
+  src: url("/fonts/InterVariable.woff2") format("woff2");
   font-style: normal;
   font-weight: 600;
+  font-display: swap;
 }
 
 @layer base {
@@ -83,6 +180,7 @@
   }
 
   body {
+    font-family: "Inter", Arial, sans-serif;
     overflow: hidden;
     background: #0a0a0a;
   }
@@ -96,6 +194,32 @@
   background: #0a0a0a;
 }
 
+/* The bridge follows the actual window, outside the scaled Figma canvas.
+   At the existing 960px minimum window width it remains above 720px wide.
+   A height cap and contain fit keep the whole artwork visible on wide windows. */
+.drawbridge-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 115%, rgba(189,219,193,.12), transparent 65%);
+}
+
+.drawbridge-bridge {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  min-width: 720px;
+  max-width: calc(100% - 24px);
+  height: auto;
+  max-height: 28vh;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
 .drawbridge-canvas {
   position: absolute;
   top: 50%;
@@ -104,6 +228,7 @@
   height: 1024px;
   overflow: hidden;
   transform-origin: center;
+  z-index: 1;
 }
 
 .screen-transition {

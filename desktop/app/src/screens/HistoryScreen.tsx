@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import BrandLogo from "../components/BrandLogo";
 import Toolbar from "../components/Toolbar";
 import type { ReviewEvent } from "../../../../src/dashboard/protocol";
-import type { ConnectionStatus } from "../../electron/contract";
+import type { ConnectionStatus, ProjectSummary } from "../../electron/contract";
 
 const pageSize = 20;
 const date = (value: number | null) => {
@@ -11,9 +11,18 @@ const date = (value: number | null) => {
   return Number.isNaN(d.getTime()) ? "Timestamp unavailable" : d.toLocaleString();
 };
 const score = (event: ReviewEvent) => event.score === null
-  ? "Not scored" : (event.score * 5).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " / 5";
+  ? "Not scored" : (event.score * 5).toLocaleString(undefined, { maximumFractionDigits: 2 }) + "/5";
 
-export default function HistoryScreen() {
+const shortDate = (value: number) => {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "Unavailable" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
+
+type Project = Pick<ProjectSummary, "id" | "name">;
+export default function HistoryScreen({ project, onProjectChange }: {
+  project: Project | null; onProjectChange: (project: Project | null) => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [checks, setChecks] = useState<ReviewEvent[]>([]);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -21,13 +30,17 @@ export default function HistoryScreen() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [statusError, setStatusError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsError, setProjectsError] = useState("");
   const requestNumber = useRef(0);
 
   async function load(nextOffset: number) {
     const request = ++requestNumber.current;
     setLoading(true);
+    setExpandedId(null);
     setError("");
     setStatusError("");
+    setProjectsError("");
     const bridge = window.drawbridge;
     if (!bridge) {
       setError("Desktop bridge unavailable. Open this interface with npm.cmd start in desktop/app, rather than in a web browser.");
@@ -37,8 +50,9 @@ export default function HistoryScreen() {
       return;
     }
     try {
-      const [history, connection] = await Promise.all([
-        bridge.readHistory({ limit: pageSize, offset: nextOffset }), bridge.readStatus(),
+      const [history, connection, list] = await Promise.all([
+        bridge.readHistory({ limit: pageSize, offset: nextOffset, projectId: project?.id }), bridge.readStatus(),
+        bridge.readProjects(),
       ]);
       if (request !== requestNumber.current) return;
       if (!history.ok) {
@@ -51,6 +65,8 @@ export default function HistoryScreen() {
       }
       setStatus(connection.ok ? connection.data : null);
       if (!connection.ok) setStatusError(connection.error);
+      setProjects(list.ok ? list.data.projects : []);
+      if (!list.ok) setProjectsError(list.error);
     } catch {
       if (request !== requestNumber.current) return;
       setChecks([]);
@@ -66,42 +82,59 @@ export default function HistoryScreen() {
     return () => { requestNumber.current++; };
   }, []);
 
+  const page = Math.floor(offset / pageSize) + 1;
+  const pagination = <div className="history-page-controls">
+    <button aria-label="First page" title="First page" disabled={loading || offset === 0}
+      onClick={() => void load(0)}>«</button>
+    <button aria-label="Previous" title="Previous page" disabled={loading || offset === 0}
+      onClick={() => void load(Math.max(0, offset - pageSize))}>‹</button>
+    <span aria-label={"Page " + page}>Page {page}</span>
+    <button aria-label="Next" title="Next page" disabled={loading || !!error || checks.length < pageSize}
+      onClick={() => void load(offset + pageSize)}>›</button>
+  </div>;
+
   return (
-    <div className="history-screen relative size-full live-history-screen">
+    <div className="history-screen history-view relative size-full live-history-screen">
       <Toolbar active="history" />
       <BrandLogo className="absolute top-[45px] left-[184px] h-[70px] w-[190px] object-contain" />
-      <span className="live-local-badge">Local learning history</span>
       <section className="live-history" aria-labelledby="history-heading">
         <header className="live-history-heading">
           <div>
-            <p className="live-eyebrow">YOUR LEARNING RECORD</p>
             <h1 id="history-heading">History</h1>
-            <p>One comprehension check per row. Open a check to read its answer and feedback.</p>
+            <p>{project ? projects.find(p => p.id === project.id)?.name || project.name || "Unnamed project" : "All projects"}</p>
           </div>
-          <button className="live-button live-primary" disabled={loading} onClick={() => void load(0)}>
-            {loading ? "Loading…" : "Refresh"}
-          </button>
+          <div className="history-header-actions">
+            <span className="history-sync" role="status"
+              title={status ? "Last received: " + date(status.lastSyncedAt) + (updatedAt ? " · Refreshed: " + date(updatedAt) : "") : statusError}>
+              <span className={"live-dot " + (status?.extensionConnected ? "connected" : "")} />
+              {status ? status.extensionConnected ? "Connected" : "Waiting for extension" : "Status unavailable"}
+            </span>
+            <button className="live-button live-primary" disabled={loading} onClick={() => void load(0)}>
+              {loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </header>
-        <div className="live-connection" role="status">
-          <span className={"live-dot " + (status?.extensionConnected ? "connected" : "")} />
-          <span>{status
-            ? status.extensionConnected ? "Extension recently seen" : "Extension not recently seen"
-            : "Connection status unavailable"}</span>
-          {status && <span>Last check received: {date(status.lastSyncedAt)}</span>}
-          {updatedAt !== null && !error && <span>Loaded: {date(updatedAt)}</span>}
-        </div>
-        {status && !status.extensionConnected && <p className="live-hint">
-          History remains available while VS Code is closed. To send new checks, pair the extension and enable Desktop Sync.
-        </p>}
         {statusError && !error && <p className="live-hint">{statusError}</p>}
+        <h2 className="history-section-title">Checks</h2>
         <div className="live-history-tools">
-          <span className="live-chip">All checks · newest first</span>
-          <p>Search, week and “Needs review” filters are deferred until they can cover all pages.</p>
+          <div className="history-filter-controls">
+            <span className="history-all-pill">All checks</span>
+            <label className="project-filter">
+              <span className="history-project-label">Project</span>
+              <select aria-label="Project" value={project?.id ?? ""} disabled={loading} onChange={e => {
+                const selected = projects.find(p => p.id === e.target.value);
+                onProjectChange(selected ? { id: selected.id, name: selected.name } : null);
+              }}>
+                <option value="">All projects</option>
+                {project && !projects.some(p => p.id === project.id) &&
+                  <option value={project.id}>{project.name || "Unnamed project"}</option>}
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name || "Unnamed project"} · {p.id.slice(0, 8)}</option>)}
+              </select>
+            </label>
+          </div>
+          {pagination}
         </div>
-        <p className="live-hint">
-          Assessment scores use the recorded score × 5, not a count of five questions or a first-try score.
-          Bypasses and other unscored checks say “Not scored.”
-        </p>
+        {projectsError && !error && <p className="live-hint">Project selector unavailable: {projectsError}</p>}
         <div className="live-records" aria-busy={loading}>
           {loading ? <div className="live-state" role="status"><h2>Loading saved checks…</h2></div>
             : error ? <div className="live-state live-error" role="alert">
@@ -110,42 +143,57 @@ export default function HistoryScreen() {
             : checks.length === 0 ? <div className="live-state">
                 <h2>{offset === 0 ? "No learning checks yet" : "No more checks on this page"}</h2>
                 <p>{offset === 0
-                  ? "Start and pair the VS Code extension, complete a supported quiz, then choose Refresh."
+                  ? "Complete a check in VS Code, then choose Refresh."
                   : "Choose Previous or Refresh to return to the newest saved checks."}</p>
               </div>
             : <table className="live-table">
-                <thead><tr><th>Check / details</th><th>Concepts</th><th>When</th><th>Assessment</th><th>Outcome</th></tr></thead>
-                <tbody>{checks.map(event => <tr key={event.eventId}>
-                  <td><details>
-                    <summary><strong>{event.project.name || "Unnamed project"}</strong>
-                      <span className="live-question">{event.question || "Question text unavailable"}</span>
-                      <span className="live-detail-prompt">View answer and feedback</span>
-                    </summary>
-                    <dl className="live-details">
-                      <dt>Question</dt><dd>{event.question || "Not captured"}</dd>
-                      <dt>Final recorded answer</dt><dd>{event.answer || "Not captured by this check path"}</dd>
-                      <dt>Feedback</dt><dd>{event.feedback || "Not captured"}</dd>
-                      {event.misconception && <><dt>Misconception</dt><dd>{event.misconception}</dd></>}
-                      <dt>File</dt><dd>{event.filePath || "Not available"}</dd>
-                      <dt>Source / mode</dt><dd>{event.source} / {event.mode}</dd>
-                      <dt>Topic / check shape</dt><dd>{event.topic || "Not tagged"} / {event.shape}</dd>
-                      <dt>Check group</dt><dd>{event.groupId}</dd>
-                      <dt>Reported retries</dt><dd>{event.retries} · Individual attempts are not stored here. Local-picker checks report zero when unavailable.</dd>
-                      <dt>Event ID</dt><dd>{event.eventId}</dd>
-                    </dl>
-                  </details></td>
-                  <td>{event.concepts.length ? event.concepts.join(", ") : "Not tagged"}</td>
-                  <td><time>{date(event.occurredAt)}</time></td>
-                  <td className="live-score">{score(event)}</td>
-                  <td><span className={"live-outcome outcome-" + event.outcome}>{event.outcome}</span></td>
-                </tr>)}</tbody>
+                <thead><tr><th scope="col">Checks</th><th scope="col">Concepts</th><th scope="col">Date</th><th scope="col">Score</th><th scope="col">Status</th></tr></thead>
+                <tbody>{checks.map(event => <Fragment key={event.eventId}>
+                  <tr className="history-record">
+                    <td>
+                      <button className="history-check-toggle" aria-expanded={expandedId === event.eventId}
+                        aria-controls={"details-" + event.eventId}
+                        onClick={() => setExpandedId(id => id === event.eventId ? null : event.eventId)}
+                        title="View answer and feedback">
+                        <strong>{event.project.name || "Unnamed project"}<span className="history-row-chevron" aria-hidden="true">{expandedId === event.eventId ? "−" : "+"}</span></strong>
+                        <span className="live-question">{event.question || "Question text unavailable"}</span>
+                      </button>
+                    </td>
+                    <td className="history-concepts">{event.concepts.length ? event.concepts.join(", ") : "Not tagged"}</td>
+                    <td className="history-date"><time title={date(event.occurredAt)}>{shortDate(event.occurredAt)}</time></td>
+                    <td className="live-score">
+                      <div className="history-score-value" title="Recorded assessment score">
+                        <span className="history-score-blocks" aria-hidden="true">
+                          {[0, 1, 2, 3, 4].map(index => <span key={index}>
+                            <i style={{ width: (event.score === null ? 0 : Math.max(0, Math.min(1, event.score * 5 - index))) * 100 + "%" }} />
+                          </span>)}
+                        </span>
+                        <strong>{score(event)}</strong>
+                      </div>
+                    </td>
+                    <td><span className={"live-outcome outcome-" + event.outcome}>{event.outcome}</span></td>
+                  </tr>
+                  {expandedId === event.eventId && <tr className="history-detail-row" id={"details-" + event.eventId}>
+                    <td colSpan={5}>
+                      <dl className="live-details">
+                        <dt>Question</dt><dd>{event.question || "Not captured"}</dd>
+                        <dt>Final recorded answer</dt><dd>{event.answer || "Not captured by this check path"}</dd>
+                        <dt>Feedback</dt><dd>{event.feedback || "Not captured"}</dd>
+                        {event.misconception && <><dt>Misconception</dt><dd>{event.misconception}</dd></>}
+                        <dt>Project</dt><dd>{event.project.name || "Unnamed project"}</dd>
+                        <dt>Date</dt><dd>{date(event.occurredAt)}</dd>
+                        <dt>File</dt><dd>{event.filePath || "Not available"}</dd>
+                        <dt>Source / mode</dt><dd>{event.source} / {event.mode}</dd>
+                        <dt>Topic / check shape</dt><dd>{event.topic || "Not tagged"} / {event.shape}</dd>
+                        <dt>Check group</dt><dd>{event.groupId}</dd>
+                        <dt>Reported retries</dt><dd>{event.retries} · Individual attempts are not stored here. Local-picker checks report zero when unavailable.</dd>
+                        <dt>Event ID</dt><dd>{event.eventId}</dd>
+                      </dl>
+                    </td>
+                  </tr>}
+                </Fragment>)}</tbody>
               </table>}
         </div>
-        <footer className="live-pagination">
-          <span>{checks.length && !error && !loading ? "Checks " + (offset + 1) + "–" + (offset + checks.length) : "20 checks per page"}</span>
-          <button className="live-button" disabled={loading || offset === 0} onClick={() => void load(Math.max(0, offset - pageSize))}>Previous</button>
-          <button className="live-button" disabled={loading || !!error || checks.length < pageSize} onClick={() => void load(offset + pageSize)}>Next</button>
-        </footer>
       </section>
     </div>
   );

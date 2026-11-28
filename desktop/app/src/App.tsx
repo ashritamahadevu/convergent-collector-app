@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import GrowthScreen from "./screens/GrowthScreen";
 import HistoryScreen from "./screens/HistoryScreen";
+import ProjectsScreen from "./screens/ProjectsScreen";
 import HomeScreen from "./screens/HomeScreen";
+import type { ProjectSummary } from "../electron/contract";
 import MapAllScreen from "./screens/MapAllScreen";
 
 type Screen = "home" | "history" | "growth" | "map";
@@ -36,12 +38,6 @@ type MapFile = {
   weakPoint: string;
   linkedFiles: string;
 };
-
-const screens = {
-  home: HomeScreen,
-  history: HistoryScreen,
-  growth: GrowthScreen,
-} satisfies Record<Exclude<Screen, "map">, React.ComponentType>;
 
 const navItems: Array<{ screen: Screen; label: string; top: number }> = [
   { screen: "home", label: "Home", top: 278 },
@@ -250,10 +246,12 @@ const mapFiles: MapFile[] = [
 ];
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("history");
+  const [screen, setScreen] = useState<Screen>("home");
+  const [showProjects, setShowProjects] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<Pick<ProjectSummary, "id" | "name"> | null>(null);
   const [toolbarMotion, setToolbarMotion] = useState({
-    from: 131,
-    to: 131,
+    from: 0,
+    to: 0,
     overshoot: 0,
     tailOffset: 0,
     active: false,
@@ -297,6 +295,7 @@ export default function App() {
 
   const navigateTo = useCallback(
     (destination: Screen) => {
+      if (destination === "home") setShowProjects(false);
       if (destination === screen) return;
 
       const from = toolbarOffsets[screen];
@@ -313,7 +312,6 @@ export default function App() {
     [screen, showScreen],
   );
 
-  const ScreenComponent = screen === "map" ? MapAllScreen : screens[screen];
   const selectedFile = mapFiles.find((file) => file.name === selectedMapFile) ?? mapFiles[10];
   const selectMapFilter = (filter: MapFilter) => {
     setMapFilter(filter);
@@ -327,6 +325,9 @@ export default function App() {
 
   return (
     <main className="drawbridge-viewport">
+      <div className="drawbridge-backdrop" aria-hidden="true">
+        <img className="drawbridge-bridge" src="./assets/home/0687b.svg" alt="" />
+      </div>
       <div
         className={`drawbridge-canvas ${toolbarMotion.active ? "toolbar-liquid-active" : ""} ${
           screen === "map"
@@ -345,10 +346,22 @@ export default function App() {
           } as CSSProperties
         }
       >
-        <div className="screen-transition" key={screen}>
-          <ScreenComponent />
+        <div className="screen-transition" key={screen + (showProjects && screen === "home" ? "-projects" : "")}>
+          {screen === "home" ? showProjects ? <ProjectsScreen
+            onOpenProject={project => { setSelectedProject(project); navigateTo("history"); }}
+            onOpenHistory={() => { setSelectedProject(null); navigateTo("history"); }}
+          /> : <HomeScreen /> : screen === "history" ? <HistoryScreen
+            key={selectedProject?.id ?? "all"}
+            project={selectedProject}
+            onProjectChange={setSelectedProject}
+          /> : screen === "growth" ? <GrowthScreen /> : <MapAllScreen />}
         </div>
-        {screen !== "history" && <div className="prototype-banner" role="status">Design prototype · Sample data · Only History is connected to your saved checks.</div>}
+        {screen === "home" && <>
+          <button className="home-projects-control live-button" onClick={() => setShowProjects(value => !value)}>
+            {showProjects ? "Back to Home" : "Browse projects"}
+          </button>
+        </>}
+        {(screen === "growth" || screen === "map") && <div className="prototype-banner" role="status">Design prototype · Sample data · Projects and History use your saved checks.</div>}
         <nav aria-label="DrawBridge">
           {navItems.map((item) => (
             <button

@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { DashboardBridge, UpdateStatus } from "./contract.js";
 
 const bridge: DashboardBridge = {
+  readHome: () => ipcRenderer.invoke("dashboard:home"),
+  readProjects: () => ipcRenderer.invoke("dashboard:projects"),
   readHistory: pagination => ipcRenderer.invoke("dashboard:history", pagination),
   readStatus: () => ipcRenderer.invoke("dashboard:status"),
   readUpdateStatus: () => ipcRenderer.invoke("app:update-status"),

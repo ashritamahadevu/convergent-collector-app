@@ -173,7 +173,21 @@ input:focus, select:focus { border-color: var(--green); }
 .held-title { font: 700 18px var(--f-pixel); color: var(--green); letter-spacing: .03em; }
 .pill { font: 600 11.5px var(--f-num); color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
 .held .btn { padding: 9px 16px; font-size: 14px; justify-self: start; }
-.hero-gob { position: absolute; width: 112px; right: -6px; top: -58px; z-index: 2; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+.hero-gob { position: absolute; width: 112px; right: -6px; top: -58px; z-index: 3; padding: 0; border: 0; background: none; cursor: pointer; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); -webkit-tap-highlight-color: transparent; }
+.hero-gob img { display: block; width: 100%; height: auto; }
+.hero-gob:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; border-radius: 8px; }
+.hero-gob.hop { animation: gob-hop .5s steps(3) both; }
+.hero-gob.huff { animation: gob-huff .36s steps(2) both; }
+@keyframes gob-hop { 0% { transform: translateY(0); } 35% { transform: translateY(-22px); } 65% { transform: translateY(0); } 82% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+@keyframes gob-huff { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.gob-say {
+  position: absolute; right: 116px; top: -50px; z-index: 3; max-width: min(240px, calc(100% - 130px));
+  margin: 0; padding: 9px 12px; background: var(--ink); color: var(--green); border: 2px solid var(--green);
+  box-shadow: 4px 4px 0 var(--wall); font: 500 15px/1.25 var(--f-pixel); letter-spacing: .02em;
+  opacity: 0; transform: scale(.6); transform-origin: right center; pointer-events: none;
+}
+.gob-say::after { content: ""; position: absolute; right: -9px; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--green); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.gob-say.on { opacity: 1; transform: scale(1); transition: opacity .12s steps(2), transform .12s steps(2); }
 .gate-wrap { position: relative; padding-top: 40px; min-width: 0; }
 
 /* ---------- feature rows ---------- */
@@ -347,16 +361,37 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
   .tile .tiny { font-size: 10.5px; }
   .tile .big { font-size: 1.35rem; white-space: nowrap; }
   .hero-gob { width: 84px; top: -40px; }
+  .gob-say { right: 88px; top: -38px; font-size: 13.5px; max-width: min(220px, calc(100% - 100px)); }
   .code { font-size: 12.5px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .portcullis { animation: none; transform: none; }
   .bridge-bar i { transition: none; }
+  .hero-gob.hop, .hero-gob.huff { animation: none; }
 }
+/* ---------- intro: the bridge lowers (plays once per visit) ---------- */
+#intro { display: none; position: fixed; inset: 0; z-index: 100; background: var(--ink); overflow: hidden; cursor: pointer; }
+html.intro #intro { display: block; }
+html.intro body { overflow: hidden; }
+#intro.out { transform: translateY(-100%); transition: transform .42s steps(8); }
+#intro canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.intro-skip { position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); font: 500 12px var(--f-code); color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
 </style>
+<script>
+/* Decide before first paint whether the bridge intro plays: once per visit, never with reduced motion. */
+(function () {
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (sessionStorage.getItem('db-intro')) return;
+    sessionStorage.setItem('db-intro', '1');
+  } catch (e) { return; }
+  document.documentElement.classList.add('intro');
+})();
+</script>
 </head>
 <body>
+<div id="intro" aria-hidden="true"><canvas id="intro-cv"></canvas><button class="intro-skip" type="button" tabindex="-1">skip</button></div>
 
 <header class="nav">
   <div class="wrap">
@@ -396,7 +431,8 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
     </div>
 
     <div class="gate-wrap">
-      <img class="hero-gob" src="/assets/gob-stand.png" alt="" width="112" height="91">
+      <button class="hero-gob" id="hero-gob" type="button" aria-label="Poke the goblin"><img src="/assets/gob-stand.png" alt="" width="112" height="91"></button>
+      <p class="gob-say" id="gob-say" role="status" aria-live="polite"></p>
       <div class="panel gate-card" aria-label="Example: code held by DrawBridge">
         <div class="gate-top">
           <i class="dot"></i><i class="dot"></i><i class="dot"></i>
@@ -615,7 +651,7 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
       <div class="team-grid">
         <div class="panel crew"><span class="card-k">Product</span><ul><li>Omar Mohamed <span>· PM</span></li><li>Elizaveta Khudorozhkova</li></ul></div>
         <div class="panel crew"><span class="card-k">Tech</span><ul><li>Ethan Jeng</li><li>Ashrita Mahadevu</li><li>Elizabeth Kuromiema</li><li>Sameer Agarwal</li><li>Angelyna Mackie</li></ul></div>
-        <div class="panel crew"><span class="card-k">Design</span><ul><li>Sumit Kalamani</li><li>Sophia Sartor</li></ul></div>
+        <div class="panel crew"><span class="card-k">Design</span><ul><li>Sumit Kalaimani</li><li>Sophia Sartor</li></ul></div>
       </div>
     </div>
   </div>
@@ -879,6 +915,188 @@ footer .wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 32px; }
     });
   });
   function show(el, text, kind) { if (!el) return; el.textContent = text; el.className = 'form-msg ' + kind; }
+})();
+</script>
+<script>
+/* Intro: two pixel castles build, the bridge lowers, the goblin crosses, the gate lifts. About 2.3s. */
+(() => {
+  const root = document.documentElement, ov = document.getElementById('intro');
+  if (!ov || !root.classList.contains('intro')) return;
+  const cv = document.getElementById('intro-cv'), ctx = cv.getContext('2d');
+  let ended = false, raf = 0, timer = 0;
+  function finish() {
+    if (ended) return; ended = true;
+    clearTimeout(timer); cancelAnimationFrame(raf);
+    ov.classList.add('out');
+    setTimeout(() => { root.classList.remove('intro'); ov.remove(); }, 450);
+  }
+  ov.addEventListener('click', finish);
+  addEventListener('keydown', finish, { once: true });
+
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  const outBack = x => { x = clamp(x); const c = 1.4; return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2; };
+  const img = src => { const i = new Image(); i.src = src; return i; };
+  const gobA = img('/assets/gob-stand.png'), gobB = img('/assets/gob-yes.png');
+  const TOWER = [
+    'gg..gg..gg', '##..##..##', 'gggggggggg', '##########', '#l######l#', '##########',
+    '####ww####', '####ww####', '####ww####', '##########', '##l####l##', '##########',
+    '##########', '#l######l#', '##########', '##########', '##########', '##########',
+    '##l####l##', '##########', '##########', '#l######l#', '##########', '##########',
+    '##########', '##########'];
+  const COL = { '#': '#1e4a2a', g: '#5fd38a', l: '#2a6b3c', w: '#0b0d0b' };
+  const SW = 44, SH = 26, TW = 10, DECK = 16, HALF = 12;
+  const TAG = 'hold AI code until you understand it.';
+  // Timeline (ms)
+  const BUILD = 440, LOWER = 620, LOCK = 1100, WALK = 1130, WALK_END = 1700, TYPE = 1300, TYPE_END = 1800, OUT = 2300;
+  const rnd = n => { const x = Math.sin(n * 91.7 + 7.3) * 43758.5; return x - Math.floor(x); };
+  let W, H, c, ox, oy;
+  function size() {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c = Math.max(4, Math.floor(Math.min(W * 0.78 / SW, H * 0.4 / SH)));
+    ox = Math.round((W - SW * c) / 2); oy = Math.round(H * 0.42 - SH * c / 2);
+  }
+  size(); addEventListener('resize', size);
+
+  function tower(t, x0, mirror) {
+    for (let r = 0; r < SH; r++) for (let k = 0; k < TW; k++) {
+      const ch = TOWER[r][mirror ? TW - 1 - k : k]; if (ch === '.') continue;
+      const at = (SH - 1 - r) / SH * BUILD + rnd(r * 31 + k + (mirror ? 999 : 0)) * 150;
+      const p = clamp((t - at) / 100); if (p <= 0) continue;
+      const s = c * (0.4 + 0.6 * p);
+      ctx.fillStyle = COL[ch];
+      ctx.fillRect(ox + (x0 + k) * c + (c - s) / 2, oy + r * c + (c - s) / 2, s + 0.5, s + 0.5);
+    }
+  }
+  function deck(px, py, ang, dir) {
+    ctx.save(); ctx.translate(px, py); ctx.rotate(ang);
+    for (let i = 0; i < HALF; i++) {
+      ctx.fillStyle = i % 3 === 2 ? '#2e8b4a' : '#5fd38a';
+      ctx.fillRect(dir * i * c - (dir < 0 ? c : 0), 0, c + 0.5, c * 2);
+    }
+    ctx.restore();
+    return [px + Math.cos(ang) * dir * HALF * c, py + Math.sin(ang) * dir * HALF * c];
+  }
+  function chain(x1, y1, x2, y2) {
+    const n = Math.max(2, Math.round(Math.hypot(x2 - x1, y2 - y1) / (c * 0.9)));
+    ctx.fillStyle = '#a9d8b1';
+    for (let i = 0; i <= n; i++) { const k = i / n; ctx.fillRect(x1 + (x2 - x1) * k - c * 0.2, y1 + (y2 - y1) * k - c * 0.2, c * 0.4, c * 0.4); }
+  }
+  const t0 = performance.now();
+  function frame(now) {
+    const t = now - t0;
+    ctx.fillStyle = '#0b0d0b'; ctx.fillRect(0, 0, W, H);
+    const sh = t > LOCK && t < LOCK + 220 ? Math.sin((t - LOCK) / 18) * c * 0.35 * (1 - (t - LOCK) / 220) : 0;
+    ctx.save(); ctx.translate(0, sh);
+    const wa = clamp((t - 380) / 260);
+    if (wa > 0) {
+      ctx.globalAlpha = wa;
+      ctx.fillStyle = '#0f2a22'; ctx.fillRect(ox + TW * c, oy + 20 * c, (SW - 2 * TW) * c, 6 * c);
+      ctx.fillStyle = '#1f5a48';
+      for (let r = 20; r < 26; r += 2) for (let k = TW; k < SW - TW; k += 4) {
+        const off = Math.floor((t / 140 + r) % 4);
+        ctx.fillRect(ox + (k + off) * c, oy + r * c, c * 2, c * 0.5);
+      }
+      ctx.globalAlpha = 1;
+    }
+    tower(t, 0, false); tower(t, SW - TW, true);
+    const da = clamp((t - 440) / 160);
+    if (da > 0) {
+      ctx.globalAlpha = da;
+      const p = t < LOWER ? 0 : outBack((t - LOWER) / (LOCK - LOWER));
+      const hy = oy + DECK * c;
+      const tipL = deck(ox + TW * c, hy, -Math.PI / 2 * (1 - p), 1);
+      const tipR = deck(ox + (SW - TW) * c, hy, Math.PI / 2 * (1 - p), -1);
+      chain(ox + (TW - 0.5) * c, oy + 2.5 * c, tipL[0], tipL[1]);
+      chain(ox + (SW - TW + 0.5) * c, oy + 2.5 * c, tipR[0], tipR[1]);
+      ctx.globalAlpha = 1;
+    }
+    const g = gobA.complete && gobA.naturalWidth ? (t > WALK_END + 20 && gobB.complete && gobB.naturalWidth ? gobB : gobA) : null;
+    const ga = clamp((t - (WALK - 110)) / 130);
+    if (g && ga > 0) {
+      const gw = 8 * c, gh = gw * g.naturalHeight / g.naturalWidth;
+      const k = clamp((t - WALK) / (WALK_END - WALK));
+      const x = ox + (TW - 2) * c + (SW - 2 * TW + 2) * c * k;
+      const bob = k > 0 && k < 1 && Math.floor(t / 100) % 2 ? c * 0.6 : 0;
+      ctx.globalAlpha = ga;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(g, x - gw / 2, oy + DECK * c - gh - bob, gw, gh);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+    const n = Math.floor(clamp((t - TYPE) / (TYPE_END - TYPE)) * TAG.length);
+    if (n > 0) {
+      const fs = Math.max(17, Math.min(30, c * 1.9));
+      ctx.font = `600 ${fs}px "Space Grotesk", Inter, sans-serif`;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      let x = W / 2 - ctx.measureText(TAG).width / 2; const y = oy + SH * c + fs * 2.1;
+      const cut = TAG.indexOf('understand');
+      const a = TAG.slice(0, Math.min(n, cut)), b = n > cut ? TAG.slice(cut, n) : '';
+      ctx.fillStyle = '#e4ede5'; ctx.fillText(a, x, y); x += ctx.measureText(a).width;
+      ctx.fillStyle = '#5fd38a'; ctx.fillText(b, x, y); x += ctx.measureText(b).width;
+      if (Math.floor(t / 260) % 2 === 0 || n < TAG.length) { ctx.fillStyle = '#e4ede5'; ctx.fillRect(x + 3, y - fs * 0.5, fs * 0.45, fs); }
+    }
+    if (!ended) raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
+  timer = setTimeout(finish, OUT);
+})();
+</script>
+<script>
+/* Hero goblin: poke it and it questions you back. Five quick pokes and it falls asleep. */
+(function () {
+  const btn = document.getElementById('hero-gob'), say = document.getElementById('gob-say');
+  if (!btn || !say) return;
+  const img = btn.querySelector('img');
+  const SRC = { stand: '/assets/gob-stand.png', no: '/assets/gob-no.png', sleep: '/assets/gob-sleep.png' };
+  [SRC.no, SRC.sleep].forEach(s => { const i = new Image(); i.src = s; });
+  const LINES = [
+    'hey. explain that click.',
+    'did AI write that click?',
+    'no free passes.',
+    "poking me won't lower the bridge.",
+    'the gate stays shut till you explain it.',
+    'ok but what does dedupe() return?',
+    'join the waitlist. then we talk.'
+  ];
+  let i = 0, pokes = 0, asleep = false, tSay, tFace, tReset, tWake;
+
+  function bubble(text, ms) {
+    clearTimeout(tSay);
+    say.textContent = text;
+    say.classList.remove('on'); void say.offsetWidth; say.classList.add('on');
+    tSay = setTimeout(() => say.classList.remove('on'), ms || 2200);
+  }
+  function play(cls) {
+    btn.classList.remove('hop', 'huff'); void btn.offsetWidth; btn.classList.add(cls);
+  }
+  btn.addEventListener('animationend', () => btn.classList.remove('hop', 'huff'));
+
+  btn.addEventListener('click', () => {
+    if (asleep) { play('huff'); bubble('zzz…', 1200); return; }
+    pokes++;
+    clearTimeout(tReset);
+    tReset = setTimeout(() => { pokes = 0; }, 4000);
+
+    if (pokes >= 5) {
+      pokes = 0; asleep = true;
+      clearTimeout(tFace);
+      img.src = SRC.sleep;
+      bubble("ok i'm done. wake me when you ship.", 2400);
+      tWake = setTimeout(() => {
+        asleep = false; img.src = SRC.stand; play('hop');
+        bubble('huh? oh. you again.', 2000);
+      }, 4500);
+      return;
+    }
+    play('hop');
+    img.src = SRC.no;
+    clearTimeout(tFace);
+    tFace = setTimeout(() => { if (!asleep) img.src = SRC.stand; }, 900);
+    bubble(LINES[i++ % LINES.length]);
+  });
 })();
 </script>
 </body>

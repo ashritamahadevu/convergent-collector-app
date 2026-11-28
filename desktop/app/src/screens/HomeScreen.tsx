@@ -14,7 +14,6 @@ const imgGroup2 = `${assetPathPrefix}/a43e2.svg`;
 const imgGroup3 = `${assetPathPrefix}/c8c72.svg`;
 const imgGroup4 = `${assetPathPrefix}/5f1fb.svg`;
 const imgGroup5 = `${assetPathPrefix}/2fd73.svg`;
-const imgGroup27 = `${assetPathPrefix}/0687b.svg`;
 const goblinSprite = `${assetPathPrefix}/goblin_sprite.png`;
 
 const homeMockData = {
@@ -357,25 +356,15 @@ export default function DashboardDrawbridge() {
     <div
       className="relative size-full"
       data-node-id="1:98"
-      style={{
-        backgroundImage:
-          "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 1440 1024' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(0.0000042832 -184.55 132.12 0.0000030663 720 2357.5)'><stop stop-color='rgba(189,219,193,1)' offset='0'/><stop stop-color='rgba(144,167,147,1)' offset='0.25'/><stop stop-color='rgba(122,141,124,1)' offset='0.375'/><stop stop-color='rgba(100,115,102,1)' offset='0.5'/><stop stop-color='rgba(77,88,79,1)' offset='0.625'/><stop stop-color='rgba(55,62,56,1)' offset='0.75'/><stop stop-color='rgba(32,36,33,1)' offset='0.875'/><stop stop-color='rgba(21,23,21,1)' offset='0.9375'/><stop stop-color='rgba(10,10,10,1)' offset='1'/></radialGradient></defs></svg>\")",
-      }}
       data-name="Dashboard Drawbridge"
     >
       <button className="home-refresh-control live-button" disabled={loading} onClick={() => void refresh()}>
         {loading ? "Loading…" : "Refresh"}
       </button>
-      <p className={"home-data-status" + (error ? " home-data-error" : "")}
-        role={error ? "alert" : "status"} title={error || "Concept cards rank the lowest mean recorded score, across all saved reviews. Each tagged review counts once per concept."}>
-        {error ? "Home data unavailable. Check the backend, then Refresh. " + error :
-          loading ? "Loading saved checks…" : "All projects · Lowest scored concepts and three latest checks"}
-      </p>
-      <div className="absolute inset-[78.42%_-4.31%_-0.03%_-4.24%]" data-node-id="1:99">
-        <div className="absolute inset-[-2.26%_-0.32%]">
-          <img alt="" className="block max-w-none size-full" src={imgGroup27} />
-        </div>
-      </div>
+      {(loading || error) && <p className={"home-data-status" + (error ? " home-data-error" : "")}
+        role={error ? "alert" : "status"}>
+        {error ? "Home data unavailable. Check the backend, then Refresh. " + error : "Loading saved checks…"}
+      </p>}
       <Toolbar active="home" />
       <div className="absolute contents left-[174px] top-[41px]" data-node-id="1:108">
         <div className="absolute contents inset-[4.2%_75.49%_91.41%_12.08%]" data-node-id="1:109">

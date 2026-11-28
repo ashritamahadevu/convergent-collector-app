@@ -136,8 +136,15 @@ Only Home's goblin stats, rank, welcome identity and local goal remain demo data
 its header identifies the goblin/goal preview. Growth and Map have a visible
 **Design prototype / Sample data** banner. Their numbers and graph edges
 are not connected or implemented by this batch. History search,
-week and review filters are visibly deferred because filtering only a loaded
+week and review filters are not yet provided because filtering only a loaded
 page would give incomplete results.
+
+History uses the mockup's pill controls, translucent rounded table, green concept
+text, muted compact dates, castle backdrop and five-block score indicators.
+Fractional scores partially fill a block; unscored records keep empty blocks and
+the Not scored label. Selecting a check expands its original data across the
+full table width. Status remains the recorded review outcome, without new
+Needs review/Strong thresholds. Pagination and the project selector remain live.
 
 ## Source and adaptation
 
@@ -155,6 +162,13 @@ under public/fonts with its license; all Figma weight aliases use that file.
 Vite rewrites its font URLs for Electron, so no font installation or runtime
 font download is needed. No Figma environment/deploy plugins,
 instructions or running-server assumptions were imported.
+
+The bridge artwork and green glow are shared by every screen in App.tsx, outside
+the fixed Figma canvas. The bridge uses the original Home asset, scales with the
+actual window and keeps its aspect ratio. Margins and a 28vh height cap prevent
+clipping on wide/tall windows; the artwork has a 720px minimum width within the
+app's existing 960px minimum window width. Individual screens no longer position
+or stretch their own bridge copies.
 
 The new Vite configuration builds local files; it does not host the backend.
 Electron has context isolation, sandboxing and web security enabled, validates

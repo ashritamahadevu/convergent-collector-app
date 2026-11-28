@@ -297,6 +297,9 @@ export default function App() {
 
   return (
     <main className="drawbridge-viewport">
+      <div className="drawbridge-backdrop" aria-hidden="true">
+        <img className="drawbridge-bridge" src="./assets/home/0687b.svg" alt="" />
+      </div>
       <div
         className={`drawbridge-canvas ${toolbarMotion.active ? "toolbar-liquid-active" : ""} ${
           screen === "map"
@@ -329,7 +332,6 @@ export default function App() {
           <button className="home-projects-control live-button" onClick={() => setShowProjects(value => !value)}>
             {showProjects ? "Back to Home" : "Browse projects"}
           </button>
-          {!showProjects && <p className="home-preview-label" role="status">Demo: goblin stats & goal</p>}
         </>}
         {(screen === "growth" || screen === "map") && <div className="prototype-banner" role="status">Design prototype · Sample data · Projects and History use your saved checks.</div>}
         <nav aria-label="DrawBridge">

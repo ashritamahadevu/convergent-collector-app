@@ -106,12 +106,14 @@ try {
   await page.locator(".live-question").filter({ hasText: "<img src=x onerror=alert(1)> is plain text" }).waitFor();
   assert.equal(await page.locator("tbody tr").count(), 20);
   assert.equal(await page.locator("tbody img").count(), 0);
-  await page.locator("tbody summary").first().click();
+  await page.locator(".history-check-toggle").first().click();
   await page.getByText("Isolated answer 20", { exact: true }).waitFor();
   await page.getByText("Isolated feedback 20", { exact: true }).waitFor();
   await page.getByText("Not scored", { exact: true }).waitFor();
   assert.equal(await page.locator("img[alt=DrawBridge]").evaluate(img => img.complete && img.naturalWidth > 0), true);
   await page.screenshot({ path: "test-results/history.png" });
+  await page.locator(".history-check-toggle").first().click();
+  await page.screenshot({ path: "test-results/history-table.png" });
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.locator(".live-question").filter({ hasText: /^Fixture question 0$/ }).waitFor();
   assert.equal(await page.locator("tbody tr").count(), 1);
@@ -183,6 +185,42 @@ try {
   await page.locator(".live-question").filter({ hasText: "<img src=x onerror=alert(1)> is plain text" }).waitFor();
   console.log("PASS: Real project summaries, unassessed state, project selection, filtered pagination and selection-preserving Refresh.");
   console.log("PASS: Sandboxed renderer, restricted bridge, validated pagination, blocked new windows and prototype labels.");
+
+  const assertBridgeVisible = async () => {
+    assert.equal(await page.locator(".drawbridge-bridge").count(), 1);
+    const bounds = await page.locator(".drawbridge-bridge").evaluate(img => {
+      const r = img.getBoundingClientRect();
+      return {
+        loaded: img.complete && img.naturalWidth > 0,
+        src: img.getAttribute("src"), width: r.width,
+        contained: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1,
+      };
+    });
+    assert.equal(bounds.loaded, true);
+    assert.equal(bounds.contained, true);
+    assert.equal(bounds.src, "./assets/home/0687b.svg");
+    return bounds.width;
+  };
+  for (const screen of ["Home", "Growth", "Map", "History"]) {
+    await page.getByRole("button", { name: screen, exact: true }).click();
+    await assertBridgeVisible();
+    await page.screenshot({ path: "test-results/bridge-" + screen.toLowerCase() + ".png" });
+  }
+  const originalSize = await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  const widths = [];
+  for (const size of [[960, 720], [1920, 900], [1100, 1000]]) {
+    await desktop.evaluate(({ BrowserWindow }, [width, height]) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(width, height);
+    }, size);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    widths.push(await assertBridgeVisible());
+    await page.screenshot({ path: "test-results/bridge-" + size.join("x") + ".png" });
+  }
+  assert.ok(new Set(widths.map(width => Math.round(width))).size > 1, "Bridge resizes with the window");
+  await desktop.evaluate(({ BrowserWindow }, [width, height]) => {
+    BrowserWindow.getAllWindows()[0].setContentSize(width, height);
+  }, originalSize);
+  console.log("PASS: One shared bridge asset stays inside Home, History, Growth and Map at minimum, wide and tall window sizes.");
 
   await closeBackend();
   await refresh();

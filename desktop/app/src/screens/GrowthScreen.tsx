@@ -15,7 +15,6 @@ const imgGroup = `${assetPathPrefix}/fd0ec.svg`;
 const imgGroup1 = `${assetPathPrefix}/2fd73.svg`;
 const imgGroup2 = `${assetPathPrefix}/a43e2.svg`;
 const imgGroup3 = `${assetPathPrefix}/73be8.svg`;
-const imgGroup27 = `${assetPathPrefix}/0687b.svg`;
 const imgColumn01 = `${assetPathPrefix}/462e1.svg`;
 const imgColumn04 = `${assetPathPrefix}/2c6e4.svg`;
 const imgColumn11 = `${assetPathPrefix}/132cc.svg`;
@@ -224,17 +223,8 @@ export default function GrowthDrawbridge() {
       className="growth-screen relative size-full"
       data-node-id="1:323"
       ref={rootRef}
-      style={{
-        backgroundImage:
-          "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 1440 1024' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(0.0000042832 -184.55 132.12 0.0000030663 720 2357.5)'><stop stop-color='rgba(189,219,193,1)' offset='0'/><stop stop-color='rgba(144,167,147,1)' offset='0.25'/><stop stop-color='rgba(122,141,124,1)' offset='0.375'/><stop stop-color='rgba(100,115,102,1)' offset='0.5'/><stop stop-color='rgba(77,88,79,1)' offset='0.625'/><stop stop-color='rgba(55,62,56,1)' offset='0.75'/><stop stop-color='rgba(32,36,33,1)' offset='0.875'/><stop stop-color='rgba(21,23,21,1)' offset='0.9375'/><stop stop-color='rgba(10,10,10,1)' offset='1'/></radialGradient></defs></svg>\")",
-      }}
       data-name="Growth Drawbridge"
     >
-      <div className="absolute inset-[77.54%_-5%_0.85%_-3.54%]" data-node-id="1:324">
-        <div className="absolute inset-[-2.26%_-0.32%]">
-          <img alt="" className="block max-w-none size-full" src={imgGroup27} />
-        </div>
-      </div>
       <Toolbar active="growth" />
       <div className="absolute contents left-[184px] top-[55px]" data-node-id="1:333">
         <div className="absolute contents inset-[5.86%_74.79%_89.75%_12.78%]" data-node-id="1:334">

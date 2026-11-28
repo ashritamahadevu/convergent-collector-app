@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import BrandLogo from "../components/BrandLogo";
 import Toolbar from "../components/Toolbar";
+import type { HomeSummary } from "../../electron/contract";
+import type { ReviewEvent } from "../../../../src/dashboard/protocol";
 
 const defaultGoal = "Raise your comprehension score to 80%.";
 
@@ -16,7 +18,7 @@ const imgGroup27 = `${assetPathPrefix}/0687b.svg`;
 const goblinSprite = `${assetPathPrefix}/goblin_sprite.png`;
 
 const homeMockData = {
-  goblin: { name: "Grub", rank: "Knight" },
+  goblin: { name: "Grub", rank: "Peasant" },
   stats: [
     {
       title: "Happiness",
@@ -49,7 +51,6 @@ const homeMockData = {
       filled: 8,
     },
   ],
-  recentPastes: [2, 3, 5],
 } as const;
 
 const pasteScoreColors = ["#58805F", "#6A9A71", "#74AB7B"] as const;
@@ -226,7 +227,7 @@ function StatsCard() {
   return (
     <section className="home-glass-card absolute left-[782px] top-[346px] h-[400px] w-[582px] rounded-[32px]">
       <h2 className="absolute left-[27px] top-[25px] font-['Inter:Semi_Bold'] text-[14px] leading-[21px] font-semibold text-[#6c7b6e]">
-        Stats
+        Stats · Demo
       </h2>
       <div className="absolute top-[62px] right-[27px] left-[27px]">
         {homeMockData.stats.map((stat, rowIndex) => (
@@ -260,45 +261,50 @@ function StatsCard() {
   );
 }
 
-function PasteDial({ score, index }: { score: number; index: number }) {
-  const filledTicks = score === 2 ? 24 : score === 3 ? 36 : 60;
+function PasteDial({ review, index, loading }: { review?: ReviewEvent; index: number; loading: boolean }) {
+  const score = review?.score ?? null;
+  const filledTicks = score === null ? 0 : Math.round(score * 60);
+  const label = loading ? "Loading" : !review ? "No check" : score === null ? "Not scored" :
+    (score * 100).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "%";
 
   return (
-    <article className="relative h-[126px] w-[174px]">
-      <div className="absolute top-[11px] left-[46px] h-[82px] w-[82px]" aria-hidden="true">
+    <article className="relative h-[126px] w-[174px]" aria-label={"Recent check " + (index + 1)}
+      title={review ? review.project.name + " · " + review.outcome + " · " + review.question : "No saved check"}>
+      <div className="absolute top-[11px] left-[46px] h-[82px] w-[82px]">
         {Array.from({ length: 60 }, (_, tickIndex) => (
           <span
             className={`absolute top-0 left-[39.9px] h-[11px] w-[2.2px] origin-[1.1px_41px] rounded-full ${
               tickIndex < filledTicks ? "bg-[#74ab7b]" : "bg-[#26302a]"
             }`}
             key={tickIndex}
+            aria-hidden="true"
             style={{ transform: `rotate(${-tickIndex * 6}deg)` }}
           />
         ))}
         <strong
           className="absolute inset-0 flex items-center justify-center font-['Inter:Semi_Bold'] text-[22px] leading-[33px] font-semibold"
-          style={{ color: pasteScoreColors[index] }}
+          style={{ color: pasteScoreColors[index], fontSize: score === null ? 13 : undefined }}
         >
-          {score}/5
+          {label}
         </strong>
       </div>
       <p className="absolute bottom-[7px] left-0 w-full text-center font-['Inter:Semi_Bold'] text-[13px] leading-[20px] font-semibold text-[#74ab7b]">
-        Recent Paste #{index + 1}
+        Recent Check #{index + 1}
       </p>
     </article>
   );
 }
 
-function RecentPastesCard() {
+function RecentPastesCard({ reviews, loading }: { reviews: ReviewEvent[]; loading: boolean }) {
   return (
     <section className="absolute top-[783px] left-[782px] h-[200px] w-[582px]">
       <div className="absolute inset-0 rounded-[20px] border border-[rgba(189,219,193,0.5)] bg-[#2b2b2b] opacity-50" />
       <h2 className="absolute top-[22px] left-[19px] font-['Inter:Semi_Bold'] text-[14px] leading-[21px] font-semibold text-[#748376]">
-        Recent pastes
+        Recent checks
       </h2>
       <div className="absolute top-[53px] left-[20px] flex gap-[10px]">
-        {homeMockData.recentPastes.map((score, index) => (
-          <PasteDial index={index} key={index} score={score} />
+        {[0, 1, 2].map(index => (
+          <PasteDial index={index} key={reviews[index]?.eventId ?? index} review={reviews[index]} loading={loading} />
         ))}
       </div>
     </section>
@@ -306,6 +312,31 @@ function RecentPastesCard() {
 }
 
 export default function DashboardDrawbridge() {
+  const [home, setHome] = useState<HomeSummary>({ recentChecks: [], weakPoints: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const requestNumber = useRef(0);
+  async function refresh() {
+    const request = ++requestNumber.current;
+    setLoading(true); setError("");
+    try {
+      if (!window.drawbridge) throw new Error("Open the desktop app to connect to saved reviews.");
+      const result = await window.drawbridge.readHome();
+      if (request !== requestNumber.current) return;
+      if (!result.ok) throw new Error(result.error);
+      setHome(result.data);
+    } catch (e) {
+      if (request !== requestNumber.current) return;
+      setHome({ recentChecks: [], weakPoints: [] });
+      setError(e instanceof Error ? e.message : "Home data unavailable. Check the backend and Refresh.");
+    } finally {
+      if (request === requestNumber.current) setLoading(false);
+    }
+  }
+  useEffect(() => {
+    void refresh();
+    return () => { requestNumber.current++; };
+  }, []);
   const [goal, setGoal] = useState(
     () => window.localStorage.getItem("drawbridge-weekly-goal") ?? defaultGoal,
   );
@@ -332,6 +363,14 @@ export default function DashboardDrawbridge() {
       }}
       data-name="Dashboard Drawbridge"
     >
+      <button className="home-refresh-control live-button" disabled={loading} onClick={() => void refresh()}>
+        {loading ? "Loading…" : "Refresh"}
+      </button>
+      <p className={"home-data-status" + (error ? " home-data-error" : "")}
+        role={error ? "alert" : "status"} title={error || "Concept cards rank the lowest mean recorded score, across all saved reviews. Each tagged review counts once per concept."}>
+        {error ? "Home data unavailable. Check the backend, then Refresh. " + error :
+          loading ? "Loading saved checks…" : "All projects · Lowest scored concepts and three latest checks"}
+      </p>
       <div className="absolute inset-[78.42%_-4.31%_-0.03%_-4.24%]" data-node-id="1:99">
         <div className="absolute inset-[-2.26%_-0.32%]">
           <img alt="" className="block max-w-none size-full" src={imgGroup27} />
@@ -345,83 +384,25 @@ export default function DashboardDrawbridge() {
         <User className="absolute flex h-[50px] items-center justify-center left-[1118px] top-[41px] w-[246px]" />
         <GoblinCard />
         <StatsCard />
-        <div
-          className="-translate-x-1/2 absolute contents left-[calc(50%+49px)] top-[140px]"
-          data-node-id="1:126"
-        >
-          <div className="absolute contents left-[174px] top-[140px]" data-node-id="1:127">
-            <div
-              className="absolute bg-[#2b2b2b] border border-[rgba(189,219,193,0.5)] border-solid inset-[13.67%_63.61%_69.82%_12.08%] opacity-50 rounded-[20px]"
-              data-node-id="1:128"
-            />
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold h-[26px] leading-[1.5] left-[191px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[153px] tracking-[0.34px] w-[124px]"
-              data-node-id="1:129"
-            >
-              Weak Point #1
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold h-[26px] leading-[1.5] left-[189px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[270px] tracking-[0.34px] w-[124px]"
-              data-node-id="1:130"
-            >
-              coalesce.c
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium h-[89px] leading-[1.5] left-[191px] not-italic text-[30px] text-white top-[180px] tracking-[0.6px] w-[319px]"
-              data-node-id="1:131"
-            >
-              Coalescing free blocks
-            </p>
-          </div>
-          <div className="absolute contents left-[594px] top-[140px]" data-node-id="1:132">
-            <div
-              className="absolute bg-[#2b2b2b] border border-[rgba(189,219,193,0.5)] border-solid inset-[13.67%_34.44%_69.82%_41.25%] opacity-50 rounded-[20px]"
-              data-node-id="1:133"
-            />
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold leading-[1.5] left-[611px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[153px] tracking-[0.34px] whitespace-nowrap"
-              data-node-id="1:134"
-            >
-              Weak Point #2
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold h-[26px] leading-[1.5] left-[609px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[270px] tracking-[0.34px] w-[124px]"
-              data-node-id="1:135"
-            >
-              coalesce.c
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium h-[89px] leading-[1.5] left-[611px] not-italic text-[30px] text-white top-[180px] tracking-[0.6px] w-[319px]"
-              data-node-id="1:136"
-            >
-              Coalescing free blocks
-            </p>
-          </div>
-          <div className="absolute contents left-[1014px] top-[140px]" data-node-id="1:137">
-            <div
-              className="absolute bg-[#2b2b2b] border border-[rgba(189,219,193,0.5)] border-solid inset-[13.67%_5.28%_69.82%_70.42%] opacity-50 rounded-[20px]"
-              data-node-id="1:138"
-            />
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold leading-[1.5] left-[1031px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[153px] tracking-[0.34px] whitespace-nowrap"
-              data-node-id="1:139"
-            >
-              Weak Point #3
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold leading-[1.5] left-[1029px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[270px] tracking-[0.34px] whitespace-nowrap"
-              data-node-id="1:140"
-            >
-              coalesce.c
-            </p>
-            <p
-              className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium h-[89px] leading-[1.5] left-[1031px] not-italic text-[30px] text-white top-[180px] tracking-[0.6px] w-[319px]"
-              data-node-id="1:141"
-            >
-              Coalescing free blocks
-            </p>
-          </div>
-        </div>
+        <section aria-label="Weak points" className="home-weak-points">
+          {[0, 1, 2].map(index => {
+            const point = home.weakPoints[index];
+            const name = loading ? "Loading…" : error ? "Unavailable" : point?.concept ??
+              (home.weakPoints.length ? "No more concepts" : "Not assessed yet");
+            const file = point?.filePath?.split(/[\\/]/).pop() ?? "No linked file";
+            const evidence = point ? file + " · " + (point.averageScore * 100).toLocaleString(undefined, { maximumFractionDigits: 1 }) +
+              "% · " + point.scoredChecks + (point.scoredChecks === 1 ? " check" : " checks") :
+              loading ? "Fetching saved reviews" : error ? "Check backend and Refresh" : "No scored concept evidence";
+            return <article key={index} className="home-weak-card" aria-label={"Weak point " + (index + 1)}
+              style={{ left: 174 + index * 420 }}
+              title={point ? point.project.name + " · " + (point.filePath ?? "No linked file") +
+                " · Mean assessment across " + point.scoredChecks + " tagged checks" : evidence}>
+              <p className="home-weak-label">Weak Point #{index + 1}</p>
+              <p className="home-weak-concept">{name}</p>
+              <p className="home-weak-evidence">{evidence}</p>
+            </article>;
+          })}
+        </section>
         <div className="absolute contents left-[174px] top-[783px]" data-node-id="1:142">
           <div
             className="absolute bg-[#2b2b2b] border border-[rgba(189,219,193,0.5)] border-solid inset-[76.46%_47.47%_4%_12.08%] opacity-50 rounded-[20px]"
@@ -431,7 +412,7 @@ export default function DashboardDrawbridge() {
             className="[word-break:break-word] absolute font-['Inter:Bold'] font-bold h-[26px] leading-[1.5] left-[194px] not-italic text-[17px] text-[rgba(189,219,193,0.5)] top-[805px] tracking-[0.34px] w-[261px]"
             data-node-id="1:144"
           >
-            Weekly Goal Mon Nov 9 2026
+            Weekly Goal · Local demo
           </p>
           <div
             className="absolute bg-[rgba(217,217,217,0)] border border-[rgba(189,219,193,0.5)] border-solid inset-[78.03%_48.82%_18.26%_46.53%] opacity-50 rounded-[10px]"
@@ -486,7 +467,7 @@ export default function DashboardDrawbridge() {
             </p>
           )}
         </div>
-        <RecentPastesCard />
+        <RecentPastesCard reviews={home.recentChecks} loading={loading} />
       </div>
     </div>
   );

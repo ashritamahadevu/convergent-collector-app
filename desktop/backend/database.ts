@@ -10,6 +10,7 @@ import {
   type DashboardEvent,
   type ReviewEvent,
 } from "../../src/dashboard/protocol";
+import type { HomeSummary, ProjectSummary, WeakPoint } from "../../src/dashboard/views";
 
 // node:sqlite is deliberately confined to the desktop backend (Node >=22.13).
 interface Statement { run(...args: (string | number | null)[]): unknown; all(...args: (string | number)[]): Record<string, unknown>[]; get(...args: (string | number)[]): Record<string, unknown> | undefined }
@@ -106,9 +107,39 @@ export class DashboardDatabase {
     this.db.prepare("INSERT OR IGNORE INTO prep_sets VALUES (?, ?, ?)").run(event.eventId, event.occurredAt, JSON.stringify(event));
   }
 
-  history(limit = 50, offset = 0): ReviewEvent[] {
+  history(limit = 50, offset = 0, projectId?: string): ReviewEvent[] {
+    if (projectId !== undefined) {
+      return this.db.prepare("SELECT event_json FROM review_events WHERE json_extract(event_json, '$.project.id')=? ORDER BY occurred_at DESC, event_id DESC LIMIT ? OFFSET ?")
+        .all(projectId, limit, offset).map(r => JSON.parse(r.event_json as string));
+    }
     return this.db.prepare("SELECT event_json FROM review_events ORDER BY occurred_at DESC, event_id DESC LIMIT ? OFFSET ?")
       .all(limit, offset).map(r => JSON.parse(r.event_json as string));
+  }
+
+  /** Aggregate every saved review, independently of History pagination. */
+  projects(): ProjectSummary[] {
+    const rows = this.db.prepare(`WITH reviews AS (
+      SELECT event_id, occurred_at,
+        json_extract(event_json, '$.project.id') AS project_id,
+        json_extract(event_json, '$.project.name') AS project_name,
+        json_extract(event_json, '$.score') AS score
+      FROM review_events
+    ), latest AS (
+      SELECT project_id, project_name,
+        ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY occurred_at DESC, event_id DESC) AS position
+      FROM reviews
+    )
+    SELECT r.project_id, l.project_name, MAX(r.occurred_at) AS last_activity,
+      COUNT(*) AS total, COUNT(r.score) AS scored, AVG(r.score) * 5 AS average
+    FROM reviews r JOIN latest l ON r.project_id=l.project_id AND l.position=1
+    GROUP BY r.project_id, l.project_name
+    ORDER BY last_activity DESC, r.project_id ASC`).all();
+    return rows.map(row => ({
+      id: String(row.project_id), name: String(row.project_name),
+      lastActivityAt: Number(row.last_activity), totalChecks: Number(row.total),
+      scoredChecks: Number(row.scored), unscoredChecks: Number(row.total) - Number(row.scored),
+      averageScoreOutOfFive: row.average === null ? null : Number(row.average),
+    }));
   }
 
   growth(days: 7 | 30 | null, now = Date.now()) {
@@ -128,6 +159,35 @@ export class DashboardDatabase {
     const all = summarize(events);
     const first = summarize(events.filter(e => e.retries === 0));
     return { days, ...all, firstTry: { completedChecks: first.completedChecks, averageScoreOutOfFive: first.averageScoreOutOfFive } };
+  }
+
+  home(): HomeSummary {
+    // DISTINCT prevents duplicate tags on a question from counting twice.
+    const rows = this.db.prepare(`WITH evidence AS (
+      SELECT DISTINCT r.event_id, r.occurred_at, tag.value AS concept,
+        json_extract(r.event_json, '$.score') AS score,
+        json_extract(r.event_json, '$.filePath') AS file_path,
+        json_extract(r.event_json, '$.project.id') AS project_id,
+        json_extract(r.event_json, '$.project.name') AS project_name
+      FROM review_events r, json_each(r.event_json, '$.concepts') tag
+      WHERE json_extract(r.event_json, '$.score') IS NOT NULL
+        AND tag.type='text' AND trim(tag.value)<>''
+    ), representative AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY concept
+        ORDER BY (file_path IS NULL) ASC, occurred_at DESC, event_id DESC) AS position
+      FROM evidence
+    ), averages AS (
+      SELECT concept, AVG(score) AS average, COUNT(*) AS samples FROM evidence GROUP BY concept
+    )
+    SELECT a.concept, a.average, a.samples, r.file_path, r.project_id, r.project_name
+    FROM averages a JOIN representative r ON r.concept=a.concept AND r.position=1
+    ORDER BY a.average ASC, a.samples DESC, a.concept ASC LIMIT 3`).all();
+    const weakPoints: WeakPoint[] = rows.map(row => ({
+      concept: String(row.concept), averageScore: Number(row.average), scoredChecks: Number(row.samples),
+      filePath: row.file_path === null ? null : String(row.file_path),
+      project: { id: String(row.project_id), name: String(row.project_name) },
+    }));
+    return { recentChecks: this.history(3), weakPoints };
   }
 
   mastery(): unknown[] { return this.rows("concept_mastery"); }

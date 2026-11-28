@@ -92,6 +92,77 @@ test("connection status comes from authenticated heartbeats", async t => {
   assert.equal((await (await f.request("/v1/status")).json() as any).extensionConnected, true);
 });
 
+test("project summaries cover all reviews and project filtering happens before pagination", async t => {
+  const f = await fixture(t);
+  assert.deepEqual(await (await f.request("/v1/projects")).json(), { projects: [] });
+  assert.equal((await f.request("/v1/projects", undefined, { Authorization: "Bearer wrong" })).status, 401);
+  const projectId = "project A&?/#='";
+  const a: ReviewEvent[] = [];
+  for (let i = 0; i < 55; i++) {
+    const row = event(i === 1 ? "bypass" : i === 2 ? "ungraded" : i === 0 ? "fail" : "pass", i === 1 || i === 2 ? null : i === 0 ? 0 : 1);
+    row.project = { id: projectId, name: i === 54 ? "Renamed project" : "Same name" };
+    row.occurredAt = 1000 + i * 2;
+    a.push(row);
+    await f.request("/v1/events", row);
+    if (i < 25) {
+      const b = event("fail", 0.4);
+      b.project = { id: "project-b", name: "Same name" }; b.occurredAt = 1001 + i * 2;
+      await f.request("/v1/events", b);
+    }
+  }
+  const ungraded = event("ungraded", null);
+  ungraded.project = { id: "unassessed", name: "Unassessed" }; ungraded.occurredAt = 2000;
+  await f.request("/v1/events", ungraded);
+  const sameName = event("fail", 0);
+  sameName.project = { id: "distinct-id", name: "Same name" }; sameName.occurredAt = 2001;
+  await f.request("/v1/events", sameName);
+  await f.request("/v1/events", a[0]);
+  const data = await (await f.request("/v1/projects")).json() as { projects: import("../src/dashboard/views").ProjectSummary[] };
+  assert.deepEqual(data.projects.map(p => p.id), ["distinct-id", "unassessed", projectId, "project-b"]);
+  const project = data.projects.find(p => p.id === projectId)!;
+  assert.deepEqual({ ...project, averageScoreOutOfFive: 0 }, {
+    id: projectId, name: "Renamed project", lastActivityAt: 1108, totalChecks: 55,
+    scoredChecks: 53, unscoredChecks: 2, averageScoreOutOfFive: 0,
+  });
+  assert.ok(Math.abs(project.averageScoreOutOfFive! - 260 / 53) < 1e-10);
+  assert.equal(data.projects.find(p => p.id === "unassessed")!.averageScoreOutOfFive, null);
+  assert.equal(data.projects.find(p => p.id === "distinct-id")!.averageScoreOutOfFive, 0);
+  const page = await (await f.request("/v1/history?limit=20&offset=20&projectId=" + encodeURIComponent(projectId))).json() as {
+    checks: ReviewEvent[]; projectId: string;
+  };
+  assert.equal(page.projectId, projectId);
+  assert.deepEqual(page.checks.map(e => e.eventId), a.slice().reverse().slice(20, 40).map(e => e.eventId));
+  const empty = await (await f.request("/v1/history?projectId=unknown")).json() as { checks: ReviewEvent[] };
+  assert.deepEqual(empty.checks, []);
+  assert.equal((await f.request("/v1/history?projectId=")).status, 400);
+  assert.equal((await f.request("/v1/history?projectId=" + "x".repeat(129))).status, 400);
+});
+
+test("Home uses all scored concept evidence once per review and keeps recent unscored checks", async t => {
+  const f = await fixture(t);
+  assert.deepEqual(await (await f.request("/v1/home")).json(), { recentChecks: [], weakPoints: [] });
+  assert.equal((await f.request("/v1/home", undefined, { Authorization: "Bearer wrong" })).status, 401);
+  const rows: ReviewEvent[] = [];
+  const add = async (concepts: string[], score: number | null, filePath: string | null, outcome: ReviewEvent["outcome"] = "pass") => {
+    const e = event(outcome, score); e.concepts = concepts; e.filePath = filePath; e.occurredAt = 1000 + rows.length;
+    rows.push(e); await f.request("/v1/events", e); return e;
+  };
+  await add(["foo", "foo", ""], 0, "src/linked.ts", "fail");
+  await add(["foo"], 1, null);
+  await add(["bar"], 0.25, "src/bar.ts", "fail");
+  await add(["baz"], 0.5, null);
+  await add(["strong"], 1, null);
+  for (let i = 0; i < 55; i++) await add([], 1, null);
+  await add(["ungraded-only", "foo"], null, null, "ungraded");
+  await add(["foo"], null, null, "bypass");
+  const data = await (await f.request("/v1/home")).json() as import("../src/dashboard/views").HomeSummary;
+  assert.deepEqual(data.recentChecks.map(e => e.eventId), rows.slice(-3).reverse().map(e => e.eventId));
+  assert.equal(data.recentChecks[0].score, null);
+  assert.deepEqual(data.weakPoints.map(w => [w.concept, w.averageScore, w.scoredChecks]),
+    [["bar", 0.25, 1], ["foo", 0.5, 2], ["baz", 0.5, 1]]);
+  assert.equal(data.weakPoints[1].filePath, "src/linked.ts");
+});
+
 test("outbox retains data offline, reloads after restart, and drains concurrent flushes exactly once", async t => {
   const f = await fixture(t);
   const directory = path.join(f.directory, "outbox");

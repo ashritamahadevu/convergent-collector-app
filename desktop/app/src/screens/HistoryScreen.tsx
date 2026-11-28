@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import BrandLogo from "../components/BrandLogo";
 import Toolbar from "../components/Toolbar";
 import type { ReviewEvent } from "../../../../src/dashboard/protocol";
-import type { ConnectionStatus } from "../../electron/contract";
+import type { ConnectionStatus, ProjectSummary } from "../../electron/contract";
 
 const pageSize = 20;
 const date = (value: number | null) => {
@@ -13,7 +13,10 @@ const date = (value: number | null) => {
 const score = (event: ReviewEvent) => event.score === null
   ? "Not scored" : (event.score * 5).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " / 5";
 
-export default function HistoryScreen() {
+type Project = Pick<ProjectSummary, "id" | "name">;
+export default function HistoryScreen({ project, onProjectChange }: {
+  project: Project | null; onProjectChange: (project: Project | null) => void;
+}) {
   const [checks, setChecks] = useState<ReviewEvent[]>([]);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -21,6 +24,8 @@ export default function HistoryScreen() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [statusError, setStatusError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsError, setProjectsError] = useState("");
   const requestNumber = useRef(0);
 
   async function load(nextOffset: number) {
@@ -28,6 +33,7 @@ export default function HistoryScreen() {
     setLoading(true);
     setError("");
     setStatusError("");
+    setProjectsError("");
     const bridge = window.drawbridge;
     if (!bridge) {
       setError("Desktop bridge unavailable. Open this interface with npm.cmd start in desktop/app, rather than in a web browser.");
@@ -37,8 +43,9 @@ export default function HistoryScreen() {
       return;
     }
     try {
-      const [history, connection] = await Promise.all([
-        bridge.readHistory({ limit: pageSize, offset: nextOffset }), bridge.readStatus(),
+      const [history, connection, list] = await Promise.all([
+        bridge.readHistory({ limit: pageSize, offset: nextOffset, projectId: project?.id }), bridge.readStatus(),
+        bridge.readProjects(),
       ]);
       if (request !== requestNumber.current) return;
       if (!history.ok) {
@@ -51,6 +58,8 @@ export default function HistoryScreen() {
       }
       setStatus(connection.ok ? connection.data : null);
       if (!connection.ok) setStatusError(connection.error);
+      setProjects(list.ok ? list.data.projects : []);
+      if (!list.ok) setProjectsError(list.error);
     } catch {
       if (request !== requestNumber.current) return;
       setChecks([]);
@@ -76,7 +85,7 @@ export default function HistoryScreen() {
           <div>
             <p className="live-eyebrow">YOUR LEARNING RECORD</p>
             <h1 id="history-heading">History</h1>
-            <p>One comprehension check per row. Open a check to read its answer and feedback.</p>
+            <p>{project ? "Checks for " + (projects.find(p => p.id === project.id)?.name || project.name || "Unnamed project") : "All projects"} · Open a check to read its answer and feedback.</p>
           </div>
           <button className="live-button live-primary" disabled={loading} onClick={() => void load(0)}>
             {loading ? "Loading…" : "Refresh"}
@@ -95,9 +104,20 @@ export default function HistoryScreen() {
         </p>}
         {statusError && !error && <p className="live-hint">{statusError}</p>}
         <div className="live-history-tools">
-          <span className="live-chip">All checks · newest first</span>
+          <label className="project-filter">Project
+            <select aria-label="Project" value={project?.id ?? ""} disabled={loading} onChange={e => {
+              const selected = projects.find(p => p.id === e.target.value);
+              onProjectChange(selected ? { id: selected.id, name: selected.name } : null);
+            }}>
+              <option value="">All projects</option>
+              {project && !projects.some(p => p.id === project.id) &&
+                <option value={project.id}>{project.name || "Unnamed project"}</option>}
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name || "Unnamed project"} · {p.id.slice(0, 8)}</option>)}
+            </select>
+          </label>
           <p>Search, week and “Needs review” filters are deferred until they can cover all pages.</p>
         </div>
+        {projectsError && !error && <p className="live-hint">Project selector unavailable: {projectsError}</p>}
         <p className="live-hint">
           Assessment scores use the recorded score × 5, not a count of five questions or a first-try score.
           Bypasses and other unscored checks say “Not scored.”

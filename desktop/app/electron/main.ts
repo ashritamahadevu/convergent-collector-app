@@ -34,6 +34,10 @@ function createWindow() {
 void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
+  ipcMain.handle("dashboard:home", event =>
+    trusted(event) ? client.readHome() : { ok: false, error: "Untrusted dashboard request." });
+  ipcMain.handle("dashboard:projects", event =>
+    trusted(event) ? client.readProjects() : { ok: false, error: "Untrusted dashboard request." });
   ipcMain.handle("dashboard:history", (event, pagination: unknown) =>
     trusted(event) ? client.readHistory(pagination) : { ok: false, error: "Untrusted dashboard request." });
   ipcMain.handle("dashboard:status", event =>
